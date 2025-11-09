@@ -1,0 +1,26 @@
+/* Additional navigation-specific styles */
+.nav-brand {
+  text-decoration: none;
+  color: inherit;
+}
+
+.nav-brand:hover {
+  opacity: 0.8;
+}
+
+@media (max-width: 768px) {
+  .nav-content {
+    flex-direction: column;
+    gap: var(--spacing-md);
+  }
+  
+  .nav-links {
+    width: 100%;
+    justify-content: space-around;
+  }
+  
+  .nav-link {
+    font-size: var(--font-size-sm);
+  }
+}
+
