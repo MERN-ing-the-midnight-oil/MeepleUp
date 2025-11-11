@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { EventsProvider } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
+import { AvailabilityProvider } from './context/AvailabilityContext';
 import Navigation from './components/Navigation';
 import Onboarding from './screens/Onboarding';
 import Home from './screens/Home';
@@ -95,11 +96,13 @@ const AppContent = () => {
 const App = () => {
   return (
     <AuthProvider>
-      <EventsProvider>
-        <CollectionsProvider>
-          <AppContent />
-        </CollectionsProvider>
-      </EventsProvider>
+      <AvailabilityProvider>
+        <EventsProvider>
+          <CollectionsProvider>
+            <AppContent />
+          </CollectionsProvider>
+        </EventsProvider>
+      </AvailabilityProvider>
     </AuthProvider>
   );
 };

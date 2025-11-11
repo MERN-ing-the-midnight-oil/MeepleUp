@@ -1,14 +1,14 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 
 const Navigation = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, isEmailVerified } = useAuth();
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !isEmailVerified) {
     return null;
   }
 
@@ -29,7 +29,7 @@ const Navigation = () => {
         <Text style={styles.brand}>MeepleUp</Text>
         <View style={styles.navLinks}>
           {navItems.map((item) => (
-            <TouchableOpacity
+            <Pressable
               key={item.route}
               onPress={() => navigation.navigate(item.route)}
               style={[
@@ -45,12 +45,12 @@ const Navigation = () => {
               >
                 {item.name}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           ))}
           {user && (
-            <TouchableOpacity onPress={logout} style={styles.logoutButton}>
+            <Pressable onPress={logout} style={styles.logoutButton}>
               <Text style={styles.logoutText}>Logout</Text>
-            </TouchableOpacity>
+            </Pressable>
           )}
         </View>
       </View>

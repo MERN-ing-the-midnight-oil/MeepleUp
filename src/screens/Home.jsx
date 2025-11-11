@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
 import { formatDate } from '../utils/helpers';
@@ -11,7 +11,8 @@ const Home = () => {
   const { user } = useAuth();
   const { getUserEvents } = useEvents();
   
-  const userEvents = user ? getUserEvents(user.id) : [];
+  const userIdentifier = user?.uid || user?.id;
+  const userEvents = userIdentifier ? getUserEvents(userIdentifier) : [];
 
   const handleEventClick = (eventId) => {
     navigation.navigate('EventHub', { eventId });
@@ -54,12 +55,17 @@ const Home = () => {
       ) : (
         <>
           <View style={styles.eventsGrid}>
-            {userEvents.map((event) => (
-              <TouchableOpacity
-                key={event.id}
-                style={styles.eventTile}
-                onPress={() => handleEventClick(event.id)}
-              >
+            {userEvents.map((event) => {
+              const memberCount = (event.members || []).filter(
+                (member) => member.status === 'member',
+              ).length;
+
+              return (
+                <Pressable
+                  key={event.id}
+                  style={styles.eventTile}
+                  onPress={() => handleEventClick(event.id)}
+                >
                 <View style={styles.eventHeader}>
                   <View style={styles.eventInfo}>
                     <Text style={styles.eventTitle}>
@@ -82,11 +88,12 @@ const Home = () => {
                 )}
                 {event.members && (
                   <Text style={styles.eventMembers}>
-                    {event.members.length} member{event.members.length !== 1 ? 's' : ''}
+                    {memberCount} member{memberCount !== 1 ? 's' : ''}
                   </Text>
                 )}
-              </TouchableOpacity>
-            ))}
+                </Pressable>
+              );
+            })}
           </View>
           
           <View style={styles.createSection}>
@@ -115,7 +122,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#d45d5d',
+    backgroundColor: '#f3f3f3',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 12,
     marginBottom: 8,
   },
   subtitle: {

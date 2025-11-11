@@ -8,24 +8,15 @@ import { getUserLocation } from '../utils/helpers';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 
-const generateJoinCode = () => {
-  const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i += 1) {
-    const index = Math.floor(Math.random() * characters.length);
-    code += characters[index];
-  }
-  return code;
-};
-
 const Onboarding = () => {
   const navigation = useNavigation();
-  const { user, login } = useAuth();
-  const { events, joinEvent, createEvent } = useEvents();
+  const { user, updateUser } = useAuth();
+  const { joinEventWithCode, createEvent } = useEvents();
   const [joinCode, setJoinCode] = useState('');
   const [location, setLocation] = useState('');
   const [eventName, setEventName] = useState('');
-  const [eventLocation, setEventLocation] = useState('');
+  const [eventGeneralLocation, setEventGeneralLocation] = useState('');
+  const [eventExactLocation, setEventExactLocation] = useState('');
   const [eventDate, setEventDate] = useState('');
   const [eventDescription, setEventDescription] = useState('');
   const [mode, setMode] = useState('choice'); // 'choice', 'join', 'discover', 'create'
@@ -36,7 +27,8 @@ const Onboarding = () => {
     setError('');
     if (nextMode === 'choice') {
       setEventName('');
-      setEventLocation('');
+      setEventGeneralLocation('');
+      setEventExactLocation('');
       setEventDate('');
       setEventDescription('');
     }
@@ -54,6 +46,11 @@ const Onboarding = () => {
   };
 
   const handleJoinByCode = async () => {
+    if (!user) {
+      setError('Please sign in before joining an event.');
+      return;
+    }
+
     if (!joinCode.trim()) {
       setError('Please enter a join code');
       return;
@@ -66,25 +63,14 @@ const Onboarding = () => {
 
     setLoading(true);
     try {
-      // Find event by join code
-      const event = events.find((e) => e.joinCode === joinCode);
-      
-      if (!event) {
+      const joinedEvent = joinEventWithCode(joinCode, user.uid);
+
+      if (!joinedEvent) {
         setError('Event not found. Please check your join code.');
         setLoading(false);
         return;
       }
 
-      // Create a temporary user if they don't exist
-      const userId = `user_${Date.now()}`;
-      const userData = {
-        id: userId,
-        name: `User ${userId.slice(-4)}`,
-        joinedAt: new Date().toISOString(),
-      };
-
-      await login(userData);
-      joinEvent(event.id, userId);
       navigation.replace('Home');
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -95,6 +81,11 @@ const Onboarding = () => {
   };
 
   const handleDiscoverEvents = async () => {
+    if (!user) {
+      setError('Please sign in before discovering events.');
+      return;
+    }
+
     if (!location.trim()) {
       setError('Please enter your location');
       return;
@@ -102,16 +93,7 @@ const Onboarding = () => {
 
     setLoading(true);
     try {
-      // Create a temporary user
-      const userId = `user_${Date.now()}`;
-      const userData = {
-        id: userId,
-        name: `User ${userId.slice(-4)}`,
-        location: location,
-        joinedAt: new Date().toISOString(),
-      };
-
-      await login(userData);
+      await updateUser({ location: location.trim() });
       navigation.replace('Discover');
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -134,58 +116,45 @@ const Onboarding = () => {
     }
   };
 
-  const ensureHostUser = async () => {
-    if (user) {
-      return user;
+  const handleCreateEvent = async () => {
+    if (!user) {
+      setError('Please sign in before creating an event.');
+      return;
     }
 
-    const userId = `user_${Date.now()}`;
-    const newUser = {
-      id: userId,
-      name: `Host ${userId.slice(-4)}`,
-      joinedAt: new Date().toISOString(),
-    };
-    await login(newUser);
-    return newUser;
-  };
-
-  const handleCreateEvent = async () => {
-    if (!eventName.trim() || !eventLocation.trim() || !eventDate.trim()) {
+    if (!eventName.trim() || !eventGeneralLocation.trim() || !eventDate.trim()) {
       setError('Please fill in all event details.');
       return;
     }
 
     setLoading(true);
     try {
-      const hostUser = await ensureHostUser();
-      const joinCodeGenerated = generateJoinCode();
       const newEvent = createEvent({
         name: eventName.trim(),
-        location: eventLocation.trim(),
+        generalLocation: eventGeneralLocation.trim(),
+        exactLocation: eventExactLocation.trim(),
         scheduledFor: eventDate.trim(),
         description: eventDescription.trim(),
-        joinCode: joinCodeGenerated,
         visibility: 'private',
-        organizerId: hostUser.id,
-        members: [hostUser.id],
+        organizerId: user.uid,
       });
 
       setEventName('');
-      setEventLocation('');
+      setEventGeneralLocation('');
+      setEventExactLocation('');
       setEventDate('');
       setEventDescription('');
       setError('');
 
       Alert.alert(
         'Event Created',
-        `Share this join code so friends can join: ${joinCodeGenerated}`,
+        `Share this membership link or code so trusted guests can join:\n\nCode: ${newEvent.joinCode}`,
         [
           {
             text: 'View Event',
             onPress: () => navigation.replace('EventHub', {
               eventId: newEvent.id,
-              joinCode: joinCodeGenerated,
-              hostId: hostUser.id,
+              joinCode: newEvent.joinCode,
             }),
           },
           {
@@ -364,10 +333,19 @@ const Onboarding = () => {
           style={styles.input}
         />
         <Input
-          placeholder="Location"
-          value={eventLocation}
+          placeholder="General area (what strangers can see)"
+          value={eventGeneralLocation}
           onChangeText={(text) => {
-            setEventLocation(text);
+            setEventGeneralLocation(text);
+            setError('');
+          }}
+          style={styles.input}
+        />
+        <Input
+          placeholder="Exact meetup spot (members only)"
+          value={eventExactLocation}
+          onChangeText={(text) => {
+            setEventExactLocation(text);
             setError('');
           }}
           style={styles.input}
@@ -415,7 +393,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#d45d5d',
+    backgroundColor: '#f3f3f3',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 12,
     marginBottom: 12,
     textAlign: 'center',
   },

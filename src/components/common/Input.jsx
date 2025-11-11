@@ -12,13 +12,22 @@ const Input = ({
   secureTextEntry = false,
   keyboardType = 'default',
   autoCapitalize = 'sentences',
+  multiline = false,
+  numberOfLines = multiline ? 4 : 1,
+  textAlignVertical = multiline ? 'top' : 'center',
+  ...rest
 }) => {
-    return (
+  return (
     <TextInput
-      style={[styles.input, style, disabled && styles.disabled]}
-            placeholder={placeholder}
+      style={[
+        styles.input,
+        multiline && styles.multiline,
+        style,
+        disabled && styles.disabled,
+      ]}
+      placeholder={placeholder}
       placeholderTextColor="#999"
-            value={value}
+      value={value}
       onChangeText={onChangeText}
       onKeyPress={onKeyPress}
       maxLength={maxLength}
@@ -26,8 +35,12 @@ const Input = ({
       secureTextEntry={secureTextEntry}
       keyboardType={keyboardType}
       autoCapitalize={autoCapitalize}
-        />
-    );
+      multiline={multiline}
+      numberOfLines={numberOfLines}
+      textAlignVertical={textAlignVertical}
+      {...rest}
+    />
+  );
 };
 
 const styles = StyleSheet.create({
@@ -39,6 +52,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#fff',
     minHeight: 44,
+  },
+  multiline: {
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   disabled: {
     backgroundColor: '#f5f5f5',

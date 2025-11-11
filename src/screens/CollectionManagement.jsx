@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
@@ -10,11 +10,12 @@ const CollectionManagement = () => {
   const { getUserCollection, addGameToCollection } = useCollections();
   const [activeTab, setActiveTab] = useState('scanner'); // 'scanner', 'bgg', or 'collection'
   
-  const userCollection = user ? getUserCollection(user.id) : [];
+  const userIdentifier = user?.uid || user?.id;
+  const userCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
 
   const handleAddToCollection = (gameData) => {
-    if (user) {
-      addGameToCollection(user.id, gameData);
+    if (userIdentifier) {
+      addGameToCollection(userIdentifier, gameData);
       alert(`${gameData.title} added to your collection!`);
     }
   };
@@ -29,30 +30,30 @@ const CollectionManagement = () => {
       </View>
 
       <View style={styles.tabs}>
-        <TouchableOpacity
+        <Pressable
           style={[styles.tab, activeTab === 'scanner' && styles.tabActive]}
           onPress={() => setActiveTab('scanner')}
         >
           <Text style={[styles.tabText, activeTab === 'scanner' && styles.tabTextActive]}>
             Scan Barcode
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
+        </Pressable>
+        <Pressable
           style={[styles.tab, activeTab === 'bgg' && styles.tabActive]}
           onPress={() => setActiveTab('bgg')}
         >
           <Text style={[styles.tabText, activeTab === 'bgg' && styles.tabTextActive]}>
             Import from BGG
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
+        </Pressable>
+        <Pressable
           style={[styles.tab, activeTab === 'collection' && styles.tabActive]}
           onPress={() => setActiveTab('collection')}
         >
           <Text style={[styles.tabText, activeTab === 'collection' && styles.tabTextActive]}>
             My Games ({userCollection.length})
           </Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       <View style={styles.content}>
@@ -149,7 +150,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#d45d5d',
+    backgroundColor: '#f3f3f3',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 12,
     marginBottom: 8,
   },
   subtitle: {

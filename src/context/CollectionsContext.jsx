@@ -36,9 +36,7 @@ export const CollectionsProvider = ({ children }) => {
   useEffect(() => {
     const saveCollections = async () => {
       try {
-        if (Object.keys(collections).length > 0) {
-          await AsyncStorage.setItem('meepleup_collections', JSON.stringify(collections));
-        }
+        await AsyncStorage.setItem('meepleup_collections', JSON.stringify(collections));
       } catch (error) {
         console.error('Error saving collections:', error);
       }
@@ -47,6 +45,7 @@ export const CollectionsProvider = ({ children }) => {
   }, [collections]);
 
   const addGameToCollection = (userId, gameData) => {
+    if (!userId) return;
     setCollections((prev) => ({
       ...prev,
       [userId]: [...(prev[userId] || []), gameData],
@@ -54,6 +53,7 @@ export const CollectionsProvider = ({ children }) => {
   };
 
   const removeGameFromCollection = (userId, gameId) => {
+    if (!userId) return;
     setCollections((prev) => ({
       ...prev,
       [userId]: (prev[userId] || []).filter((game) => game.id !== gameId),
@@ -61,6 +61,7 @@ export const CollectionsProvider = ({ children }) => {
   };
 
   const getUserCollection = (userId) => {
+    if (!userId) return [];
     return collections[userId] || [];
   };
 
@@ -82,6 +83,7 @@ export const CollectionsProvider = ({ children }) => {
   };
 
   const updateGameInCollection = (userId, gameId, updates) => {
+    if (!userId) return;
     setCollections((prev) => ({
       ...prev,
       [userId]: (prev[userId] || []).map((game) =>

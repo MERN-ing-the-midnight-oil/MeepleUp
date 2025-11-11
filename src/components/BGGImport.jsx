@@ -10,6 +10,7 @@ import './BGGImport.css';
 const BGGImport = ({ onImportComplete }) => {
   const { user, updateUser } = useAuth();
   const { addGameToCollection } = useCollections();
+  const userIdentifier = user?.uid || user?.id;
   const [bggUsername, setBggUsername] = useState(user?.bggUsername || '');
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -44,7 +45,7 @@ const BGGImport = ({ onImportComplete }) => {
       setCollection(games);
       
       // Save BGG username to user profile
-      if (user) {
+      if (userIdentifier) {
         updateUser({ bggUsername: bggUsername.trim() });
       }
     } catch (err) {
@@ -90,8 +91,8 @@ const BGGImport = ({ onImportComplete }) => {
           };
 
           // Add to collection
-          if (user) {
-            addGameToCollection(user.id, gameData);
+          if (userIdentifier) {
+            addGameToCollection(userIdentifier, gameData);
             setImportedGames((prev) => [...prev, gameData]);
           }
 
