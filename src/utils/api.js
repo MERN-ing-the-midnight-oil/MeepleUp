@@ -1,9 +1,7 @@
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
 import { API_CONFIG } from '../config/api';
-
-// BoardGameGeek API base URL
-const BGG_API_BASE = API_CONFIG.BGG_API_BASE;
+import * as bggLocalDB from './bggLocalDB';
 
 // RapidAPI Barcode Lookup configuration
 const RAPIDAPI_BARCODE_BASE = 'https://barcodes-lookup.p.rapidapi.com';
@@ -326,41 +324,58 @@ export const searchGameByBarcode = async (barcode) => {
 };
 
 /**
- * Search for games by name on BoardGameGeek
+ * Search for games by name using local CSV database
+ * Works completely offline - no server or API needed!
  */
 export const searchGamesByName = async (query) => {
   try {
-    const response = await axios.get(`${BGG_API_BASE}/search`, {
-      params: {
-        query: query,
-        type: 'boardgame',
-        exact: 0,
-      },
-    });
- 
-    // Parse XML response (BGG API returns XML)
-    return parseBGGSearchResponse(response.data);
+    if (__DEV__) {
+      console.log('[BGG Local] Searching local database:', query);
+    }
+
+    // Use local database directly
+    const results = await bggLocalDB.searchGamesByName(query, 10);
+    
+    if (__DEV__) {
+      console.log(`[BGG Local] Found ${results.length} games`);
+    }
+
+    // Format to match BGG API response format (for compatibility)
+    return bggLocalDB.parseBGGSearchResponse(results);
   } catch (error) {
-    console.error('Error searching games:', error);
+    console.error('[BGG Local] Search error:', error);
     throw error;
   }
 };
 
 /**
- * Get detailed game information by BGG ID
+ * Get detailed game information by BGG ID using local CSV database
+ * Works completely offline - no server or API needed!
  */
 export const getGameDetails = async (gameId) => {
   try {
-    const response = await axios.get(`${BGG_API_BASE}/thing`, {
-      params: {
-        id: gameId,
-        stats: 1,
-      },
-    });
- 
-    return parseBGGGameDetails(response.data);
+    if (__DEV__) {
+      console.log('[BGG Local] Fetching game details from local database:', gameId);
+    }
+
+    // Use local database directly
+    const game = await bggLocalDB.getGameById(gameId);
+    
+    if (!game) {
+      if (__DEV__) {
+        console.warn('[BGG Local] Game not found:', gameId);
+      }
+      return null;
+    }
+
+    if (__DEV__) {
+      console.log(`[BGG Local] Found game: ${game.name}`);
+    }
+
+    // Format to match BGG API response format (for compatibility)
+    return bggLocalDB.parseBGGGameDetails(game);
   } catch (error) {
-    console.error('Error fetching game details:', error);
+    console.error('[BGG Local] Thing error:', error);
     throw error;
   }
 };
@@ -488,69 +503,8 @@ const extractValue = (node) => {
 };
 
 /**
- * Parse BGG search XML response
- */
-const parseBGGSearchResponse = (xmlData) => {
-  const parser = new XMLParser(xmlParserOptions);
-  const result = parser.parse(xmlData);
-  const items = ensureArray(result?.items?.item);
-
-  return items.map((item) => {
-    const nameNodes = ensureArray(item.name);
-    const primaryNameNode = nameNodes.find((n) => getAttr(n, 'type') === 'primary');
-    const name = extractValue(primaryNameNode || nameNodes[0]);
-
-    return {
-      id: getAttr(item, 'id') || '',
-      name: name || '',
-      yearPublished: extractValue(item.yearpublished) || '',
-    };
-  });
-};
-
-/**
- * Parse BGG game details XML response
- */
-const parseBGGGameDetails = (xmlData) => {
-  const parser = new XMLParser(xmlParserOptions);
-  const result = parser.parse(xmlData);
-  const item = ensureArray(result?.items?.item)[0];
-
-  if (!item) {
-    return null;
-  }
-
-  const nameNodes = ensureArray(item.name);
-  const primaryNameNode = nameNodes.find((n) => getAttr(n, 'type') === 'primary');
-  const name = extractValue(primaryNameNode || nameNodes[0]);
-
-  const descriptionRaw = extractValue(item.description);
-  const cleanDescription = descriptionRaw
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;#10;/g, '\n')
-    .replace(/&#10;/g, '\n');
-
-  const stats = item.statistics || {};
-  const ratings = stats.ratings || {};
-  const averageRatingValue = extractValue(ratings.average);
-
-  return {
-    id: getAttr(item, 'id') || '',
-    name: name || '',
-    description: cleanDescription,
-    image: extractValue(item.image),
-    thumbnail: extractValue(item.thumbnail),
-    yearPublished: extractValue(item.yearpublished),
-    minPlayers: extractValue(item.minplayers),
-    maxPlayers: extractValue(item.maxplayers),
-    playingTime: extractValue(item.playingtime),
-    averageRating: averageRatingValue ? parseFloat(averageRatingValue) : 0,
-  };
-};
-
-/**
  * Parse BGG collection XML response
+ * Note: Only used by fetchBGGCollection for importing user collections
  * @param {string} xmlData - XML string from BGG API
  * @returns {Array} Array of game objects
  */

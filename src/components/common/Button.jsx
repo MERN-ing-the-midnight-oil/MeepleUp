@@ -14,7 +14,13 @@ const Button = ({ label, onPress, style, disabled, title, variant = 'primary' })
       ]}
       accessibilityLabel={title || label}
     >
-      <Text style={[styles.label, variant === 'outline' && styles.outlineLabel]}>
+      <Text
+        style={[
+          styles.label,
+          variant === 'outline' && styles.outlineLabel,
+          variant === 'danger' && styles.dangerLabel,
+        ]}
+      >
             {label}
       </Text>
     </Pressable>
@@ -37,6 +43,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#4a90e2',
   },
+  danger: {
+    backgroundColor: '#d32f2f',
+  },
   label: {
     color: '#fff',
     fontSize: 16,
@@ -44,6 +53,9 @@ const styles = StyleSheet.create({
   },
   outlineLabel: {
     color: '#4a90e2',
+  },
+  dangerLabel: {
+    color: '#fff',
   },
   disabled: {
     opacity: 0.5,

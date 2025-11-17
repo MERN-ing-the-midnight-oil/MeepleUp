@@ -3,12 +3,14 @@ import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
+import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
+import GameCard from '../components/GameCard';
 // Note: BarcodeScanner and BGGImport will need to be converted separately
 
 const CollectionManagement = () => {
   const { user } = useAuth();
   const { getUserCollection, addGameToCollection } = useCollections();
-  const [activeTab, setActiveTab] = useState('scanner'); // 'scanner', 'bgg', or 'collection'
+  const [activeView, setActiveView] = useState('menu'); // 'menu', 'view', 'add', 'import'
   
   const userIdentifier = user?.uid || user?.id;
   const userCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
@@ -20,7 +22,10 @@ const CollectionManagement = () => {
     }
   };
 
-    return (
+  // Show menu when no specific view is active
+  const showMenu = activeView === 'menu';
+
+  return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>My Collection</Text>
@@ -29,75 +34,88 @@ const CollectionManagement = () => {
         </Text>
       </View>
 
-      <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, activeTab === 'scanner' && styles.tabActive]}
-          onPress={() => setActiveTab('scanner')}
-        >
-          <Text style={[styles.tabText, activeTab === 'scanner' && styles.tabTextActive]}>
-            Scan Barcode
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === 'bgg' && styles.tabActive]}
-          onPress={() => setActiveTab('bgg')}
-        >
-          <Text style={[styles.tabText, activeTab === 'bgg' && styles.tabTextActive]}>
-            Import from BGG
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === 'collection' && styles.tabActive]}
-          onPress={() => setActiveTab('collection')}
-        >
-          <Text style={[styles.tabText, activeTab === 'collection' && styles.tabTextActive]}>
-            My Games ({userCollection.length})
-          </Text>
-        </Pressable>
-      </View>
-
       <View style={styles.content}>
-        {activeTab === 'scanner' && (
-          <View style={styles.tabContent}>
-            <Text style={styles.placeholderText}>
-              Barcode Scanner will be implemented here
-            </Text>
-            {/* <BarcodeScanner onAddToCollection={handleAddToCollection} /> */}
+        {showMenu && (
+          <View style={styles.menuContainer}>
+            <Text style={styles.menuTitle}>What would you like to do?</Text>
+            
+            <Pressable
+              style={styles.menuOption}
+              onPress={() => setActiveView('view')}
+            >
+              <View style={styles.menuOptionContent}>
+                <Text style={styles.menuOptionIcon}>📚</Text>
+                <View style={styles.menuOptionText}>
+                  <Text style={styles.menuOptionTitle}>View my MeepleUp collection</Text>
+                  <Text style={styles.menuOptionDescription}>
+                    Browse your {userCollection.length} game{userCollection.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+                <Text style={styles.menuOptionArrow}>→</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.menuOption}
+              onPress={() => setActiveView('add')}
+            >
+              <View style={styles.menuOptionContent}>
+                <Text style={styles.menuOptionIcon}>📷</Text>
+                <View style={styles.menuOptionText}>
+                  <Text style={styles.menuOptionTitle}>Add games using my camera</Text>
+                  <Text style={styles.menuOptionDescription}>
+                    Take a photo to identify games with Claude AI
+                  </Text>
+                </View>
+                <Text style={styles.menuOptionArrow}>→</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.menuOption}
+              onPress={() => setActiveView('import')}
+            >
+              <View style={styles.menuOptionContent}>
+                <Text style={styles.menuOptionIcon}>🌐</Text>
+                <View style={styles.menuOptionText}>
+                  <Text style={styles.menuOptionTitle}>Import games from my BGG collection</Text>
+                  <Text style={styles.menuOptionDescription}>
+                    Sync your BoardGameGeek collection
+                  </Text>
+                </View>
+                <Text style={styles.menuOptionArrow}>→</Text>
+              </View>
+            </Pressable>
           </View>
         )}
 
-        {activeTab === 'bgg' && (
-          <View style={styles.tabContent}>
-            <Text style={styles.placeholderText}>
-              BGG Import will be implemented here
-            </Text>
-            {/* <BGGImport
-              onImportComplete={(count) => {
-                if (count > 0) {
-                  setActiveTab('collection');
-                }
-              }}
-            /> */}
-          </View>
-        )}
-
-        {activeTab === 'collection' && (
-          <View style={styles.tabContent}>
+        {activeView === 'view' && (
+          <View style={styles.viewContent}>
+            <View style={styles.viewHeader}>
+              <Pressable
+                style={styles.backButton}
+                onPress={() => setActiveView('menu')}
+              >
+                <Text style={styles.backButtonText}>← Back</Text>
+              </Pressable>
+              <Text style={styles.viewTitle}>My Games</Text>
+            </View>
+            
             {userCollection.length === 0 ? (
               <View style={styles.emptyCollection}>
                 <Text style={styles.emptyTitle}>No games yet</Text>
                 <Text style={styles.emptyText}>
-                  Add games to your collection by scanning barcodes or importing from BoardGameGeek.
+                  Add games to your collection by using your camera or importing from BoardGameGeek.
                 </Text>
                 <View style={styles.emptyActions}>
                   <Button
-                    label="Scan Barcode"
-                    onPress={() => setActiveTab('scanner')}
+                    label="Add Games with Camera"
+                    onPress={() => setActiveView('add')}
                     style={styles.emptyButton}
                   />
                   <Button
                     label="Import from BGG"
-                    onPress={() => setActiveTab('bgg')}
+                    onPress={() => setActiveView('import')}
                     variant="outline"
                     style={styles.emptyButton}
                   />
@@ -106,31 +124,51 @@ const CollectionManagement = () => {
             ) : (
               <View style={styles.gamesGrid}>
                 {userCollection.map((game) => (
-                  <View key={game.id} style={styles.gameCard}>
-                    {game.image && (
-                      <View style={styles.gameCardImage}>
-                        <Text style={styles.imagePlaceholder}>Image</Text>
-                        {/* <Image source={{ uri: game.image }} style={styles.gameImage} /> */}
-                      </View>
-                    )}
-                    <View style={styles.gameCardInfo}>
-                      <Text style={styles.gameCardTitle}>{game.title}</Text>
-                      {game.brand && (
-                        <Text style={styles.gameCardMeta}>{game.brand}</Text>
-                      )}
-                      {game.category && (
-                        <Text style={styles.gameCardMeta}>{game.category}</Text>
-                      )}
-                      {game.barcode && (
-                        <Text style={styles.gameCardBarcode}>
-                          UPC: {game.barcode}
-                        </Text>
-                      )}
-                    </View>
-                  </View>
+                  <GameCard key={game.id} game={game} />
                 ))}
               </View>
             )}
+          </View>
+        )}
+
+        {activeView === 'add' && (
+          <View style={styles.viewContent}>
+            <View style={styles.viewHeader}>
+              <Pressable
+                style={styles.backButton}
+                onPress={() => setActiveView('menu')}
+              >
+                <Text style={styles.backButtonText}>← Back</Text>
+              </Pressable>
+              <Text style={styles.viewTitle}>Identify Games</Text>
+            </View>
+            <ClaudeGameIdentifier onAddToCollection={handleAddToCollection} />
+          </View>
+        )}
+
+        {activeView === 'import' && (
+          <View style={styles.viewContent}>
+            <View style={styles.viewHeader}>
+              <Pressable
+                style={styles.backButton}
+                onPress={() => setActiveView('menu')}
+              >
+                <Text style={styles.backButtonText}>← Back</Text>
+              </Pressable>
+              <Text style={styles.viewTitle}>Import from BGG</Text>
+            </View>
+            <View style={styles.tabContent}>
+              <Text style={styles.placeholderText}>
+                BGG Import will be implemented here
+              </Text>
+              {/* <BGGImport
+                onImportComplete={(count) => {
+                  if (count > 0) {
+                    setActiveView('view');
+                  }
+                }}
+              /> */}
+            </View>
           </View>
         )}
       </View>
@@ -161,28 +199,77 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  tabs: {
+  menuContainer: {
+    paddingVertical: 20,
+  },
+  menuTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  menuOption: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  menuOptionContent: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    alignItems: 'center',
+    padding: 20,
   },
-  tab: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+  menuOptionIcon: {
+    fontSize: 32,
+    marginRight: 16,
   },
-  tabActive: {
-    borderBottomColor: '#4a90e2',
+  menuOptionText: {
+    flex: 1,
   },
-  tabText: {
+  menuOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  menuOptionDescription: {
     fontSize: 14,
     color: '#666',
   },
-  tabTextActive: {
+  menuOptionArrow: {
+    fontSize: 20,
+    color: '#999',
+    marginLeft: 12,
+  },
+  viewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  backButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginRight: 12,
+  },
+  backButtonText: {
+    fontSize: 16,
     color: '#4a90e2',
+    fontWeight: '500',
+  },
+  viewTitle: {
+    fontSize: 24,
     fontWeight: '600',
+    color: '#333',
+  },
+  viewContent: {
+    minHeight: 400,
   },
   content: {
     padding: 20,

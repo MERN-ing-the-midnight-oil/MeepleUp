@@ -129,7 +129,7 @@ const BGGImport = ({ onImportComplete }) => {
   return (
     <div className="bgg-import">
       <div className="bgg-import-header">
-        <h2>Import from BoardGameGeek</h2>
+        <h2>Import collectionfrom BoardGameGeek</h2>
         <p className="text-secondary">
           Import your BGG collection to quickly populate your MeepleUp collection.
         </p>

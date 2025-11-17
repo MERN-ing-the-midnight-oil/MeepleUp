@@ -1,12 +1,14 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet, Text, TextInput } from 'react-native';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { EventsProvider } from './src/context/EventsContext';
 import { CollectionsProvider } from './src/context/CollectionsContext';
-import RegisterScreen from './src/screens/Register';
+import { AvailabilityProvider } from './src/context/AvailabilityContext';
+import LandingScreen from './src/screens/Landing';
+import AuthScreen from './src/screens/Auth';
 import VerifyEmailScreen from './src/screens/VerifyEmail';
 import OnboardingScreen from './src/screens/Onboarding';
 import HomeScreen from './src/screens/Home';
@@ -48,17 +50,36 @@ function AppNavigator() {
   const { user } = useAuth();
   const isAuthenticated = !!user;
   const isVerified = user?.emailVerified;
+  const navigationRef = useNavigationContainerRef();
+  const [currentRouteName, setCurrentRouteName] = React.useState();
+
+  const handleNavReady = () => {
+    setCurrentRouteName(navigationRef.getCurrentRoute()?.name);
+  };
+
+  const handleStateChange = () => {
+    setCurrentRouteName(navigationRef.getCurrentRoute()?.name);
+  };
 
   return (
-    <NavigationContainer>
-      {isAuthenticated && isVerified && <Navigation />}
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={handleNavReady}
+      onStateChange={handleStateChange}
+    >
+      {isAuthenticated && isVerified && (
+        <Navigation navigationRef={navigationRef} currentRouteName={currentRouteName} />
+      )}
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
         }}
       >
         {!isAuthenticated && (
-          <Stack.Screen name="Register" component={RegisterScreen} />
+          <>
+            <Stack.Screen name="Landing" component={LandingScreen} />
+            <Stack.Screen name="Auth" component={AuthScreen} />
+          </>
         )}
         {isAuthenticated && !isVerified && (
           <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
@@ -99,11 +120,13 @@ function AppContent() {
   }
 
   return (
-    <EventsProvider>
-      <CollectionsProvider>
-        <AppNavigator />
-      </CollectionsProvider>
-    </EventsProvider>
+    <AvailabilityProvider>
+      <EventsProvider>
+        <CollectionsProvider>
+          <AppNavigator />
+        </CollectionsProvider>
+      </EventsProvider>
+    </AvailabilityProvider>
   );
 }
 

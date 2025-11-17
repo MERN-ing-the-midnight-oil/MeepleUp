@@ -1,19 +1,20 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 
-const Navigation = () => {
-  const navigation = useNavigation();
-  const route = useRoute();
+const Navigation = ({ navigationRef, currentRouteName }) => {
   const { user, logout, isAuthenticated, isEmailVerified } = useAuth();
 
   if (!isAuthenticated || !isEmailVerified) {
     return null;
   }
 
+  const handleNavigate = (routeName) => {
+    navigationRef?.current?.navigate(routeName);
+  };
+
   const isActive = (routeName) => {
-    return route.name === routeName;
+    return currentRouteName === routeName;
   };
 
   const navItems = [
@@ -26,12 +27,11 @@ const Navigation = () => {
   return (
     <View style={styles.container}>
       <View style={styles.navContent}>
-        <Text style={styles.brand}>MeepleUp</Text>
         <View style={styles.navLinks}>
           {navItems.map((item) => (
             <Pressable
               key={item.route}
-              onPress={() => navigation.navigate(item.route)}
+              onPress={() => handleNavigate(item.route)}
               style={[
                 styles.navLink,
                 isActive(item.route) && styles.navLinkActive,
@@ -67,19 +67,16 @@ const styles = StyleSheet.create({
   },
   navContent: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
-  brand: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4a90e2',
-  },
   navLinks: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
   },
   navLink: {
     paddingVertical: 8,

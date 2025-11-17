@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import { useAuth } from '../context/AuthContext';
@@ -17,9 +17,13 @@ const initialFormState = {
   name: '',
 };
 
-const AuthScreen = () => {
+const AuthScreen = ({ route, navigation }) => {
   const { login, signup, resetPassword } = useAuth();
-  const [mode, setMode] = useState(MODES.LOGIN);
+  const initialModeParam = route?.params?.mode;
+  const getValidatedMode = (value) =>
+    Object.values(MODES).includes(value) ? value : MODES.LOGIN;
+
+  const [mode, setMode] = useState(getValidatedMode(initialModeParam));
   const [form, setForm] = useState(initialFormState);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -57,7 +61,7 @@ const AuthScreen = () => {
   };
 
   const switchMode = (nextMode) => {
-    setMode(nextMode);
+    setMode(getValidatedMode(nextMode));
     setForm((prev) => ({
       ...prev,
       password: '',
@@ -66,6 +70,20 @@ const AuthScreen = () => {
     setError('');
     setMessage('');
   };
+
+  useEffect(() => {
+    const requestedMode = getValidatedMode(route?.params?.mode);
+    if (requestedMode !== mode) {
+      setMode(requestedMode);
+      setForm((prev) => ({
+        ...prev,
+        password: '',
+        confirmPassword: '',
+      }));
+      setError('');
+      setMessage('');
+    }
+  }, [mode, route?.params?.mode]);
 
   const handleLogin = async () => {
     if (!form.email.trim() || !form.password) {
@@ -196,6 +214,14 @@ const AuthScreen = () => {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.topRow}>
+        {navigation.canGoBack() && (
+          <Pressable onPress={() => navigation.goBack()} accessibilityRole="button">
+            <Text style={styles.backText}>Back</Text>
+          </Pressable>
+        )}
+      </View>
+
       <View style={styles.card}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
@@ -277,6 +303,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
     backgroundColor: '#f5f5f5',
+  },
+  topRow: {
+    minHeight: 24,
+    marginBottom: 16,
+  },
+  backText: {
+    color: '#4a90e2',
+    fontSize: 16,
+    fontWeight: '600',
   },
   card: {
     backgroundColor: '#fff',

@@ -191,7 +191,7 @@ const Onboarding = () => {
             >
               <Text style={styles.optionTitle}>Join with Code</Text>
               <Text style={styles.optionText}>
-                Have a join code from a friend? Enter it here to join their game night.
+                Join an existing event with a code someone gave you.
               </Text>
             </Pressable>
             
