@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet, Pressable } from 'react-native';
 import { getGameById } from '../utils/bggLocalDB';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import CategoryBadge from './CategoryBadge';
@@ -8,7 +8,7 @@ import CategoryBadge from './CategoryBadge';
  * Enhanced Game Card Component
  * Displays game with thumbnail, title, year, star rating, and category badges
  */
-const GameCard = ({ game }) => {
+const GameCard = ({ game, onDelete }) => {
   const [bggData, setBggData] = useState(null);
   const [badges, setBadges] = useState([]);
   const [starRating, setStarRating] = useState(0);
@@ -44,8 +44,26 @@ const GameCard = ({ game }) => {
   const year = game.yearPublished || bggData?.yearPublished || null;
   const rating = starRating || (bggData?.average ? getStarRating(bggData.average) : 0);
 
+  const handleDelete = () => {
+    if (onDelete) {
+      onDelete(game.id);
+    }
+  };
+
   return (
     <View style={styles.card}>
+      {/* Delete Button */}
+      {onDelete && (
+        <Pressable
+          style={styles.deleteButton}
+          onPress={handleDelete}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${title}`}
+        >
+          <Text style={styles.deleteIcon}>✕</Text>
+        </Pressable>
+      )}
+
       {/* Thumbnail */}
       <View style={styles.thumbnailContainer}>
         {thumbnail ? (
@@ -74,7 +92,6 @@ const GameCard = ({ game }) => {
               <Text style={styles.ratingText}>
                 {'★'.repeat(Math.floor(rating))}
                 {rating % 1 >= 0.5 ? '½' : ''}
-                {'☆'.repeat(5 - Math.ceil(rating))}
               </Text>
               {bggData?.average && (
                 <Text style={styles.ratingNumber}>
@@ -85,12 +102,15 @@ const GameCard = ({ game }) => {
           )}
         </View>
 
-        {/* Category Badges */}
+        {/* Category Badges - smaller and limited */}
         {badges.length > 0 && (
           <View style={styles.badgesContainer}>
-            {badges.map((badge, index) => (
-              <CategoryBadge key={`${badge.category}-${index}`} badge={badge} size={16} />
+            {badges.slice(0, 3).map((badge, index) => (
+              <CategoryBadge key={`${badge.category}-${index}`} badge={badge} size={14} />
             ))}
+            {badges.length > 3 && (
+              <Text style={styles.moreBadges}>+{badges.length - 3}</Text>
+            )}
           </View>
         )}
       </View>
@@ -101,20 +121,39 @@ const GameCard = ({ game }) => {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#e0e0e0',
     shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    marginBottom: 16,
+    elevation: 2,
+    position: 'relative',
+    width: '100%', // Fill wrapper width
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(231, 76, 60, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  deleteIcon: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 16,
   },
   thumbnailContainer: {
     width: '100%',
-    height: 200,
+    height: 100, // Half of original 200
     backgroundColor: '#f5f5f5',
   },
   thumbnail: {
@@ -129,49 +168,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   thumbnailPlaceholderText: {
-    fontSize: 48,
+    fontSize: 32, // Smaller for smaller card
     fontWeight: 'bold',
     color: '#999',
   },
   cardContent: {
-    padding: 12,
+    padding: 8, // Smaller padding
   },
   title: {
-    fontSize: 18,
+    fontSize: 13, // Smaller font
     fontWeight: '600',
     color: '#333',
-    marginBottom: 8,
-    lineHeight: 24,
+    marginBottom: 4,
+    lineHeight: 16,
   },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   year: {
-    fontSize: 14,
+    fontSize: 11,
     color: '#666',
     fontWeight: '500',
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   ratingText: {
-    fontSize: 14,
+    fontSize: 11,
     color: '#FFA500',
   },
   ratingNumber: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#999',
     fontWeight: '500',
   },
   badgesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 4,
+    marginTop: 2,
+    alignItems: 'center',
+  },
+  moreBadges: {
+    fontSize: 9,
+    color: '#999',
+    marginLeft: 4,
+    fontWeight: '500',
   },
 });
 
