@@ -31,74 +31,112 @@ const PulsingControl = ({ type, onPress, disabled, size = 'normal' }) => {
   const loopRef = useRef(null);
 
   useEffect(() => {
-    if (disabled) {
-      if (loopRef.current) {
-        loopRef.current.stop();
-        loopRef.current = null;
+    try {
+      if (disabled) {
+        if (loopRef.current) {
+          try {
+            loopRef.current.stop();
+          } catch (stopError) {
+            console.warn('[PulsingControl] Error stopping animation:', stopError);
+          }
+          loopRef.current = null;
+        }
+        try {
+          pulse.setValue(1);
+        } catch (setValueError) {
+          console.warn('[PulsingControl] Error setting pulse value:', setValueError);
+        }
+        return;
       }
-      pulse.setValue(1);
-      return;
+
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, {
+            toValue: 0.6,
+            duration: 420,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 420,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+
+      try {
+        loop.start();
+        loopRef.current = loop;
+      } catch (startError) {
+        console.warn('[PulsingControl] Error starting animation:', startError);
+      }
+
+      return () => {
+        try {
+          if (loopRef.current) {
+            loopRef.current.stop();
+            loopRef.current = null;
+          }
+        } catch (cleanupError) {
+          console.warn('[PulsingControl] Error cleaning up animation:', cleanupError);
+        }
+      };
+    } catch (effectError) {
+      console.error('[PulsingControl] Error in useEffect:', effectError);
     }
-
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 0.6,
-          duration: 420,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 420,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-    loop.start();
-    loopRef.current = loop;
-
-    return () => {
-      loop.stop();
-      loopRef.current = null;
-    };
-  }, [disabled, pulse]);
+  }, [disabled]); // Removed pulse from dependencies - it's a ref value that doesn't change
 
   const backgroundColor = type === 'confirm' ? '#2ecc71' : type === 'edit' ? '#4a90e2' : '#e74c3c';
   const icon = type === 'confirm' ? '✓' : type === 'edit' ? '✎' : '✕';
 
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.controlWrapper,
-        disabled && styles.controlWrapperDisabled,
-        pressed && !disabled && styles.controlWrapperPressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={
-        type === 'confirm'
-          ? 'Confirm and add to collection'
-          : type === 'edit'
-            ? 'View similar games'
-            : 'Reject game identification'
-      }
-    >
-      <Animated.View
-        style={[
-          styles.control,
-          size === 'small' && styles.controlSmall,
-          {
-            backgroundColor,
-            opacity: disabled ? 0.5 : pulse,
-          },
+  try {
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={disabled}
+        style={({ pressed }) => [
+          styles.controlWrapper,
+          disabled && styles.controlWrapperDisabled,
+          pressed && !disabled && styles.controlWrapperPressed,
         ]}
+        accessibilityRole="button"
+        accessibilityLabel={
+          type === 'confirm'
+            ? 'Confirm and add to collection'
+            : type === 'edit'
+              ? 'View similar games'
+              : 'Reject game identification'
+        }
       >
-        <Text style={[styles.controlIcon, size === 'small' && styles.controlIconSmall]}>{icon}</Text>
-      </Animated.View>
-    </Pressable>
-  );
+        <Animated.View
+          style={[
+            styles.control,
+            size === 'small' && styles.controlSmall,
+            {
+              backgroundColor,
+              opacity: disabled ? 0.5 : pulse,
+            },
+          ]}
+        >
+          <Text style={[styles.controlIcon, size === 'small' && styles.controlIconSmall]}>{icon}</Text>
+        </Animated.View>
+      </Pressable>
+    );
+  } catch (renderError) {
+    console.error('[PulsingControl] Error rendering:', renderError);
+    // Fallback to simple button without animation
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={disabled}
+        style={[styles.controlWrapper, disabled && styles.controlWrapperDisabled]}
+      >
+        <View style={[styles.control, size === 'small' && styles.controlSmall, { backgroundColor, opacity: disabled ? 0.5 : 1 }]}>
+          <Text style={[styles.controlIcon, size === 'small' && styles.controlIconSmall]}>{icon}</Text>
+        </View>
+      </Pressable>
+    );
+  }
 };
 
 const CorrectionSuggestionCard = ({ suggestion, onSelect }) => {
@@ -138,7 +176,15 @@ const CorrectionSuggestionCard = ({ suggestion, onSelect }) => {
   );
 };
 
-const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDone }) => {
+const ClaudeGameIdentifier = ({ 
+  onAddToCollection, 
+  onRemoveFromCollection, 
+  onDone,
+  showCameraModal = false,
+  showResultsModal = false,
+  onCameraModalClose,
+  onResultsModalClose,
+}) => {
   const cameraRef = useRef(null);
   const activeSessionRef = useRef(null);
   const pendingFetchTimersRef = useRef([]);
@@ -161,6 +207,12 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
   const [isCorrectionSearching, setIsCorrectionSearching] = useState(false);
   const [correctionError, setCorrectionError] = useState(null);
   const isSelectingSuggestionRef = useRef(false);
+  // Inline correction input for no_match candidates
+  const [inlineCorrectionInputs, setInlineCorrectionInputs] = useState({});
+  const [inlineCorrectionSearching, setInlineCorrectionSearching] = useState({});
+  // Queue for sequential BGG fetches to prevent concurrent Firestore queries
+  const bggFetchQueueRef = useRef([]);
+  const isProcessingBggQueueRef = useRef(false);
 
   useEffect(() => {
     if (!permission || permission.status === 'undetermined') {
@@ -195,15 +247,24 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
   };
 
   const updateCandidate = useCallback((candidateId, updater) => {
-    setGameCandidates((prev) =>
-      prev.map((candidate) => {
-        if (candidate.id !== candidateId) {
-          return candidate;
-        }
-        const updated = updater(candidate);
-        return updated;
-      })
-    );
+    try {
+      setGameCandidates((prev) =>
+        prev.map((candidate) => {
+          if (candidate.id !== candidateId) {
+            return candidate;
+          }
+          try {
+            const result = updater(candidate);
+            return result;
+          } catch (updateError) {
+            console.error('[ClaudeGameIdentifier] Error updating candidate:', updateError, candidate);
+            return candidate; // Return unchanged candidate on error
+          }
+        })
+      );
+    } catch (error) {
+      console.error('[ClaudeGameIdentifier] Error in updateCandidate:', error);
+    }
   }, []);
 
   const fetchBGGMetadata = useCallback(
@@ -212,11 +273,23 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
         return;
       }
 
-      updateCandidate(candidateId, (candidate) => ({
-        ...candidate,
-        bggStatus: 'loading',
-        bggErrorMessage: null,
-      }));
+      updateCandidate(candidateId, (candidate) => {
+        try {
+          const updated = {
+            ...candidate,
+            bggStatus: 'loading',
+            bggErrorMessage: null,
+          };
+          // Preserve styling - ensure it's a valid object
+          if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+            updated.styling = { ...candidate.styling };
+          }
+          return updated;
+        } catch (updateError) {
+          console.error('[ClaudeGameIdentifier] Error in updateCandidate (loading):', updateError);
+          return candidate; // Return unchanged on error
+        }
+      });
 
       if (__DEV__) {
         console.log('[ClaudeGameIdentifier] Fetching BGG metadata', {
@@ -227,78 +300,325 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
 
       try {
         const query = rawTitle?.trim();
-        const searchResults = query ? await searchGamesByName(query) : [];
+        let searchResults = [];
+        
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] About to call searchGamesByName for:', query, 'candidateId:', candidateId);
+        }
+        
+        try {
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] Creating search promise for:', query);
+          }
+          
+          const searchPromise = query ? searchGamesByName(query) : Promise.resolve([]);
+          
+          // Add a timeout wrapper to prevent hanging
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Search timeout after 8 seconds')), 8000);
+          });
+          
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] Awaiting Promise.race...');
+          }
+          
+          try {
+            searchResults = await Promise.race([searchPromise, timeoutPromise]);
+            
+            if (__DEV__) {
+              console.log('[ClaudeGameIdentifier] Promise.race resolved, result type:', typeof searchResults, 'isArray:', Array.isArray(searchResults));
+            }
+          } catch (raceError) {
+            if (__DEV__) {
+              console.error('[ClaudeGameIdentifier] Promise.race error:', raceError);
+            }
+            throw raceError;
+          }
+          
+          // Ensure searchResults is an array
+          if (!Array.isArray(searchResults)) {
+            if (__DEV__) {
+              console.warn('[ClaudeGameIdentifier] searchGamesByName returned non-array:', searchResults);
+            }
+            searchResults = [];
+          }
+          
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] searchGamesByName completed, results:', searchResults.length);
+            console.log('[ClaudeGameIdentifier] searchResults type:', Array.isArray(searchResults) ? 'array' : typeof searchResults);
+          }
+        } catch (searchError) {
+          console.error('[ClaudeGameIdentifier] Error calling searchGamesByName:', searchError);
+          searchResults = [];
+        }
 
         if (__DEV__) {
           console.log('[ClaudeGameIdentifier] BGG search results', {
             candidateId,
             title: rawTitle,
             resultCount: searchResults.length,
-            firstResult: searchResults[0],
+            firstResult: searchResults.length > 0 ? searchResults[0] : null,
           });
         }
 
-        if (!searchResults || searchResults.length === 0) {
+        // Add a timeout to prevent infinite loading
+        // If search takes too long, mark as error
+        const searchTimeout = setTimeout(() => {
           if (sessionKey === activeSessionRef.current) {
-            updateCandidate(candidateId, (candidate) => ({
-              ...candidate,
-              bggStatus: 'no_match',
-              bggErrorMessage: 'No matches on BoardGameGeek yet.',
-            }));
+            console.warn('[ClaudeGameIdentifier] Search timeout for:', candidateId);
+            updateCandidate(candidateId, (candidate) => {
+              // Only update if still in loading/idle state
+              if (candidate && (candidate.bggStatus === 'loading' || candidate.bggStatus === 'idle')) {
+                try {
+                  const updated = {
+                    ...candidate,
+                    bggStatus: 'error',
+                    bggErrorMessage: 'Search timed out. You can still confirm this game.',
+                  };
+                  if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+                    updated.styling = { ...candidate.styling };
+                  }
+                  return updated;
+                } catch (updateError) {
+                  console.error('[ClaudeGameIdentifier] Error in updateCandidate (timeout):', updateError);
+                  return candidate;
+                }
+              }
+              return candidate; // Don't change if already updated
+            });
           }
+        }, 10000); // 10 second timeout
+
+        // Clear timeout if search completes
+        const clearTimeoutOnComplete = () => {
+          clearTimeout(searchTimeout);
+        };
+
+        // Safety check: ensure we're still in the right session
+        if (sessionKey !== activeSessionRef.current) {
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] Session changed, aborting update for:', candidateId);
+          }
+          clearTimeoutOnComplete();
+          return;
+        }
+
+        if (!searchResults || searchResults.length === 0) {
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] No search results, updating to no_match state');
+          }
+          clearTimeoutOnComplete();
+          
+          // Double-check session before updating
+          if (sessionKey !== activeSessionRef.current) {
+            if (__DEV__) {
+              console.log('[ClaudeGameIdentifier] Session changed, aborting no_match update');
+            }
+            return;
+          }
+          
+          // Use requestAnimationFrame to defer state update and prevent render crashes
+          requestAnimationFrame(() => {
+            if (sessionKey !== activeSessionRef.current) {
+              return;
+            }
+            
+            if (__DEV__) {
+              console.log('[ClaudeGameIdentifier] Updating candidate to no_match in requestAnimationFrame');
+            }
+            
+            updateCandidate(candidateId, (candidate) => {
+              try {
+                const searchedTitle = query || rawTitle || candidate.claudeTitle || 'this game';
+                const updated = {
+                  ...candidate,
+                  bggStatus: 'no_match',
+                  bggErrorMessage: `No matches for "${searchedTitle}" on BGG`,
+                  searchedTitle: searchedTitle, // Store the searched title for the correction button
+                };
+                // Preserve styling - ensure it's a valid object
+                if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+                  updated.styling = { ...candidate.styling };
+                }
+                if (__DEV__) {
+                  console.log('[ClaudeGameIdentifier] Updated candidate to no_match:', candidateId);
+                }
+                return updated;
+              } catch (updateError) {
+                console.error('[ClaudeGameIdentifier] Error in updateCandidate (no_match):', updateError);
+                return candidate;
+              }
+            });
+          });
           return;
         }
 
         const primaryResult = searchResults[0];
+        
+        // Validate primaryResult has required fields
+        if (!primaryResult || !primaryResult.id) {
+          clearTimeoutOnComplete();
+          if (__DEV__) {
+            console.warn('[ClaudeGameIdentifier] Invalid primaryResult:', primaryResult);
+          }
+          if (sessionKey === activeSessionRef.current) {
+            updateCandidate(candidateId, (candidate) => {
+              try {
+                const searchedTitle = rawTitle || candidate.claudeTitle || 'this game';
+                const updated = {
+                  ...candidate,
+                  bggStatus: 'no_match',
+                  bggErrorMessage: `No matches for "${searchedTitle}" on BGG`,
+                  searchedTitle: searchedTitle, // Store the searched title for the correction button
+                };
+                if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+                  updated.styling = { ...candidate.styling };
+                }
+                return updated;
+              } catch (updateError) {
+                console.error('[ClaudeGameIdentifier] Error in updateCandidate (invalid result):', updateError);
+                return candidate;
+              }
+            });
+          }
+          return;
+        }
+
         let details = null;
 
         try {
-          details = await getGameDetails(primaryResult.id);
+          if (primaryResult.id) {
+            details = await getGameDetails(primaryResult.id);
+          }
         } catch (detailError) {
-          console.warn('BGG detail fetch failed:', detailError);
+          console.warn('[ClaudeGameIdentifier] BGG detail fetch failed:', detailError);
+          // Continue with primaryResult data even if details fetch fails
         }
 
         if (sessionKey !== activeSessionRef.current) {
           return;
         }
 
-        updateCandidate(candidateId, (candidate) => ({
-          ...candidate,
-          bggStatus: 'matched',
-          bggData: {
-            id: primaryResult.id,
-            name: details?.name || primaryResult.name,
-            thumbnail: details?.thumbnail || null,
-            image: details?.image || null,
-            yearPublished: details?.yearPublished || primaryResult.yearPublished || '',
-          },
-        }));
+        clearTimeoutOnComplete();
+        
+        // Double-check session before updating
+        if (sessionKey !== activeSessionRef.current) {
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] Session changed before matched update, aborting:', candidateId);
+          }
+          return;
+        }
+
+        // Use requestAnimationFrame to defer state update and prevent render crashes
+        requestAnimationFrame(() => {
+          if (sessionKey !== activeSessionRef.current) {
+            return;
+          }
+          
+          updateCandidate(candidateId, (candidate) => {
+            try {
+              // Ensure we preserve styling and other important fields
+              const updatedCandidate = {
+                ...candidate,
+                bggStatus: 'matched',
+                bggData: {
+                  id: primaryResult.id || candidate.bggData?.id || null,
+                  name: details?.name || primaryResult.name || candidate.claudeTitle || 'Unknown',
+                  thumbnail: details?.thumbnail || primaryResult.thumbnail || null,
+                  image: details?.image || primaryResult.image || null,
+                  yearPublished: details?.yearPublished || primaryResult.yearPublished || candidate.bggData?.yearPublished || '',
+                },
+              };
+              // Preserve styling if it exists - ensure it's a valid object
+              if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+                updatedCandidate.styling = { ...candidate.styling };
+              }
+              if (__DEV__) {
+                console.log('[ClaudeGameIdentifier] Updated candidate to matched:', candidateId, updatedCandidate.bggData.name);
+              }
+              return updatedCandidate;
+            } catch (updateError) {
+              console.error('[ClaudeGameIdentifier] Error in updateCandidate (matched):', updateError, candidate);
+              return candidate;
+            }
+          });
+        });
       } catch (searchError) {
-        console.error('BGG search failed:', searchError);
+        console.error('[ClaudeGameIdentifier] BGG search failed:', searchError);
+        // Clear timeout on error
+        if (typeof clearTimeoutOnComplete === 'function') {
+          clearTimeoutOnComplete();
+        }
         if (sessionKey === activeSessionRef.current) {
           // BGG API requires authentication - show game without metadata but still allow confirmation
-          updateCandidate(candidateId, (candidate) => ({
-            ...candidate,
-            bggStatus: 'error',
-            bggErrorMessage: 'BGG metadata unavailable. You can still confirm this game.',
-            // Don't block the user - they can still confirm with just the Claude title
-          }));
+          updateCandidate(candidateId, (candidate) => {
+            try {
+              const updated = {
+                ...candidate,
+                bggStatus: 'error',
+                bggErrorMessage: 'BGG metadata unavailable. You can still confirm this game.',
+              };
+              // Preserve styling - ensure it's a valid object
+              if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+                updated.styling = { ...candidate.styling };
+              }
+              if (__DEV__) {
+                console.log('[ClaudeGameIdentifier] Updated candidate to error state:', candidateId);
+              }
+              return updated;
+            } catch (updateError) {
+              console.error('[ClaudeGameIdentifier] Error in updateCandidate (error):', updateError);
+              return candidate;
+            }
+          });
         }
       }
     },
     [updateCandidate]
   );
 
+  const processBggQueue = useCallback(async () => {
+    if (isProcessingBggQueueRef.current || bggFetchQueueRef.current.length === 0) {
+      return;
+    }
+
+    isProcessingBggQueueRef.current = true;
+    const item = bggFetchQueueRef.current.shift();
+    
+    if (item && item.sessionKey === activeSessionRef.current) {
+      try {
+        await fetchBGGMetadata(item.sessionKey, item.candidateId, item.title);
+      } catch (error) {
+        console.error('[ClaudeGameIdentifier] Error processing BGG queue item:', error);
+      }
+    }
+
+    isProcessingBggQueueRef.current = false;
+    
+    // Process next item in queue after a short delay
+    if (bggFetchQueueRef.current.length > 0) {
+      setTimeout(() => processBggQueue(), 300);
+    }
+  }, [fetchBGGMetadata]);
+
   const scheduleBGGFetch = useCallback(
     (sessionKey, candidateId, title, delayMs = 0) => {
-      const timerId = setTimeout(() => {
-        pendingFetchTimersRef.current = pendingFetchTimersRef.current.filter((id) => id !== timerId);
-        fetchBGGMetadata(sessionKey, candidateId, title);
-      }, delayMs);
-
-      pendingFetchTimersRef.current.push(timerId);
+      // Add to queue instead of scheduling directly to prevent concurrent Firestore queries
+      const queueItem = { sessionKey, candidateId, title };
+      
+      if (delayMs > 0) {
+        const timerId = setTimeout(() => {
+          pendingFetchTimersRef.current = pendingFetchTimersRef.current.filter((id) => id !== timerId);
+          bggFetchQueueRef.current.push(queueItem);
+          processBggQueue();
+        }, delayMs);
+        pendingFetchTimersRef.current.push(timerId);
+      } else {
+        bggFetchQueueRef.current.push(queueItem);
+        processBggQueue();
+      }
     },
-    [fetchBGGMetadata]
+    [processBggQueue]
   );
 
   const beginIdentificationWorkflow = useCallback(
@@ -348,30 +668,65 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
         }
 
         filteredGames.forEach((game, index) => {
-          const candidateId = `${sessionKey}-${index}-${Date.now()}`;
-          const candidate = {
-            id: candidateId,
-            claudeTitle: game.title || 'Untitled',
-            claudeConfidence: game.confidence || 'unknown',
-            claudeNotes: game.notes || '',
-            status: 'pending',
-            bggStatus: 'idle',
-            bggData: null,
-            bggErrorMessage: null,
-            origin: 'claude',
-            createdAt: Date.now(),
-            collectionRecordId: null,
-          };
-
-          setGameCandidates((prev) => {
-            if (sessionKey !== activeSessionRef.current) {
-              return prev;
+          try {
+            const candidateId = `${sessionKey}-${index}-${Date.now()}`;
+            
+            // Validate and normalize styling if present
+            let styling = null;
+            if (game.styling) {
+              try {
+                // Ensure styling is an object
+                if (typeof game.styling === 'object' && game.styling !== null) {
+                  styling = game.styling;
+                  if (__DEV__) {
+                    console.log('[ClaudeGameIdentifier] Styling for', game.title, ':', JSON.stringify(styling, null, 2));
+                    console.log('[ClaudeGameIdentifier] Font name from Claude:', styling.fontName || styling.fontStyle || 'NOT PROVIDED');
+                  }
+                }
+              } catch (stylingError) {
+                console.warn('[ClaudeGameIdentifier] Error processing styling:', stylingError);
+                styling = null;
+              }
+            } else if (__DEV__) {
+              console.log('[ClaudeGameIdentifier] No styling object for', game.title);
             }
-            return [...prev, candidate];
-          });
+            
+            const candidate = {
+              id: candidateId,
+              claudeTitle: game.title || 'Untitled',
+              claudeConfidence: game.confidence || 'unknown',
+              claudeNotes: game.notes || '',
+              styling: styling || null, // Store AI-extracted styling (ensure it's null if invalid)
+              status: 'pending',
+              bggStatus: 'idle',
+              bggData: null,
+              bggErrorMessage: null,
+              origin: 'claude',
+              createdAt: Date.now(),
+              collectionRecordId: null,
+            };
+            
+            // Validate candidate structure
+            if (!candidate.id || !candidate.claudeTitle) {
+              console.warn('[ClaudeGameIdentifier] Invalid candidate structure:', candidate);
+              return; // Skip invalid candidates
+            }
 
-          const delayMs = index * 220;
-          scheduleBGGFetch(sessionKey, candidateId, game.title, delayMs);
+            setGameCandidates((prev) => {
+              if (sessionKey !== activeSessionRef.current) {
+                return prev;
+              }
+              return [...prev, candidate];
+            });
+
+            // Stagger searches more aggressively to prevent concurrent Firestore queries
+            // Start with 500ms delay, then add 800ms for each subsequent game
+            const delayMs = 500 + (index * 800);
+            scheduleBGGFetch(sessionKey, candidateId, game.title, delayMs);
+          } catch (candidateError) {
+            console.error('[ClaudeGameIdentifier] Error creating candidate:', candidateError, game);
+            // Continue with next game instead of crashing
+          }
         });
       } catch (identifyError) {
         console.error('Claude identification failed:', identifyError);
@@ -404,7 +759,14 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
       activeSessionRef.current = sessionKey;
 
       setPhoto(capturedPhoto);
+      
+      // Start identification workflow first
       beginIdentificationWorkflow(capturedPhoto, sessionKey);
+      
+      // Close camera modal - results modal will be opened by parent
+      if (onCameraModalClose) {
+        onCameraModalClose();
+      }
     } catch (captureError) {
       console.error('Error capturing photo:', captureError);
       setError('Unable to capture photo. Please try again.');
@@ -535,7 +897,8 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
 
       // Set up the correction modal with the current candidate's title
       // This will search for similar games and show them in a carousel
-      const searchQuery = candidate.bggData?.name || candidate.claudeTitle || '';
+      // Use searchedTitle if available (from no_match), otherwise use bggData name or claudeTitle
+      const searchQuery = candidate.searchedTitle || candidate.bggData?.name || candidate.claudeTitle || '';
       setCorrectionCandidate(candidate);
       setCorrectionQuery(searchQuery);
       setCorrectionSuggestions([]);
@@ -579,6 +942,7 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
         bggThumbnail: candidate.bggData?.thumbnail || null,
         bggImage: candidate.bggData?.image || null,
         yearPublished: candidate.bggData?.yearPublished || null,
+        styling: candidate.styling || null, // Store AI-extracted styling
       };
 
       setGameCandidates((prev) => {
@@ -586,14 +950,8 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
           item.id === candidateId ? { ...item, status: 'confirmed', collectionRecordId } : item
         );
 
-        // Check if all candidates are now confirmed
-        const allConfirmed = updated.every((item) => item.status === 'confirmed');
-        if (allConfirmed && updated.length > 0) {
-          // Auto-reset photo capture after a short delay to show confirmation
-          setTimeout(() => {
-            resetPhotoCapture();
-          }, 500);
-        }
+        // Don't auto-reset - let the user see their confirmed games
+        // They can click "I'm done" or continue identifying more games
 
         return updated;
       });
@@ -804,6 +1162,8 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
                   yearPublished: suggestion.yearPublished,
                 },
                 bggErrorMessage: null,
+                // Preserve styling if it exists
+                styling: candidate.styling || null,
               };
             }
             return candidate;
@@ -855,38 +1215,199 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
     [correctionCandidate]
   );
 
-  const renderCandidateCard = (candidate) => {
-    const title = candidate.bggData?.name || candidate.claudeTitle;
-    const subtitle = candidate.bggData?.yearPublished
-      ? `${candidate.bggData.yearPublished} · Claude confidence: ${candidate.claudeConfidence}`
-      : `Claude confidence: ${candidate.claudeConfidence}`;
+  const handleInlineCorrectionSearch = useCallback(
+    async (candidateId) => {
+      const searchQuery = inlineCorrectionInputs[candidateId]?.trim();
+      if (!searchQuery) {
+        return;
+      }
 
-    let borderStyle = styles.gameCardPending;
-    if (candidate.status === 'confirmed') {
-      borderStyle = styles.gameCardConfirmed;
+      const candidate = gameCandidates.find((item) => item.id === candidateId);
+      if (!candidate) {
+        return;
+      }
+
+      // Set searching state
+      setInlineCorrectionSearching((prev) => ({
+        ...prev,
+        [candidateId]: true,
+      }));
+
+      try {
+        if (__DEV__) {
+          console.log('[Inline Correction] Searching for:', searchQuery);
+        }
+
+        const matches = await searchGamesByName(searchQuery);
+
+        if (!matches || matches.length === 0) {
+          Alert.alert(
+            'No matches found',
+            `No games found for "${searchQuery}". Try a different spelling or search term.`,
+            [{ text: 'OK' }]
+          );
+          setInlineCorrectionSearching((prev) => ({
+            ...prev,
+            [candidateId]: false,
+          }));
+          return;
+        }
+
+        // Take the first match
+        const selectedMatch = matches[0];
+        let details = null;
+
+        try {
+          if (selectedMatch.id) {
+            details = await getGameDetails(selectedMatch.id);
+          }
+        } catch (detailError) {
+          console.warn('[Inline Correction] Detail fetch failed:', detailError);
+        }
+
+        // Update the candidate with the found game
+        setGameCandidates((prev) =>
+          prev.map((c) => {
+            if (c.id === candidateId) {
+              return {
+                ...c,
+                claudeTitle: details?.name || selectedMatch.name || searchQuery,
+                bggStatus: 'matched',
+                bggData: {
+                  id: selectedMatch.id,
+                  name: details?.name || selectedMatch.name || searchQuery,
+                  thumbnail: details?.thumbnail || selectedMatch.thumbnail || null,
+                  image: details?.image || selectedMatch.image || null,
+                  yearPublished: details?.yearPublished || selectedMatch.yearPublished || '',
+                },
+                bggErrorMessage: null,
+                searchedTitle: null, // Clear searched title since we found a match
+                // Preserve styling if it exists
+                styling: c.styling || null,
+              };
+            }
+            return c;
+          })
+        );
+
+        // Clear the input for this candidate
+        setInlineCorrectionInputs((prev) => {
+          const updated = { ...prev };
+          delete updated[candidateId];
+          return updated;
+        });
+      } catch (searchError) {
+        console.error('[Inline Correction] Search failed:', searchError);
+        Alert.alert(
+          'Search failed',
+          'Something went wrong while searching. Please try again.',
+          [{ text: 'OK' }]
+        );
+      } finally {
+        setInlineCorrectionSearching((prev) => ({
+          ...prev,
+          [candidateId]: false,
+        }));
+      }
+    },
+    [gameCandidates, inlineCorrectionInputs]
+  );
+
+  const renderCandidateCard = (candidate) => {
+    // Defensive checks to prevent crashes
+    if (!candidate || !candidate.id) {
+      console.warn('[ClaudeGameIdentifier] Invalid candidate:', candidate);
+      return null;
     }
 
-    return (
-      <View key={candidate.id} style={[styles.gameCard, borderStyle]}>
-        {/* Red X in upper right for pending cards */}
-        {candidate.status !== 'confirmed' ? (
-          <Pressable
-            style={styles.cardDeleteButton}
-            onPress={() => handleRejectCandidate(candidate.id)}
-            accessibilityRole="button"
-            accessibilityLabel={`Remove ${title}`}
-          >
-            <PulsingControl
-              type="reject"
-              disabled={false}
-              onPress={() => handleRejectCandidate(candidate.id)}
-              size="small"
-            />
-          </Pressable>
-        ) : null}
+    // Simplified render for loading/idle state to prevent crashes
+    // Avoids PulsingControl and complex nested structures during loading
+    // Also handles 'idle' state (before BGG fetch starts) to avoid showing placeholder thumbnail
+    if (candidate.bggStatus === 'loading' || candidate.bggStatus === 'idle') {
+      try {
+        const title = candidate.bggData?.name || candidate.claudeTitle || 'Unknown Game';
+        
+        return (
+          <View key={candidate.id} style={[styles.gameCard, styles.gameCardPending]}>
+            {/* Game info - no thumbnail placeholder to save space */}
+            <View style={[styles.gameBody, { paddingVertical: 12 }]}>
+              <Text style={[styles.gameTitle, { fontSize: 16, marginBottom: 8 }]} numberOfLines={3}>{title}</Text>
+              <Text style={styles.gameSubtitle}>Fetching BGG data…</Text>
+            </View>
+            
+            {/* No controls during loading - they'll appear after BGG data loads */}
+          </View>
+        );
+      } catch (minimalError) {
+        console.error('[ClaudeGameIdentifier] Error in loading state render:', minimalError);
+        // Fallback
+        return (
+          <View key={candidate.id} style={styles.gameCard}>
+            <Text style={styles.gameTitle}>Loading game...</Text>
+          </View>
+        );
+      }
+    }
 
-        {/* Delete button for confirmed cards */}
-        {candidate.status === 'confirmed' ? (
+    // Additional safety check: if bggStatus is undefined or invalid, show error state
+    if (!candidate.bggStatus || (candidate.bggStatus !== 'matched' && candidate.bggStatus !== 'no_match' && candidate.bggStatus !== 'error')) {
+      if (__DEV__) {
+        console.warn('[ClaudeGameIdentifier] Invalid bggStatus:', candidate.bggStatus, 'for candidate:', candidate.id);
+      }
+      // Force to error state to show something
+      return (
+        <View key={candidate.id} style={[styles.gameCard, styles.gameCardPending]}>
+          <View style={[styles.gameBody, { paddingVertical: 12 }]}>
+            <Text style={[styles.gameTitle, { fontSize: 16, marginBottom: 8 }]} numberOfLines={3}>
+              {candidate.bggData?.name || candidate.claudeTitle || 'Unknown Game'}
+            </Text>
+            <Text style={styles.gameSubtitle}>Error loading game data</Text>
+          </View>
+        </View>
+      );
+    }
+
+    try {
+      const title = candidate.bggData?.name || candidate.claudeTitle || 'Unknown Game';
+      const subtitle = candidate.bggData?.yearPublished
+        ? `${candidate.bggData.yearPublished} · Claude confidence: ${candidate.claudeConfidence || 'unknown'}`
+        : `Claude confidence: ${candidate.claudeConfidence || 'unknown'}`;
+
+      let borderStyle = styles.gameCardPending;
+      if (candidate.status === 'confirmed') {
+        borderStyle = styles.gameCardConfirmed;
+      }
+
+      // Safe fallback for first character
+      const firstChar = title && typeof title === 'string' && title.length > 0 ? title.charAt(0).toUpperCase() : '?';
+      
+      let deleteButton = null;
+      if (candidate.status !== 'confirmed') {
+        try {
+          deleteButton = (
+            <Pressable
+              style={styles.cardDeleteButton}
+              onPress={() => handleRejectCandidate(candidate.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${title}`}
+            >
+              <PulsingControl
+                type="reject"
+                disabled={false}
+                onPress={() => handleRejectCandidate(candidate.id)}
+                size="small"
+              />
+            </Pressable>
+          );
+        } catch (deleteButtonError) {
+          console.error('[ClaudeGameIdentifier] Error rendering delete button:', deleteButtonError);
+          // Continue without delete button
+        }
+      }
+
+      let confirmedDeleteButton = null;
+      if (candidate.status === 'confirmed') {
+        confirmedDeleteButton = (
           <Pressable
             style={styles.confirmedDeleteButton}
             onPress={() => handleRemoveConfirmedCandidate(candidate.id)}
@@ -895,57 +1416,140 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
           >
             <Text style={styles.confirmedDeleteIcon}>✕</Text>
           </Pressable>
-        ) : null}
+        );
+      }
+      const mainView = (
+        <View key={candidate.id} style={[styles.gameCard, borderStyle]}>
+          {deleteButton}
+          {confirmedDeleteButton}
 
-        <View style={styles.gameThumbnailWrapper}>
-          {candidate.bggStatus === 'loading' && !candidate.bggData?.thumbnail ? (
-            <View style={styles.gameThumbnailPlaceholder}>
-              <ActivityIndicator size="small" color="#4a90e2" />
-              <Text style={styles.thumbnailLoadingText}>Fetching BGG data…</Text>
-            </View>
-          ) : candidate.bggData?.thumbnail ? (
-            <Image source={{ uri: candidate.bggData.thumbnail }} style={styles.gameThumbnail} />
-          ) : (
-            <View style={styles.gameThumbnailPlaceholder}>
-              <Text style={styles.thumbnailFallbackText}>{title.charAt(0)}</Text>
-            </View>
-          )}
-        </View>
+          <View style={styles.gameThumbnailWrapper}>
+            {candidate.bggData?.thumbnail && typeof candidate.bggData.thumbnail === 'string' ? (
+              <Image 
+                source={{ uri: candidate.bggData.thumbnail }} 
+                style={styles.gameThumbnail}
+                onError={(error) => {
+                  console.warn('[ClaudeGameIdentifier] Image load error:', error);
+                }}
+              />
+            ) : (
+              <View style={styles.gameThumbnailPlaceholder}>
+                <Text style={styles.thumbnailFallbackText}>{firstChar}</Text>
+              </View>
+            )}
+          </View>
 
-        <View style={styles.gameBody}>
-          <Text style={styles.gameTitle} numberOfLines={2}>
-            {title}
-          </Text>
-          <Text style={styles.gameSubtitle} numberOfLines={2}>
-            {subtitle}
-          </Text>
-          {candidate.bggStatus === 'no_match' || candidate.bggStatus === 'error' ? (
-            <Text style={styles.gameStatusMessage}>{candidate.bggErrorMessage}</Text>
+          <View style={styles.gameBody}>
+            <Text style={styles.gameTitle} numberOfLines={2}>
+              {title}
+            </Text>
+            <Text style={styles.gameSubtitle} numberOfLines={2}>
+              {subtitle}
+            </Text>
+            {candidate.bggStatus === 'no_match' || candidate.bggStatus === 'error' ? (
+              <View style={styles.gameStatusContainer}>
+                <Text style={styles.gameStatusMessage}>{candidate.bggErrorMessage || 'Error loading data'}</Text>
+                {candidate.bggStatus === 'no_match' && (
+                  <View style={styles.inlineCorrectionContainer}>
+                    <Text style={styles.inlineCorrectionLabel}>Correct game title:</Text>
+                    <View style={styles.inlineCorrectionInputRow}>
+                      <TextInput
+                        style={styles.inlineCorrectionInput}
+                        value={inlineCorrectionInputs[candidate.id] || ''}
+                        onChangeText={(text) => {
+                          setInlineCorrectionInputs((prev) => ({
+                            ...prev,
+                            [candidate.id]: text,
+                          }));
+                        }}
+                        placeholder="Type correct game name"
+                        placeholderTextColor="#999"
+                        autoCapitalize="words"
+                        returnKeyType="search"
+                        onSubmitEditing={() => handleInlineCorrectionSearch(candidate.id)}
+                      />
+                      <Pressable
+                        style={[
+                          styles.inlineCorrectionSearchButton,
+                          (!inlineCorrectionInputs[candidate.id]?.trim() || inlineCorrectionSearching[candidate.id]) && styles.inlineCorrectionSearchButtonDisabled,
+                        ]}
+                        onPress={() => handleInlineCorrectionSearch(candidate.id)}
+                        disabled={!inlineCorrectionInputs[candidate.id]?.trim() || inlineCorrectionSearching[candidate.id]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Search for game"
+                      >
+                        {inlineCorrectionSearching[candidate.id] ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Text style={styles.inlineCorrectionSearchButtonText}>Search</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+              </View>
+            ) : null}
+          </View>
+
+          {candidate.status !== 'confirmed' ? (
+            <View style={styles.controlRow}>
+              {(() => {
+                try {
+                  return (
+                    <>
+                      <PulsingControl
+                        type="confirm"
+                        disabled={candidate.status === 'confirmed'}
+                        onPress={() => handleConfirmCandidate(candidate.id)}
+                      />
+                      <PulsingControl
+                        type="edit"
+                        disabled={false}
+                        onPress={() => handleViewSimilarGames(candidate.id)}
+                      />
+                    </>
+                  );
+                } catch (controlError) {
+                  console.error('[ClaudeGameIdentifier] Error rendering controls:', controlError);
+                  // Fallback to simple buttons without animation
+                  return (
+                    <>
+                      <Pressable
+                        style={[styles.simpleButton, { backgroundColor: '#2ecc71' }]}
+                        onPress={() => handleConfirmCandidate(candidate.id)}
+                      >
+                        <Text style={styles.simpleButtonText}>✓</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.simpleButton, { backgroundColor: '#4a90e2' }]}
+                        onPress={() => handleViewSimilarGames(candidate.id)}
+                      >
+                        <Text style={styles.simpleButtonText}>✎</Text>
+                      </Pressable>
+                    </>
+                  );
+                }
+              })()}
+            </View>
+          ) : null}
+
+          {candidate.status === 'confirmed' ? (
+            <View style={[styles.statusBadge, styles.statusBadgeConfirmed]}>
+              <Text style={styles.statusBadgeText}>Confirmed</Text>
+            </View>
           ) : null}
         </View>
-
-        {candidate.status !== 'confirmed' ? (
-          <View style={styles.controlRow}>
-            <PulsingControl
-              type="confirm"
-              disabled={candidate.status === 'confirmed'}
-              onPress={() => handleConfirmCandidate(candidate.id)}
-            />
-            <PulsingControl
-              type="edit"
-              disabled={false}
-              onPress={() => handleViewSimilarGames(candidate.id)}
-            />
-          </View>
-        ) : null}
-
-        {candidate.status === 'confirmed' ? (
-          <View style={[styles.statusBadge, styles.statusBadgeConfirmed]}>
-            <Text style={styles.statusBadgeText}>Confirmed</Text>
-          </View>
-        ) : null}
-      </View>
-    );
+      );
+      return mainView;
+    } catch (error) {
+      console.error('[ClaudeGameIdentifier] Error rendering candidate card:', error, candidate);
+      // Return a minimal fallback card to prevent crash
+      return (
+        <View key={candidate?.id || 'error'} style={[styles.gameCard, styles.gameCardPending]}>
+          <Text style={styles.gameTitle}>Error loading game</Text>
+        </View>
+      );
+    }
   };
 
   if (!permission) {
@@ -977,6 +1581,206 @@ const ClaudeGameIdentifier = ({ onAddToCollection, onRemoveFromCollection, onDon
     );
   }
 
+  // Camera Modal - Just camera and capture button
+  const renderCameraModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={false}
+      visible={showCameraModal}
+      onRequestClose={onCameraModalClose}
+    >
+      <View style={styles.cameraModalContainer}>
+        <View style={styles.cameraModalHeader}>
+          <Pressable onPress={onCameraModalClose} style={styles.cameraModalCloseButton}>
+            <Text style={styles.cameraModalCloseText}>✕</Text>
+          </Pressable>
+        </View>
+        <View style={styles.cameraModalContent}>
+          {!permission?.granted ? (
+            <View style={styles.centered}>
+              <Text style={styles.permissionTitle}>Camera access is required</Text>
+              <Text style={styles.permissionText}>
+                Enable camera permissions in your device settings to identify board games from photos.
+              </Text>
+              <Button
+                label="Grant Permission"
+                onPress={() =>
+                  requestPermission().catch((permError) => {
+                    console.error('Camera permission request failed:', permError);
+                  })
+                }
+                style={styles.permissionButton}
+              />
+            </View>
+          ) : (
+            <>
+              <CameraView
+                ref={cameraRef}
+                style={styles.cameraModal}
+                facing="back"
+                mode="picture"
+                animateShutter={false}
+                onCameraReady={() => setCameraReady(true)}
+              />
+              <View style={styles.cameraModalFooter}>
+                <Button 
+                  label="Capture Photo" 
+                  onPress={handleCapturePhoto} 
+                  style={styles.captureButtonModal}
+                  disabled={!cameraReady}
+                />
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Results Modal - Shows identified games
+  const renderResultsModal = () => (
+    <Modal
+      animationType="slide"
+      transparent
+      visible={showResultsModal}
+      onRequestClose={onResultsModalClose}
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.resultsModalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Identified Games</Text>
+            <Pressable onPress={onResultsModalClose} accessibilityRole="button">
+              <Text style={styles.modalCloseLink}>Close</Text>
+            </Pressable>
+          </View>
+
+          {isProcessing && (
+            <View style={styles.processingRow}>
+              <ActivityIndicator size="small" color="#4a90e2" />
+              <Text style={styles.processingText}>Claude is analysing your photo…</Text>
+            </View>
+          )}
+
+          {error && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {comments && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Claude's Notes</Text>
+              <Text style={styles.comments}>{comments}</Text>
+            </View>
+          )}
+
+          {gameCandidates.length > 0 ? (
+            <ScrollView style={styles.resultsScrollView}>
+              <Text style={styles.resultsInstructions}>
+                Tap ✓ to confirm or ✎ to edit wrong suggestions.
+              </Text>
+              <View style={styles.gameGrid}>
+                {gameCandidates.map((candidate) => {
+                  try {
+                    return renderCandidateCard(candidate);
+                  } catch (mapError) {
+                    console.error('[ClaudeGameIdentifier] Error mapping candidate:', mapError, candidate);
+                    return null;
+                  }
+                }).filter(Boolean)}
+              </View>
+            </ScrollView>
+          ) : isProcessing ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color="#4a90e2" />
+              <Text style={styles.centeredText}>Waiting for Claude's results…</Text>
+            </View>
+          ) : null}
+
+          {gameCandidates.some((c) => c.status === 'confirmed') && (
+            <View style={styles.resultsModalActions}>
+              <Button
+                label="Add to Collection"
+                onPress={() => {
+                  if (onDone) {
+                    onDone();
+                  }
+                  if (onResultsModalClose) {
+                    onResultsModalClose();
+                  }
+                }}
+                style={styles.doneButton}
+              />
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // If using modals, render them
+  if (showCameraModal || showResultsModal) {
+    return (
+      <>
+        {renderCameraModal()}
+        {renderResultsModal()}
+        {/* Correction modal for editing games */}
+        <Modal
+          animationType="slide"
+          transparent
+          visible={isCorrectionModalVisible}
+          onRequestClose={closeCorrectionModal}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Help us fix that title</Text>
+                <Pressable onPress={closeCorrectionModal} accessibilityRole="button">
+                  <Text style={styles.modalCloseLink}>Close</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.modalDescription}>
+                Say or type the correct game name and we will search BoardGameGeek for a match.
+              </Text>
+              <TextInput
+                value={correctionQuery}
+                onChangeText={setCorrectionQuery}
+                placeholder="Correct game title"
+                style={styles.modalInput}
+              />
+              <View style={styles.modalActions}>
+                <Button
+                  label={isCorrectionSearching ? 'Searching…' : 'Search BoardGameGeek'}
+                  onPress={() => handleCorrectionSearch()}
+                  disabled={isCorrectionSearching || !correctionQuery.trim()}
+                />
+              </View>
+              {correctionError ? <Text style={styles.correctionError}>{correctionError}</Text> : null}
+              {isCorrectionSearching ? (
+                <View style={styles.modalLoadingRow}>
+                  <ActivityIndicator size="small" color="#4a90e2" />
+                  <Text style={styles.modalLoadingText}>Fetching suggestions…</Text>
+                </View>
+              ) : null}
+              {correctionSuggestions.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
+                  {correctionSuggestions.map((suggestion) => (
+                    <CorrectionSuggestionCard
+                      key={suggestion.id}
+                      suggestion={suggestion}
+                      onSelect={handleSuggestionSelect}
+                    />
+                  ))}
+                </ScrollView>
+              ) : null}
+            </View>
+          </View>
+        </Modal>
+      </>
+    );
+  }
+
+  // Original full-screen view (fallback)
   return (
     <View style={styles.flex}>
     <ScrollView contentContainerStyle={styles.container}>
@@ -1295,9 +2099,9 @@ const styles = StyleSheet.create({
   gameCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 12,
+    padding: 8, // Reduced padding for more compact cards
     marginHorizontal: 6,
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
     flexBasis: '47%',
     maxWidth: '47%',
     borderWidth: 1,
@@ -1318,9 +2122,9 @@ const styles = StyleSheet.create({
   gameThumbnailWrapper: {
     borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 6, // Reduced margin
     backgroundColor: '#f5f5f5',
-    height: 120,
+    height: 60, // Reduced to half height
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1343,7 +2147,7 @@ const styles = StyleSheet.create({
     color: '#4a90e2',
   },
   thumbnailFallbackText: {
-    fontSize: 28,
+    fontSize: 20, // Reduced font size for smaller card
     fontWeight: '700',
     color: '#c0c4cc',
   },
@@ -1351,19 +2155,65 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   gameTitle: {
-    fontSize: 15,
+    fontSize: 14, // Slightly smaller
     fontWeight: '600',
     color: '#2a2a2a',
-    marginBottom: 4,
+    marginBottom: 3, // Reduced margin
   },
   gameSubtitle: {
-    fontSize: 13,
+    fontSize: 12, // Slightly smaller
     color: '#777',
-    marginBottom: 6,
+    marginBottom: 4, // Reduced margin
+  },
+  gameStatusContainer: {
+    marginTop: 8,
+    gap: 8,
   },
   gameStatusMessage: {
     fontSize: 12,
     color: '#c0392b',
+  },
+  inlineCorrectionContainer: {
+    marginTop: 12,
+    gap: 8,
+  },
+  inlineCorrectionLabel: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '500',
+  },
+  inlineCorrectionInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  inlineCorrectionInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    backgroundColor: '#fff',
+    color: '#333',
+  },
+  inlineCorrectionSearchButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#4a90e2',
+    borderRadius: 8,
+    minWidth: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineCorrectionSearchButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  inlineCorrectionSearchButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   cardDeleteButton: {
     position: 'absolute',
@@ -1381,6 +2231,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
     gap: 8,
+  },
+  simpleButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  simpleButtonText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
   controlWrapper: {
     flex: 1,
@@ -1579,6 +2441,79 @@ const styles = StyleSheet.create({
   suggestionYear: {
     fontSize: 12,
     color: '#777',
+  },
+  // Camera Modal Styles
+  cameraModalContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  cameraModalHeader: {
+    paddingTop: 50,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 10,
+  },
+  cameraModalCloseButton: {
+    alignSelf: 'flex-end',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraModalCloseText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  cameraModalContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cameraModal: {
+    width: '100%',
+    flex: 1,
+  },
+  cameraModalFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 20,
+    paddingBottom: 40,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    alignItems: 'center',
+  },
+  captureButtonModal: {
+    width: '100%',
+    maxWidth: 300,
+  },
+  // Results Modal Styles
+  resultsModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '90%',
+    width: '95%',
+    alignSelf: 'center',
+  },
+  resultsScrollView: {
+    maxHeight: 400,
+  },
+  resultsInstructions: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  resultsModalActions: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
   },
 });
 

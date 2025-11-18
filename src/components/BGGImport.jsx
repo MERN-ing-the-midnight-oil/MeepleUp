@@ -20,40 +20,8 @@ const BGGImport = ({ onImportComplete }) => {
   const [importedGames, setImportedGames] = useState([]);
 
   const handleFetchCollection = async () => {
-    if (!bggUsername.trim()) {
-      setError('Please enter a BGG username');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setCollection(null);
-
-    try {
-      const games = await fetchBGGCollection(bggUsername, {
-        own: 1,
-        stats: 1,
-        subtype: 'boardgame',
-      });
-
-      if (games.length === 0) {
-        setError('No games found in your BGG collection. Make sure your collection is set to public.');
-        setLoading(false);
-        return;
-      }
-
-      setCollection(games);
-      
-      // Save BGG username to user profile
-      if (userIdentifier) {
-        updateUser({ bggUsername: bggUsername.trim() });
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to fetch BGG collection. Please try again.');
-      console.error('BGG collection fetch error:', err);
-    } finally {
-      setLoading(false);
-    }
+    // BGG API import is no longer available
+    setError('BGG collection import is no longer available. Please add games manually using the camera feature or by searching for games.');
   };
 
   const handleImportGames = async () => {

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 const Navigation = ({ navigationRef, currentRouteName }) => {
-  const { user, logout, isAuthenticated, isEmailVerified } = useAuth();
+  const { isAuthenticated, isEmailVerified } = useAuth();
 
   if (!isAuthenticated || !isEmailVerified) {
     return null;
@@ -47,11 +47,6 @@ const Navigation = ({ navigationRef, currentRouteName }) => {
               </Text>
             </Pressable>
           ))}
-          {user && (
-            <Pressable onPress={logout} style={styles.logoutButton}>
-              <Text style={styles.logoutText}>Logout</Text>
-            </Pressable>
-          )}
         </View>
       </View>
     </View>
@@ -94,18 +89,6 @@ const styles = StyleSheet.create({
   navLinkTextActive: {
     color: '#4a90e2',
     fontWeight: '600',
-  },
-  logoutButton: {
-    marginLeft: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#4a90e2',
-    borderRadius: 4,
-  },
-  logoutText: {
-    color: '#4a90e2',
-    fontSize: 14,
   },
 });
 

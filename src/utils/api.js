@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { XMLParser } from 'fast-xml-parser';
 import { API_CONFIG } from '../config/api';
 import * as bggLocalDB from './bggLocalDB';
 
@@ -324,59 +323,144 @@ export const searchGameByBarcode = async (barcode) => {
 };
 
 /**
- * Search for games by name using local CSV database
- * Works completely offline - no server or API needed!
+ * Search for games by name
+ * Priority: Firebase Firestore -> Local DB
+ * Returns empty array if no results found
  */
 export const searchGamesByName = async (query) => {
   try {
     if (__DEV__) {
-      console.log('[BGG Local] Searching local database:', query);
+      console.log('[Game Search] Searching for:', query);
     }
 
-    // Use local database directly
-    const results = await bggLocalDB.searchGamesByName(query, 10);
-    
+    // Try Firebase Firestore first (if available)
+    try {
+      const { searchGamesByName: searchFirestore } = await import('../services/gameDatabase');
+      
+      // Add timeout wrapper in case Firestore hangs
+      const firestorePromise = searchFirestore(query, 10);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Firestore search timeout')), 6000);
+      });
+      
+      const firestoreResults = await Promise.race([firestorePromise, timeoutPromise]);
+      
+      if (__DEV__) {
+        console.log('[Firestore] Query completed, results:', firestoreResults ? firestoreResults.length : 'null');
+      }
+      
+      if (firestoreResults && firestoreResults.length > 0) {
+        if (__DEV__) {
+          console.log(`[Firestore] Found ${firestoreResults.length} games`);
+        }
+        // Format response
+        const formatted = firestoreResults.map(game => ({
+          id: game.id,
+          name: game.name,
+          yearPublished: game.yearPublished || '',
+        }));
+        if (__DEV__) {
+          console.log('[Firestore] Returning formatted results:', formatted.length);
+        }
+        return formatted;
+      } else {
+        // Firestore returned empty array - return it explicitly
+        if (__DEV__) {
+          console.log('[Firestore] No results found, returning empty array');
+        }
+        return [];
+      }
+    } catch (firestoreError) {
+      if (__DEV__) {
+        console.log('[Firestore] Not available or error, trying local DB:', firestoreError.message);
+      }
+      // Don't throw - fall through to local DB
+    }
+
+    // Fallback: Try local database (if still bundled)
+    try {
+      const localResults = await bggLocalDB.searchGamesByName(query, 10);
+      if (localResults && localResults.length > 0) {
+        if (__DEV__) {
+          console.log(`[Local DB] Found ${localResults.length} games`);
+        }
+        return bggLocalDB.parseBGGSearchResponse(localResults);
+      }
+    } catch (localError) {
+      if (__DEV__) {
+        console.log('[Local DB] Not available:', localError.message);
+      }
+    }
+
+    // No results found
     if (__DEV__) {
-      console.log(`[BGG Local] Found ${results.length} games`);
+      console.log('[Game Search] No results found, returning empty array');
     }
-
-    // Format to match BGG API response format (for compatibility)
-    return bggLocalDB.parseBGGSearchResponse(results);
+    return [];
   } catch (error) {
-    console.error('[BGG Local] Search error:', error);
-    throw error;
+    console.error('[Game Search] Error:', error);
+    return [];
   }
 };
 
 /**
- * Get detailed game information by BGG ID using local CSV database
- * Works completely offline - no server or API needed!
+ * Get detailed game information by BGG ID
+ * Priority: Firebase Firestore -> Local DB
  */
 export const getGameDetails = async (gameId) => {
   try {
     if (__DEV__) {
-      console.log('[BGG Local] Fetching game details from local database:', gameId);
+      console.log('[Game Details] Fetching game:', gameId);
     }
 
-    // Use local database directly
-    const game = await bggLocalDB.getGameById(gameId);
-    
-    if (!game) {
-      if (__DEV__) {
-        console.warn('[BGG Local] Game not found:', gameId);
+    // Try Firebase Firestore first
+    try {
+      const { getGameById: getFirestoreGame } = await import('../services/gameDatabase');
+      const firestoreGame = await getFirestoreGame(gameId);
+      
+      if (firestoreGame) {
+        if (__DEV__) {
+          console.log(`[Firestore] Found game: ${firestoreGame.name}`);
+        }
+        // Format to match BGG API response format
+        return {
+          id: firestoreGame.id,
+          name: firestoreGame.name,
+          yearPublished: firestoreGame.yearPublished || '',
+          rank: firestoreGame.rank || '',
+          bayesAverage: firestoreGame.bayesAverage || '',
+          average: firestoreGame.average || '',
+          usersRated: firestoreGame.usersRated || '',
+          thumbnail: null,
+          image: null,
+        };
       }
-      return null;
+    } catch (firestoreError) {
+      if (__DEV__) {
+        console.log('[Firestore] Not available, trying local DB');
+      }
+    }
+
+    // Fallback: Local database
+    try {
+      const localGame = await bggLocalDB.getGameById(gameId);
+      if (localGame) {
+        if (__DEV__) {
+          console.log(`[Local DB] Found game: ${localGame.name}`);
+        }
+        return bggLocalDB.parseBGGGameDetails(localGame);
+      }
+    } catch (localError) {
+      // Local DB not available
     }
 
     if (__DEV__) {
-      console.log(`[BGG Local] Found game: ${game.name}`);
+      console.warn('[Game Details] Game not found:', gameId);
     }
-
-    // Format to match BGG API response format (for compatibility)
-    return bggLocalDB.parseBGGGameDetails(game);
+    return null;
   } catch (error) {
-    console.error('[BGG Local] Thing error:', error);
-    throw error;
+    console.error('[Game Details] Error:', error);
+    return null;
   }
 };
 
@@ -400,147 +484,13 @@ export const validateJoinCode = (code) => {
 };
 
 /**
- * Fetch BGG collection for a user with retry logic for 202 status
- * @param {string} username - BGG username
- * @param {Object} options - Options for the collection request
- * @param {number} maxRetries - Maximum number of retries for 202 status
- * @param {number} retryDelay - Delay in milliseconds between retries
- * @returns {Promise<Array>} Array of game objects from the collection
+ * Fetch BGG collection for a user
+ * NOTE: BGG API is no longer used. This function is deprecated.
+ * @deprecated BGG API integration has been removed
  */
-export const fetchBGGCollection = async (
-  username,
-  options = { own: 1, stats: 1, subtype: 'boardgame' },
-  maxRetries = 5,
-  retryDelay = 2000
-) => {
-  if (!username || !username.trim()) {
-    throw new Error('BGG username is required');
-  }
-
-  const params = new URLSearchParams({
-    username: username.trim(),
-    ...options,
-  });
-
-  const url = `${BGG_API_BASE}/collection?${params.toString()}`;
-
-  let retries = 0;
-  
-  while (retries <= maxRetries) {
-    try {
-      const response = await axios.get(url, {
-        validateStatus: (status) => status === 200 || status === 202,
-      });
-
-      // If 202, the collection is being processed - wait and retry
-      if (response.status === 202) {
-        if (retries < maxRetries) {
-          retries++;
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          continue;
-        } else {
-          throw new Error('BGG collection is still being processed. Please try again in a few moments.');
-        }
-      }
-
-      // Parse the XML response
-      return parseBGGCollectionResponse(response.data);
-    } catch (error) {
-      if (error.response && error.response.status === 202) {
-        // Handle 202 in catch block too
-        if (retries < maxRetries) {
-          retries++;
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          continue;
-        }
-      }
-      
-      if (error.response && error.response.status === 404) {
-        throw new Error(`BGG user "${username}" not found. Please check the username and try again.`);
-      }
-      
-      throw error;
-    }
-  }
+export const fetchBGGCollection = async () => {
+  throw new Error('BGG collection import is no longer available. Please add games manually or use the camera feature.');
 };
 
-const xmlParserOptions = {
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  textNodeName: '#text',
-};
-
-const ensureArray = (value) => {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-};
-
-const getAttr = (node, attr) => {
-  if (!node) return undefined;
-  if (Array.isArray(node)) {
-    return getAttr(node[0], attr);
-  }
-  if (typeof node !== 'object') return undefined;
-  return node[`@_${attr}`];
-};
-
-const extractValue = (node) => {
-  if (node == null) {
-    return '';
-  }
-  if (Array.isArray(node)) {
-    return extractValue(node[0]);
-  }
-  if (typeof node === 'object') {
-    if (node['@_value'] != null) {
-      return String(node['@_value']);
-    }
-    if (node['#text'] != null) {
-      return String(node['#text']);
-    }
-  }
-  return String(node);
-};
-
-/**
- * Parse BGG collection XML response
- * Note: Only used by fetchBGGCollection for importing user collections
- * @param {string} xmlData - XML string from BGG API
- * @returns {Array} Array of game objects
- */
-const parseBGGCollectionResponse = (xmlData) => {
-  const parser = new XMLParser(xmlParserOptions);
-  const result = parser.parse(xmlData);
-  const items = ensureArray(result?.items?.item);
-
-  return items.map((item) => {
-    const statusNode = item.status || {};
-    const statsNode = item.stats || {};
-    const ratingNode = statsNode.rating;
-    const averageNode = statsNode.average;
-
-    const userRatingValue = getAttr(ratingNode, 'value') || extractValue(ratingNode);
-    const averageRatingValue = getAttr(averageNode, 'value') || extractValue(averageNode);
-
-    return {
-      bggId: getAttr(item, 'objectid') || '',
-      name: extractValue(item.name),
-      yearPublished: extractValue(item.yearpublished),
-      thumbnail: extractValue(item.thumbnail),
-      image: extractValue(item.image),
-      numplays: parseInt(extractValue(item.numplays) || '0', 10) || 0,
-      status: {
-        own: getAttr(statusNode, 'own') === '1',
-        prevowned: getAttr(statusNode, 'prevowned') === '1',
-        fortrade: getAttr(statusNode, 'fortrade') === '1',
-        want: getAttr(statusNode, 'want') === '1',
-        wanttoplay: getAttr(statusNode, 'wanttoplay') === '1',
-        wanttobuy: getAttr(statusNode, 'wanttobuy') === '1',
-        wishlist: getAttr(statusNode, 'wishlist') === '1',
-      },
-      rating: userRatingValue ? parseFloat(userRatingValue) : null,
-      averageRating: averageRatingValue ? parseFloat(averageRatingValue) : null,
-    };
-  });
-};
+// BGG API XML parsing utilities removed - BGG API is no longer used
 

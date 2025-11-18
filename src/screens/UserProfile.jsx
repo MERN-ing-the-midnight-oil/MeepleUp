@@ -34,6 +34,7 @@ const UserProfile = () => {
     resendVerificationEmail,
     refreshUser,
     isEmailVerified,
+    logout,
   } = useAuth();
   const {
     slots: availabilitySlots,
@@ -825,6 +826,15 @@ const UserProfile = () => {
           style={styles.saveButton}
         />
       </View>
+
+      <View style={styles.form}>
+        <Button
+          label="Logout"
+          onPress={logout}
+          variant="outline"
+          style={styles.logoutButton}
+        />
+      </View>
     </ScrollView>
   );
 };
@@ -1074,6 +1084,10 @@ const styles = StyleSheet.create({
   },
   messageButton: {
     marginBottom: 8,
+  },
+  logoutButton: {
+    marginTop: 8,
+    borderColor: '#d45d5d',
   },
 });
 

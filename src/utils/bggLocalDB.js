@@ -1,74 +1,112 @@
 /**
  * Local BGG Database - Reads from JSON file
  * No server needed - works completely offline!
+ * 
+ * NOTE: The JSON file is large (64MB), so we load it lazily and asynchronously
+ * to avoid crashing the app at startup.
  */
-
-// Import the JSON database directly
-// This will be bundled with the app at build time
-// For React Native/Expo, we'll use require() which works for JSON files
-let gameDatabaseJSON = null;
-try {
-  gameDatabaseJSON = require('../assets/data/boardgames_ranks.json');
-} catch (error) {
-  console.warn('[BGG Local DB] Could not load JSON via require, will try fetch:', error.message);
-}
 
 // Cache for loaded database
 let gameDatabase = null;
-let isLoaded = false;
+let isLoading = false;
+let loadPromise = null;
 
 /**
- * Load the game database from JSON
- * This is a one-time load when the app starts
+ * Lazy require function - only loads the JSON when called, not at module initialization
+ * This prevents the 64MB file from being loaded at app startup
+ */
+function lazyRequireJSON() {
+  // Use a function to delay the require() call until it's actually needed
+  // This prevents the file from being bundled/loaded at module initialization
+  try {
+    return require('../assets/data/boardgames_ranks.json');
+  } catch (error) {
+    console.warn('[BGG Local DB] Could not load JSON via require:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Load the game database from JSON asynchronously
+ * This is a lazy load - only loads when first needed
  */
 async function loadGameDatabase() {
-  if (isLoaded && gameDatabase) {
+  // If already loaded, return cached data
+  if (gameDatabase) {
     return gameDatabase;
   }
 
-  try {
-    let games;
-    
-    // Try require() first (works in Node/bundled environments)
-    if (gameDatabaseJSON) {
-      if (Array.isArray(gameDatabaseJSON)) {
-        games = gameDatabaseJSON;
-      } else if (typeof gameDatabaseJSON === 'object' && gameDatabaseJSON.default) {
-        games = gameDatabaseJSON.default;
+  // If currently loading, wait for the existing load to complete
+  if (isLoading && loadPromise) {
+    return loadPromise;
+  }
+
+  // Start loading
+  isLoading = true;
+  loadPromise = (async () => {
+    try {
+      let games;
+      
+      // Use lazy require - this only loads when the function is called
+      // Wrap in setTimeout to make it truly async and non-blocking
+      const loadedData = await new Promise((resolve) => {
+        // Use setTimeout to defer loading to next event loop tick
+        // This prevents blocking the main thread
+        setTimeout(() => {
+          try {
+            const data = lazyRequireJSON();
+            resolve(data);
+          } catch (error) {
+            resolve(null);
+          }
+        }, 0);
+      });
+      
+      if (loadedData) {
+        if (Array.isArray(loadedData)) {
+          games = loadedData;
+        } else if (typeof loadedData === 'object' && loadedData.default) {
+          games = loadedData.default;
+        } else {
+          games = loadedData;
+        }
       } else {
-        games = gameDatabaseJSON;
+        // Fallback: try fetch for web environments
+        try {
+          const response = await fetch('/assets/data/boardgames_ranks.json');
+          if (!response.ok) {
+            throw new Error(`Failed to fetch: ${response.status}`);
+          }
+          games = await response.json();
+        } catch (fetchError) {
+          console.error('[BGG Local DB] Could not load via require or fetch:', fetchError);
+          return [];
+        }
       }
-    } else {
-      // Fallback: try to fetch from assets (for web/Expo)
-      try {
-        // For Expo, assets are in different locations - adjust path as needed
-        const response = await fetch('https://your-cdn-or-assets/boardgames_ranks.json');
-        games = await response.json();
-      } catch (fetchError) {
-        console.error('[BGG Local DB] Could not load game database via fetch:', fetchError);
+      
+      // Ensure we have an array
+      if (!Array.isArray(games)) {
+        console.error('[BGG Local DB] Invalid game database format - expected array');
         return [];
       }
-    }
-    
-    // Ensure we have an array
-    if (!Array.isArray(games)) {
-      console.error('[BGG Local DB] Invalid game database format - expected array');
+      
+      gameDatabase = games;
+      isLoading = false;
+      
+      if (__DEV__) {
+        console.log(`[BGG Local DB] Loaded ${games.length} games from JSON`);
+      }
+      
+      return games;
+    } catch (error) {
+      isLoading = false;
+      console.error('[BGG Local DB] Error loading game database:', error);
+      // Fallback: return empty array
       return [];
     }
-    
-    gameDatabase = games;
-    isLoaded = true;
-    
-    if (__DEV__) {
-      console.log(`[BGG Local DB] Loaded ${games.length} games from JSON`);
-    }
-    
-    return games;
-  } catch (error) {
-    console.error('[BGG Local DB] Error loading game database:', error);
-    // Fallback: return empty array
-    return [];
-  }
+  })();
+
+  return loadPromise;
 }
 
 /**

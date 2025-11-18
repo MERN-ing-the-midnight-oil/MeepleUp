@@ -8,10 +8,32 @@ Use the exact published English titles whenever possible.
 If you see multiple copies or editions, list them separately and note the edition.
 If you are uncertain about a title, mark the confidence as "low".
 If no games are recognisable, return an empty list.
+
+IMPORTANT: Most board game boxes in photos will be viewed from the side (spine view), showing the narrow edge of the box.
+When analyzing styling, focus on the side/spine of the box where the title is typically displayed.
+
+For each game, analyze the visual design of the game box side/spine and extract styling information:
+1. Background color: The main background color of the box side/spine (as hex code, e.g., "#FF5733"). This is the dominant solid color behind the title text.
+2. Title text color: The color of the main title text on the box side/spine (as hex code, e.g., "#FFFFFF" or "#000000").
+3. Font identification: Identify the font used for the title text. If you can identify a specific font name (e.g., "Helvetica", "Times New Roman", "Futura", "Garamond"), provide it. If the font is custom or unidentifiable, provide the name of the most similar standard font (e.g., "Arial", "Georgia", "Impact", "Courier"). Common font categories include:
+   - Sans-serif: Arial, Helvetica, Futura, Gill Sans, Verdana, etc.
+   - Serif: Times New Roman, Georgia, Garamond, Baskerville, etc.
+   - Display/Decorative: Impact, Bebas Neue, Oswald, etc.
+   - Monospace: Courier, Monaco, Consolas, etc.
+
 Respond strictly with valid JSON that matches this schema:
 {
   "games": [
-    {"title": "string", "confidence": "high|medium|low", "notes": "optional string"}
+    {
+      "title": "string",
+      "confidence": "high|medium|low",
+      "notes": "optional string",
+      "styling": {
+        "backgroundColor": "hex color code (e.g., #FF5733) - main background color of box side",
+        "titleTextColor": "hex color code (e.g., #FFFFFF) - color of the title text",
+        "fontName": "string - font name (e.g., 'Helvetica', 'Times New Roman', 'Impact') or most similar standard font"
+      }
+    }
   ],
   "comments": "optional string"
 }

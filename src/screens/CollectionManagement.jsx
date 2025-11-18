@@ -5,7 +5,7 @@ import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import GameCard from '../components/GameCard';
-import { getGameById } from '../utils/bggLocalDB';
+import { getGameById } from '../services/gameDatabase';
 import { getStarRating } from '../utils/gameBadges';
 // Note: BarcodeScanner and BGGImport will need to be converted separately
 
@@ -14,10 +14,19 @@ const CollectionManagement = () => {
   const { getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'view', 'add', 'import'
   const [sortBy, setSortBy] = useState('rating'); // 'rating', 'category', 'title'
+  const [showCameraModal, setShowCameraModal] = useState(false);
+  const [showResultsModal, setShowResultsModal] = useState(false);
   
   const userIdentifier = user?.uid || user?.id;
   const rawCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
   const [sortedCollection, setSortedCollection] = useState([]);
+
+  // Reset to menu when collection becomes empty while on view screen
+  useEffect(() => {
+    if (rawCollection.length === 0 && activeView === 'view') {
+      setActiveView('menu');
+    }
+  }, [rawCollection.length, activeView]);
 
   // Load BGG data and sort collection
   useEffect(() => {
@@ -84,8 +93,31 @@ const CollectionManagement = () => {
   const handleAddToCollection = (gameData) => {
     if (userIdentifier) {
       addGameToCollection(userIdentifier, gameData);
-      alert(`${gameData.title} added to your collection!`);
+      // Don't show alert for each game - too many alerts
+      // The user will see the games in their collection
     }
+  };
+
+  const handleDoneIdentifying = () => {
+    // After identifying games, close results modal and show the collection view
+    setShowResultsModal(false);
+    setActiveView('view');
+  };
+
+  const handleOpenCamera = () => {
+    setShowCameraModal(true);
+  };
+
+  const handleCameraModalClose = () => {
+    setShowCameraModal(false);
+    // Open results modal after camera closes (photo was captured)
+    setTimeout(() => {
+      setShowResultsModal(true);
+    }, 300);
+  };
+
+  const handleResultsModalClose = () => {
+    setShowResultsModal(false);
   };
 
   const handleDeleteGame = useCallback((gameId) => {
@@ -128,13 +160,6 @@ const CollectionManagement = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My Collection</Text>
-        <Text style={styles.subtitle}>
-          {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''} in your collection
-        </Text>
-      </View>
-
       <View style={styles.content}>
         {showMenu && (
           <View style={styles.menuContainer}>
@@ -147,7 +172,7 @@ const CollectionManagement = () => {
               <View style={styles.menuOptionContent}>
                 <Text style={styles.menuOptionIcon}>📚</Text>
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>View my MeepleUp collection</Text>
+                  <Text style={styles.menuOptionTitle}>Manage my games collection</Text>
                   <Text style={styles.menuOptionDescription}>
                     Browse your {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''}
                   </Text>
@@ -158,7 +183,7 @@ const CollectionManagement = () => {
 
             <Pressable
               style={styles.menuOption}
-              onPress={() => setActiveView('add')}
+              onPress={handleOpenCamera}
             >
               <View style={styles.menuOptionContent}>
                 <Text style={styles.menuOptionIcon}>📷</Text>
@@ -269,20 +294,15 @@ const CollectionManagement = () => {
           </View>
         )}
 
-        {activeView === 'add' && (
-          <View style={styles.viewContent}>
-            <View style={styles.viewHeader}>
-              <Pressable
-                style={styles.backButton}
-                onPress={() => setActiveView('menu')}
-              >
-                <Text style={styles.backButtonText}>← Back</Text>
-              </Pressable>
-              <Text style={styles.viewTitle}>Identify Games</Text>
-            </View>
-            <ClaudeGameIdentifier onAddToCollection={handleAddToCollection} />
-          </View>
-        )}
+        {/* Camera and Results Modals */}
+        <ClaudeGameIdentifier 
+          onAddToCollection={handleAddToCollection}
+          onDone={handleDoneIdentifying}
+          showCameraModal={showCameraModal}
+          showResultsModal={showResultsModal}
+          onCameraModalClose={handleCameraModalClose}
+          onResultsModalClose={handleResultsModalClose}
+        />
 
         {activeView === 'import' && (
           <View style={styles.viewContent}>
@@ -318,24 +338,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  header: {
-    padding: 20,
-    paddingTop: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#d45d5d',
-    backgroundColor: '#f3f3f3',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
   },
   menuContainer: {
     paddingVertical: 20,
@@ -488,9 +490,8 @@ const styles = StyleSheet.create({
   },
   gridContainer: {
     paddingBottom: 20,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    // Note: flexWrap is not needed when using numColumns with FlatList
+    // numColumns={2} already handles the grid layout
   },
   cardWrapper: {
     width: '48%',
