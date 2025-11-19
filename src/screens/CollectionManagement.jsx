@@ -139,17 +139,9 @@ const CollectionManagement = () => {
     );
   }, [userIdentifier, removeGameFromCollection]);
 
-  const renderGameCard = useCallback(({ item, index }) => {
-    // Calculate if this is the first item in a row (for 2-column grid)
-    const isLeftColumn = index % 2 === 0;
-    
+  const renderGameCard = useCallback(({ item }) => {
     return (
-      <View 
-        style={[
-          styles.cardWrapper, 
-          isLeftColumn && styles.cardWrapperLeft,
-        ]}
-      >
+      <View style={styles.cardWrapper}>
         <GameCard game={item} onDelete={handleDeleteGame} />
       </View>
     );
@@ -285,8 +277,7 @@ const CollectionManagement = () => {
                 data={sortedCollection}
                 keyExtractor={(item) => item.id}
                 renderItem={renderGameCard}
-                numColumns={2}
-                contentContainerStyle={styles.gridContainer}
+                contentContainerStyle={styles.listContainer}
                 scrollEnabled={true}
                 showsVerticalScrollIndicator={false}
               />
@@ -485,20 +476,12 @@ const styles = StyleSheet.create({
   emptyButton: {
     marginBottom: 12,
   },
-  gridView: {
-    flex: 1,
-  },
-  gridContainer: {
+  listContainer: {
     paddingBottom: 20,
-    // Note: flexWrap is not needed when using numColumns with FlatList
-    // numColumns={2} already handles the grid layout
   },
   cardWrapper: {
-    width: '48%',
+    width: '100%',
     marginBottom: 12,
-  },
-  cardWrapperLeft: {
-    marginRight: '2%',
   },
   gameCard: {
     backgroundColor: '#fff',

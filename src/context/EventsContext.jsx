@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage from '../utils/storage';
 import { useAuth } from './AuthContext';
 
 const EventsContext = createContext();
@@ -169,7 +169,7 @@ export const EventsProvider = ({ children }) => {
   useEffect(() => {
     const loadEvents = async () => {
       try {
-        const storedEvents = await AsyncStorage.getItem(STORAGE_KEY);
+        const storedEvents = await storage.getItem(STORAGE_KEY);
         if (storedEvents) {
           const parsed = JSON.parse(storedEvents);
           const normalized = Array.isArray(parsed)
@@ -214,7 +214,7 @@ export const EventsProvider = ({ children }) => {
           })),
         }));
 
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+        await storage.setItem(STORAGE_KEY, JSON.stringify(serializable));
       } catch (error) {
         console.error('Error saving events:', error);
       }

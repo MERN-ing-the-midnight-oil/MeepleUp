@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage from '../utils/storage';
 import { useAuth } from './AuthContext';
 
 const CollectionsContext = createContext();
@@ -17,11 +17,11 @@ export const CollectionsProvider = ({ children }) => {
   const [collections, setCollections] = useState({}); // { userId: [games] }
   const [loading, setLoading] = useState(false);
 
-  // Load collections from AsyncStorage on mount
+  // Load collections from storage on mount
   useEffect(() => {
     const loadCollections = async () => {
       try {
-        const storedCollections = await AsyncStorage.getItem('meepleup_collections');
+        const storedCollections = await storage.getItem('meepleup_collections');
         if (storedCollections) {
           setCollections(JSON.parse(storedCollections));
         }
@@ -32,11 +32,11 @@ export const CollectionsProvider = ({ children }) => {
     loadCollections();
   }, []);
 
-  // Save collections to AsyncStorage whenever they change
+  // Save collections to storage whenever they change
   useEffect(() => {
     const saveCollections = async () => {
       try {
-        await AsyncStorage.setItem('meepleup_collections', JSON.stringify(collections));
+        await storage.setItem('meepleup_collections', JSON.stringify(collections));
       } catch (error) {
         console.error('Error saving collections:', error);
       }

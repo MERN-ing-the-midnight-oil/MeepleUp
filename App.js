@@ -18,6 +18,7 @@ import UserProfileScreen from './src/screens/UserProfile';
 import EventDiscoveryScreen from './src/screens/EventDiscovery';
 import LoadingSpinner from './src/components/common/LoadingSpinner';
 import Navigation from './src/components/Navigation';
+// Fonts are now loaded on-demand, no need to load all at startup
 
 const Stack = createNativeStackNavigator();
 
@@ -111,6 +112,8 @@ export default function App() {
 function AppContent() {
   const { loading } = useAuth();
 
+  // Show loading screen while auth is loading
+  // Fonts are now loaded on-demand, so no need to wait for them
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -135,6 +138,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
   },
 });
 

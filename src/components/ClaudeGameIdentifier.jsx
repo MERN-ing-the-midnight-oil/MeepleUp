@@ -200,7 +200,13 @@ const ClaudeGameIdentifier = ({
   const [audioClip, setAudioClip] = useState(defaultAudioState);
   const [audioPermissionStatus, setAudioPermissionStatus] = useState(null);
   const [gameCandidates, setGameCandidates] = useState([]);
+  const gameCandidatesRef = useRef([]); // Keep a ref for synchronous access
   const [correctionCandidate, setCorrectionCandidate] = useState(null);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    gameCandidatesRef.current = gameCandidates;
+  }, [gameCandidates]);
   const [isCorrectionModalVisible, setIsCorrectionModalVisible] = useState(false);
   const [correctionQuery, setCorrectionQuery] = useState('');
   const [correctionSuggestions, setCorrectionSuggestions] = useState([]);
@@ -213,6 +219,11 @@ const ClaudeGameIdentifier = ({
   // Queue for sequential BGG fetches to prevent concurrent Firestore queries
   const bggFetchQueueRef = useRef([]);
   const isProcessingBggQueueRef = useRef(false);
+  // Multiple search results modal (when more than 1 match found)
+  const [multipleResultsCandidate, setMultipleResultsCandidate] = useState(null);
+  const [isMultipleResultsModalVisible, setIsMultipleResultsModalVisible] = useState(false);
+  const [multipleResultsOptions, setMultipleResultsOptions] = useState([]);
+  const [isLoadingMultipleResults, setIsLoadingMultipleResults] = useState(false);
 
   useEffect(() => {
     if (!permission || permission.status === 'undetermined') {
@@ -453,6 +464,92 @@ const ClaudeGameIdentifier = ({
           return;
         }
 
+        // If multiple results found, create multiple candidate cards in staging area
+        if (searchResults.length > 1) {
+          clearTimeoutOnComplete();
+          if (__DEV__) {
+            console.log('[ClaudeGameIdentifier] Multiple results found:', searchResults.length, 'creating multiple candidate cards');
+          }
+          
+          if (sessionKey === activeSessionRef.current) {
+            // Get the current candidate from ref (synchronous access)
+            const currentCandidate = gameCandidatesRef.current.find((c) => c.id === candidateId) || {
+              id: candidateId,
+              claudeTitle: rawTitle || 'Unknown',
+            };
+            
+            // Remove the original candidate (we'll replace it with multiple cards)
+            setGameCandidates((prev) => prev.filter((c) => c.id !== candidateId));
+            
+            // Load details for top 10 results and create candidate cards
+            const topResults = searchResults.slice(0, 10);
+            Promise.all(
+              topResults.map(async (result, index) => {
+                try {
+                  const details = await getGameDetails(result.id);
+                  return {
+                    id: result.id,
+                    name: details?.name || result.name,
+                    thumbnail: details?.thumbnail || null,
+                    image: details?.image || null,
+                    yearPublished: details?.yearPublished || result.yearPublished || '',
+                    rank: result.rank || '0',
+                  };
+                } catch (error) {
+                  console.warn('[ClaudeGameIdentifier] Error loading details for result:', result.id, error);
+                  return {
+                    id: result.id,
+                    name: result.name,
+                    thumbnail: null,
+                    image: null,
+                    yearPublished: result.yearPublished || '',
+                    rank: result.rank || '0',
+                  };
+                }
+              })
+            ).then((enrichedResults) => {
+              if (sessionKey === activeSessionRef.current) {
+                // Create a candidate card for each result
+                const newCandidates = enrichedResults.map((result, index) => {
+                  // Create unique ID for each candidate card
+                  const newCandidateId = `${candidateId}-option-${index}`;
+                  
+                  return {
+                    id: newCandidateId,
+                    claudeTitle: result.name,
+                    claudeConfidence: currentCandidate.claudeConfidence || 'high',
+                    styling: currentCandidate.styling || {},
+                    bggStatus: 'matched',
+                    bggData: {
+                      id: result.id,
+                      name: result.name,
+                      thumbnail: result.thumbnail,
+                      image: result.image,
+                      yearPublished: result.yearPublished,
+                    },
+                    status: 'pending',
+                    originalCandidateId: candidateId, // Track which original candidate this came from
+                  };
+                });
+                
+                // Add all new candidates to staging area
+                setGameCandidates((prev) => [...prev, ...newCandidates]);
+                
+                if (__DEV__) {
+                  console.log('[ClaudeGameIdentifier] Created', newCandidates.length, 'candidate cards in staging area');
+                }
+              }
+            }).catch((error) => {
+              console.error('[ClaudeGameIdentifier] Error loading multiple results:', error);
+              // Fall back to first result if available
+              if (searchResults && searchResults.length > 0 && searchResults[0]) {
+                handleSelectFromMultipleResults(searchResults[0], candidateId, sessionKey);
+              }
+            });
+          }
+          return;
+        }
+        
         const primaryResult = searchResults[0];
         
         // Validate primaryResult has required fields
@@ -663,7 +760,19 @@ const ClaudeGameIdentifier = ({
         }
 
         if (!filteredGames.length) {
-          setError('Claude could not recognise any games in this photo.');
+          // Check if comments contain lighting/glare guidance
+          const comments = result.comments || '';
+          const hasLightingGuidance = comments.toLowerCase().includes('light') || 
+                                     comments.toLowerCase().includes('glare') || 
+                                     comments.toLowerCase().includes('lighting') ||
+                                     comments.toLowerCase().includes('reflection');
+          
+          if (hasLightingGuidance && comments.trim()) {
+            // Show the lighting guidance as an error message
+            setError(comments.trim());
+          } else {
+            setError('Claude could not recognise any games in this photo.');
+          }
           return;
         }
 
@@ -673,6 +782,7 @@ const ClaudeGameIdentifier = ({
             
             // Validate and normalize styling if present
             let styling = null;
+            let fontReasoning = null;
             if (game.styling) {
               try {
                 // Ensure styling is an object
@@ -680,7 +790,8 @@ const ClaudeGameIdentifier = ({
                   styling = game.styling;
                   if (__DEV__) {
                     console.log('[ClaudeGameIdentifier] Styling for', game.title, ':', JSON.stringify(styling, null, 2));
-                    console.log('[ClaudeGameIdentifier] Font name from Claude:', styling.fontName || styling.fontStyle || 'NOT PROVIDED');
+                    console.log('[ClaudeGameIdentifier] Font family from Claude:', styling.fontFamily || 'NOT PROVIDED');
+                    console.log('[ClaudeGameIdentifier] Font reasoning:', game.fontReasoning || 'NOT PROVIDED');
                   }
                 }
               } catch (stylingError) {
@@ -691,12 +802,19 @@ const ClaudeGameIdentifier = ({
               console.log('[ClaudeGameIdentifier] No styling object for', game.title);
             }
             
+            // Store fontReasoning if provided
+            if (game.fontReasoning) {
+              fontReasoning = game.fontReasoning;
+            }
+            
             const candidate = {
               id: candidateId,
               claudeTitle: game.title || 'Untitled',
+              additionalText: game.additionalText || null, // Store additional text that's not part of the title
               claudeConfidence: game.confidence || 'unknown',
               claudeNotes: game.notes || '',
               styling: styling || null, // Store AI-extracted styling (ensure it's null if invalid)
+              fontReasoning: fontReasoning || null, // Store font reasoning explanation
               status: 'pending',
               bggStatus: 'idle',
               bggData: null,
@@ -730,7 +848,17 @@ const ClaudeGameIdentifier = ({
         });
       } catch (identifyError) {
         console.error('Claude identification failed:', identifyError);
-        setError(identifyError.message || 'Failed to identify games. Please try again.');
+        const errorMessage = identifyError.message || 'Failed to identify games. Please try again.';
+        
+        // Provide more helpful error messages
+        let userFriendlyMessage = errorMessage;
+        if (errorMessage.toLowerCase().includes('overloaded')) {
+          userFriendlyMessage = 'Claude API is temporarily overloaded. Please wait a few seconds and try again.';
+        } else if (errorMessage.toLowerCase().includes('rate limit')) {
+          userFriendlyMessage = 'Too many requests. Please wait a moment before trying again.';
+        }
+        
+        setError(userFriendlyMessage);
       } finally {
         if (sessionKey === activeSessionRef.current) {
           setIsProcessing(false);
@@ -935,6 +1063,7 @@ const ClaudeGameIdentifier = ({
       source: 'claude_image',
         claudeConfidence: candidate.claudeConfidence,
         claudeNotes: candidate.claudeNotes || '',
+        additionalText: candidate.additionalText || null, // Store additional text that's not part of the title
       claudeComments: comments,
       createdAt: now,
       updatedAt: now,
@@ -943,6 +1072,7 @@ const ClaudeGameIdentifier = ({
         bggImage: candidate.bggData?.image || null,
         yearPublished: candidate.bggData?.yearPublished || null,
         styling: candidate.styling || null, // Store AI-extracted styling
+        fontReasoning: candidate.fontReasoning || null, // Store font reasoning explanation
       };
 
       setGameCandidates((prev) => {
@@ -1313,6 +1443,71 @@ const ClaudeGameIdentifier = ({
     [gameCandidates, inlineCorrectionInputs]
   );
 
+  const handleSelectFromMultipleResults = useCallback(
+    async (selectedResult, candidateId, sessionKey) => {
+      if (sessionKey !== activeSessionRef.current) {
+        return;
+      }
+
+      setIsMultipleResultsModalVisible(false);
+      setMultipleResultsOptions([]);
+      setMultipleResultsCandidate(null);
+
+      try {
+        let details = null;
+        try {
+          if (selectedResult.id) {
+            details = await getGameDetails(selectedResult.id);
+          }
+        } catch (detailError) {
+          console.warn('[ClaudeGameIdentifier] Detail fetch failed for selected result:', detailError);
+        }
+
+        if (sessionKey !== activeSessionRef.current) {
+          return;
+        }
+
+        // Use requestAnimationFrame to defer state update
+        requestAnimationFrame(() => {
+          if (sessionKey !== activeSessionRef.current) {
+            return;
+          }
+
+          updateCandidate(candidateId, (candidate) => {
+            try {
+              const updatedCandidate = {
+                ...candidate,
+                claudeTitle: details?.name || selectedResult.name || candidate.claudeTitle,
+                bggStatus: 'matched',
+                bggData: {
+                  id: selectedResult.id,
+                  name: details?.name || selectedResult.name || candidate.claudeTitle || 'Unknown',
+                  thumbnail: details?.thumbnail || selectedResult.thumbnail || null,
+                  image: details?.image || selectedResult.image || null,
+                  yearPublished: details?.yearPublished || selectedResult.yearPublished || candidate.bggData?.yearPublished || '',
+                },
+              };
+              // Preserve styling if it exists
+              if (candidate && candidate.styling && typeof candidate.styling === 'object') {
+                updatedCandidate.styling = { ...candidate.styling };
+              }
+              if (__DEV__) {
+                console.log('[ClaudeGameIdentifier] Updated candidate with selected result:', candidateId, updatedCandidate.bggData.name);
+              }
+              return updatedCandidate;
+            } catch (updateError) {
+              console.error('[ClaudeGameIdentifier] Error in updateCandidate (selected result):', updateError, candidate);
+              return candidate;
+            }
+          });
+        });
+      } catch (error) {
+        console.error('[ClaudeGameIdentifier] Error selecting from multiple results:', error);
+      }
+    },
+    [updateCandidate]
+  );
+
   const renderCandidateCard = (candidate) => {
     // Defensive checks to prevent crashes
     if (!candidate || !candidate.id) {
@@ -1331,7 +1526,7 @@ const ClaudeGameIdentifier = ({
           <View key={candidate.id} style={[styles.gameCard, styles.gameCardPending]}>
             {/* Game info - no thumbnail placeholder to save space */}
             <View style={[styles.gameBody, { paddingVertical: 12 }]}>
-              <Text style={[styles.gameTitle, { fontSize: 16, marginBottom: 8 }]} numberOfLines={3}>{title}</Text>
+              <Text style={[styles.gameTitle, { fontSize: 16, marginBottom: 8 }]}>{title}</Text>
               <Text style={styles.gameSubtitle}>Fetching BGG data…</Text>
             </View>
             
@@ -1358,7 +1553,7 @@ const ClaudeGameIdentifier = ({
       return (
         <View key={candidate.id} style={[styles.gameCard, styles.gameCardPending]}>
           <View style={[styles.gameBody, { paddingVertical: 12 }]}>
-            <Text style={[styles.gameTitle, { fontSize: 16, marginBottom: 8 }]} numberOfLines={3}>
+            <Text style={[styles.gameTitle, { fontSize: 16, marginBottom: 8 }]}>
               {candidate.bggData?.name || candidate.claudeTitle || 'Unknown Game'}
             </Text>
             <Text style={styles.gameSubtitle}>Error loading game data</Text>
@@ -1440,7 +1635,7 @@ const ClaudeGameIdentifier = ({
           </View>
 
           <View style={styles.gameBody}>
-            <Text style={styles.gameTitle} numberOfLines={2}>
+            <Text style={styles.gameTitle}>
               {title}
             </Text>
             <Text style={styles.gameSubtitle} numberOfLines={2}>
@@ -1451,7 +1646,7 @@ const ClaudeGameIdentifier = ({
                 <Text style={styles.gameStatusMessage}>{candidate.bggErrorMessage || 'Error loading data'}</Text>
                 {candidate.bggStatus === 'no_match' && (
                   <View style={styles.inlineCorrectionContainer}>
-                    <Text style={styles.inlineCorrectionLabel}>Correct game title:</Text>
+                    <Text style={styles.inlineCorrectionLabel}>Not the right title? Enter it here:</Text>
                     <View style={styles.inlineCorrectionInputRow}>
                       <TextInput
                         style={styles.inlineCorrectionInput}
@@ -1485,6 +1680,9 @@ const ClaudeGameIdentifier = ({
                         )}
                       </Pressable>
                     </View>
+                    <Text style={styles.inlineCorrectionHint}>
+                      Or click green check to create game without BGG info
+                    </Text>
                   </View>
                 )}
               </View>
@@ -1638,6 +1836,103 @@ const ClaudeGameIdentifier = ({
   );
 
   // Results Modal - Shows identified games
+  // Multiple results selection modal
+  const renderMultipleResultsModal = () => {
+    if (!multipleResultsCandidate) return null;
+
+    return (
+      <Modal
+        animationType="slide"
+        transparent
+        visible={isMultipleResultsModalVisible}
+        onRequestClose={() => {
+          setIsMultipleResultsModalVisible(false);
+          setMultipleResultsOptions([]);
+          setMultipleResultsCandidate(null);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Multiple games found</Text>
+              <Pressable
+                onPress={() => {
+                  setIsMultipleResultsModalVisible(false);
+                  setMultipleResultsOptions([]);
+                  setMultipleResultsCandidate(null);
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.modalCloseLink}>Close</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.modalDescription}>
+              We found {multipleResultsOptions.length} games matching "{multipleResultsCandidate.claudeTitle || 'your search'}". 
+              Please select the correct one (sorted by BGG rank):
+            </Text>
+            {isLoadingMultipleResults ? (
+              <View style={styles.modalLoadingRow}>
+                <ActivityIndicator size="small" color="#4a90e2" />
+                <Text style={styles.modalLoadingText}>Loading game details…</Text>
+              </View>
+            ) : (
+              <ScrollView style={styles.suggestionsScrollView}>
+                {multipleResultsOptions.map((option, index) => (
+                  <Pressable
+                    key={option.id || index}
+                    style={styles.multipleResultCard}
+                    onPress={() => {
+                      if (multipleResultsCandidate && multipleResultsCandidate.id) {
+                        handleSelectFromMultipleResults(
+                          option,
+                          multipleResultsCandidate.id,
+                          activeSessionRef.current
+                        );
+                      }
+                    }}
+                  >
+                    <View style={styles.multipleResultContent}>
+                      {option.thumbnail ? (
+                        <Image
+                          source={{ uri: option.thumbnail }}
+                          style={styles.multipleResultThumbnail}
+                        />
+                      ) : (
+                        <View style={styles.multipleResultThumbnailPlaceholder}>
+                          <Text style={styles.multipleResultPlaceholderText}>
+                            {option.name?.charAt(0)?.toUpperCase() || '?'}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.multipleResultInfo}>
+                        <Text style={styles.multipleResultName} numberOfLines={2}>
+                          {option.name}
+                        </Text>
+                        {option.yearPublished ? (
+                          <Text style={styles.multipleResultYear}>
+                            {option.yearPublished}
+                          </Text>
+                        ) : null}
+                        {option.rank && option.rank !== '0' ? (
+                          <Text style={styles.multipleResultRank}>
+                            BGG Rank: #{option.rank}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <View style={styles.multipleResultSelectButton}>
+                        <Text style={styles.multipleResultSelectText}>✓</Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   const renderResultsModal = () => (
     <Modal
       animationType="slide"
@@ -1700,7 +1995,7 @@ const ClaudeGameIdentifier = ({
           {gameCandidates.some((c) => c.status === 'confirmed') && (
             <View style={styles.resultsModalActions}>
               <Button
-                label="Add to Collection"
+                label="Add confirmed to Collection"
                 onPress={() => {
                   if (onDone) {
                     onDone();
@@ -1724,6 +2019,7 @@ const ClaudeGameIdentifier = ({
       <>
         {renderCameraModal()}
         {renderResultsModal()}
+        {renderMultipleResultsModal()}
         {/* Correction modal for editing games */}
         <Modal
           animationType="slide"
@@ -1782,7 +2078,9 @@ const ClaudeGameIdentifier = ({
 
   // Original full-screen view (fallback)
   return (
-    <View style={styles.flex}>
+    <>
+      {renderMultipleResultsModal()}
+      <View style={styles.flex}>
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Identify Games with Claude</Text>
       <Text style={styles.subheader}>
@@ -1945,6 +2243,7 @@ const ClaudeGameIdentifier = ({
         </View>
       </Modal>
     </View>
+    </>
   );
 };
 
@@ -2092,18 +2391,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   gameGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -6,
+    flexDirection: 'column',
+    marginHorizontal: 0,
   },
   gameCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 8, // Reduced padding for more compact cards
-    marginHorizontal: 6,
-    marginBottom: 12, // Reduced margin
-    flexBasis: '47%',
-    maxWidth: '47%',
+    padding: 12,
+    marginHorizontal: 0,
+    marginBottom: 16,
+    width: '100%',
     borderWidth: 1,
     borderColor: '#e0e0e0',
     shadowColor: '#000',
@@ -2122,9 +2419,9 @@ const styles = StyleSheet.create({
   gameThumbnailWrapper: {
     borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 6, // Reduced margin
+    marginBottom: 12,
     backgroundColor: '#f5f5f5',
-    height: 60, // Reduced to half height
+    height: 120,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2155,10 +2452,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   gameTitle: {
-    fontSize: 14, // Slightly smaller
+    fontSize: 16,
     fontWeight: '600',
     color: '#2a2a2a',
-    marginBottom: 3, // Reduced margin
+    marginBottom: 6,
+    lineHeight: 22,
   },
   gameSubtitle: {
     fontSize: 12, // Slightly smaller
@@ -2214,6 +2512,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  inlineCorrectionHint: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
   cardDeleteButton: {
     position: 'absolute',
@@ -2441,6 +2745,76 @@ const styles = StyleSheet.create({
   suggestionYear: {
     fontSize: 12,
     color: '#777',
+  },
+  suggestionsScrollView: {
+    maxHeight: 400,
+    marginTop: 8,
+  },
+  multipleResultCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  multipleResultContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  multipleResultThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: '#e0e0e0',
+  },
+  multipleResultThumbnailPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: '#d0d0d0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  multipleResultPlaceholderText: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#666',
+  },
+  multipleResultInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  multipleResultName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#222',
+    marginBottom: 4,
+  },
+  multipleResultYear: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 2,
+  },
+  multipleResultRank: {
+    fontSize: 12,
+    color: '#888',
+  },
+  multipleResultSelectButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#4a90e2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  multipleResultSelectText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
   },
   // Camera Modal Styles
   cameraModalContainer: {

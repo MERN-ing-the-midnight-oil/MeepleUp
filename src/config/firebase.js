@@ -18,6 +18,10 @@ if (!firebase.apps.length) {
 }
 
 export const auth = firebase.auth();
+// Note: Firebase Auth automatically persists authentication state in React Native/Expo
+// using AsyncStorage. Users will remain logged in across app restarts.
+// No explicit persistence configuration is needed for React Native.
+
 export const db = firebase.firestore();
 export const storage = firebase.storage();
 

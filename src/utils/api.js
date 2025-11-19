@@ -338,9 +338,10 @@ export const searchGamesByName = async (query) => {
       const { searchGamesByName: searchFirestore } = await import('../services/gameDatabase');
       
       // Add timeout wrapper in case Firestore hangs
-      const firestorePromise = searchFirestore(query, 10);
+      // Reduced timeout from 6s to 4s for faster failure
+      const firestorePromise = searchFirestore(query, 50);
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Firestore search timeout')), 6000);
+        setTimeout(() => reject(new Error('Firestore search timeout')), 4000);
       });
       
       const firestoreResults = await Promise.race([firestorePromise, timeoutPromise]);

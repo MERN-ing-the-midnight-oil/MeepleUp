@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage from '../utils/storage';
 import firebase, { auth } from '../config/firebase';
 
 const AuthContext = createContext();
@@ -61,46 +61,106 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const profileCacheRef = useRef({});
 
+  // Helper function to load user profile and set user state
+  const loadUserProfile = async (firebaseUser) => {
+    if (!firebaseUser) {
+      setUser(null);
+      return;
+    }
+
+    try {
+      const cacheKey = firebaseUser.uid;
+      let cachedProfile = profileCacheRef.current[cacheKey];
+
+      if (!cachedProfile) {
+        const stored = await storage.getItem(PROFILE_STORAGE_KEY(cacheKey));
+        cachedProfile = stored ? JSON.parse(stored) : {};
+        profileCacheRef.current[cacheKey] = cachedProfile;
+      }
+
+      setUser(mapUser(firebaseUser, cachedProfile));
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+      setUser(mapUser(firebaseUser));
+    }
+  };
+
   useEffect(() => {
+    let isMounted = true;
+    let authStateResolved = false;
+
+    // Set up auth state listener
+    // This will fire when auth state changes AND on initial load with persisted user
+    // onAuthStateChanged fires immediately with the current user if one exists
     const unsubscribe = auth.onAuthStateChanged(
       async (firebaseUser) => {
+        if (!isMounted) return;
+
+        authStateResolved = true;
+
         try {
           if (!firebaseUser) {
+            console.log('Auth state: No user');
             setUser(null);
             setLoading(false);
             return;
           }
 
-          const cacheKey = firebaseUser.uid;
-          let cachedProfile = profileCacheRef.current[cacheKey];
-
-          if (!cachedProfile) {
-            const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY(cacheKey));
-            cachedProfile = stored ? JSON.parse(stored) : {};
-            profileCacheRef.current[cacheKey] = cachedProfile;
-          }
-
-          setUser(mapUser(firebaseUser, cachedProfile));
+          console.log('Auth state changed: User found', firebaseUser.email);
+          await loadUserProfile(firebaseUser);
         } catch (error) {
           console.error('Auth state change error:', error);
           setUser(mapUser(firebaseUser));
         } finally {
-          setLoading(false);
+          if (isMounted) {
+            setLoading(false);
+          }
         }
       },
       (error) => {
         console.error('Failed to initialize auth listener:', error);
-        setLoading(false);
+        authStateResolved = true;
+        if (isMounted) {
+          setLoading(false);
+        }
       },
     );
 
-    return unsubscribe;
+    // Fallback: If onAuthStateChanged doesn't fire within 2 seconds, check currentUser directly
+    // This handles edge cases where the listener might not fire immediately
+    const timeoutId = setTimeout(async () => {
+      if (!authStateResolved && isMounted) {
+        console.log('Auth state listener timeout, checking currentUser directly...');
+        try {
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            console.log('Found currentUser after timeout:', currentUser.email);
+            await loadUserProfile(currentUser);
+          } else {
+            console.log('No currentUser found after timeout');
+            setUser(null);
+          }
+        } catch (error) {
+          console.error('Error checking currentUser after timeout:', error);
+        } finally {
+          if (isMounted) {
+            setLoading(false);
+          }
+        }
+      }
+    }, 2000);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, []);
 
   const saveProfile = async (uid, profile) => {
     try {
       const parsedProfile = parseProfile(profile);
-      await AsyncStorage.setItem(PROFILE_STORAGE_KEY(uid), JSON.stringify(parsedProfile));
+      await storage.setItem(PROFILE_STORAGE_KEY(uid), JSON.stringify(parsedProfile));
       profileCacheRef.current[uid] = parsedProfile;
       return parsedProfile;
     } catch (error) {
@@ -131,7 +191,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async ({ email, password }) => {
     const credential = await auth.signInWithEmailAndPassword(email.trim(), password);
-    const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
+    const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
     const profile = stored ? JSON.parse(stored) : {};
     setUser(mapUser(credential.user, profile));
     return credential.user;
@@ -167,7 +227,7 @@ export const AuthProvider = ({ children }) => {
     await auth.currentUser.updatePassword(newPassword);
     await auth.currentUser.reload();
 
-    const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
+    const stored = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const profile = stored ? JSON.parse(stored) : {};
     setUser(mapUser(auth.currentUser, profile));
   };
@@ -178,7 +238,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     await auth.currentUser.reload();
-    const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
+    const stored = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const profile = stored ? JSON.parse(stored) : {};
     const mappedUser = mapUser(auth.currentUser, profile);
     setUser(mappedUser);
@@ -190,7 +250,7 @@ export const AuthProvider = ({ children }) => {
       throw new Error('No authenticated user');
     }
 
-    const currentProfileRaw = await AsyncStorage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
+    const currentProfileRaw = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const currentProfile = currentProfileRaw ? JSON.parse(currentProfileRaw) : {};
 
     const nextProfile = {
