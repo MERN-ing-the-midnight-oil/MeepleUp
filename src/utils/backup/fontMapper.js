@@ -6,6 +6,7 @@
  */
 
 import { Platform } from 'react-native';
+// Note: Both fontLoader and fontMapper are in backup - import path updated
 import { getFontFamilyName, loadFontOnDemand } from './fontLoader';
 
 /**

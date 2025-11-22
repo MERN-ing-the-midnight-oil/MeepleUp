@@ -4,13 +4,12 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { EventsProvider } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
 import { AvailabilityProvider } from './context/AvailabilityContext';
-import Navigation from './components/Navigation';
+import WebNavigation from './components/WebNavigation';
 import Onboarding from './screens/Onboarding';
-import Home from './screens/Home';
+import EventsScreen from './screens/EventsScreen';
 import EventHub from './screens/EventHub';
-import CollectionManagement from './screens/CollectionManagement';
-import UserProfile from './screens/UserProfile';
-import EventDiscovery from './screens/EventDiscovery';
+import CollectionScreen from './screens/CollectionScreen';
+import ProfileScreen from './screens/ProfileScreen';
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -31,13 +30,13 @@ const PublicRoute = ({ children }) => {
     return <div className="container"><div className="spinner" /></div>;
   }
   
-  return !isAuthenticated ? children : <Navigate to="/home" replace />;
+  return !isAuthenticated ? children : <Navigate to="/events" replace />;
 };
 
 const AppContent = () => {
   return (
     <Router>
-      <Navigation />
+      <WebNavigation />
       <Routes>
         <Route
           path="/"
@@ -48,10 +47,10 @@ const AppContent = () => {
           }
         />
         <Route
-          path="/home"
+          path="/events"
           element={
             <ProtectedRoute>
-              <Home />
+              <EventsScreen />
             </ProtectedRoute>
           }
         />
@@ -67,7 +66,7 @@ const AppContent = () => {
           path="/collection"
           element={
             <ProtectedRoute>
-              <CollectionManagement />
+              <CollectionScreen />
             </ProtectedRoute>
           }
         />
@@ -75,19 +74,11 @@ const AppContent = () => {
           path="/profile"
           element={
             <ProtectedRoute>
-              <UserProfile />
+              <ProfileScreen />
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/discover"
-          element={
-            <ProtectedRoute>
-              <EventDiscovery />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<Navigate to="/home" replace />} />
+        <Route path="*" element={<Navigate to="/events" replace />} />
       </Routes>
     </Router>
   );

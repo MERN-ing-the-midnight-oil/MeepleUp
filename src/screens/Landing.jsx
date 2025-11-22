@@ -1,38 +1,33 @@
 import React from 'react';
-import { StyleSheet, Text, View, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import Button from '../components/common/Button';
 
-const LandingScreen = ({ navigation }) => {
-  const handleNavigate = (mode) => {
-    navigation.navigate('Auth', { mode });
-  };
+const Landing = () => {
+  const navigation = useNavigation();
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        {navigation.canGoBack() && (
-          <Pressable onPress={() => navigation.goBack()} accessibilityRole="button">
-            <Text style={styles.backText}>Back</Text>
-          </Pressable>
-        )}
-      </View>
-
-      <View style={styles.hero}>
+      <View style={styles.content}>
         <Text style={styles.title}>MeepleUp</Text>
-        <Text style={styles.subtitle}>Game on.</Text>
+        <Text style={styles.subtitle}>
+          Connect with your board game community
+        </Text>
+        
+        <View style={styles.actions}>
+          <Button
+            label="Sign In"
+            onPress={() => navigation.navigate('Auth', { mode: 'login' })}
+            style={styles.button}
+          />
+          <Button
+            label="Create Account"
+            onPress={() => navigation.navigate('Auth', { mode: 'register' })}
+            variant="outline"
+            style={styles.button}
+          />
+        </View>
       </View>
-
-      <View style={styles.actions}>
-        <Button label="Register" onPress={() => handleNavigate('signup')} style={styles.actionButton} />
-        <Button
-          label="Login"
-          onPress={() => handleNavigate('login')}
-          variant="outline"
-          style={styles.actionButton}
-        />
-      </View>
-
-      <Text style={styles.footerText}>Already have an account? Jump back in!</Text>
     </View>
   );
 };
@@ -40,49 +35,37 @@ const LandingScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 32,
     backgroundColor: '#f5f5f5',
-    justifyContent: 'space-between',
-  },
-  headerRow: {
-    minHeight: 24,
-  },
-  backText: {
-    color: '#4a90e2',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  hero: {
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 40,
+  },
+  content: {
+    width: '100%',
+    maxWidth: 400,
+    padding: 20,
+    alignItems: 'center',
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
+    fontSize: 48,
+    fontWeight: 'bold',
     color: '#d45d5d',
     marginBottom: 12,
+    textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#555',
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 48,
     textAlign: 'center',
-    lineHeight: 24,
-    paddingHorizontal: 12,
   },
   actions: {
-    gap: 16,
-    marginBottom: 24,
-  },
-  actionButton: {
     width: '100%',
+    gap: 16,
   },
-  footerText: {
-    fontSize: 14,
-    color: '#777',
-    textAlign: 'center',
+  button: {
+    width: '100%',
   },
 });
 
-export default LandingScreen;
-
+export default Landing;
 

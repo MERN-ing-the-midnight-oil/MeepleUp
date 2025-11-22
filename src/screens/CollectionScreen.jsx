@@ -5,11 +5,13 @@ import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import GameCard from '../components/GameCard';
+import PoweredByBGG from '../components/PoweredByBGG';
 import { getGameById } from '../services/gameDatabase';
 import { getStarRating } from '../utils/gameBadges';
-// Note: BarcodeScanner and BGGImport will need to be converted separately
+// Note: BarcodeScanner has been archived (see src/archive/barcode-scanner/)
+// BGGImport will need to be converted separately if needed
 
-const CollectionManagement = () => {
+const CollectionScreen = () => {
   const { user } = useAuth();
   const { getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'view', 'add', 'import'
@@ -98,6 +100,12 @@ const CollectionManagement = () => {
     }
   };
 
+  const handleRemoveFromCollection = (gameId) => {
+    if (userIdentifier) {
+      removeGameFromCollection(userIdentifier, gameId);
+    }
+  };
+
   const handleDoneIdentifying = () => {
     // After identifying games, close results modal and show the collection view
     setShowResultsModal(false);
@@ -141,9 +149,7 @@ const CollectionManagement = () => {
 
   const renderGameCard = useCallback(({ item }) => {
     return (
-      <View style={styles.cardWrapper}>
-        <GameCard game={item} onDelete={handleDeleteGame} />
-      </View>
+      <GameCard game={item} onDelete={handleDeleteGame} />
     );
   }, [handleDeleteGame]);
 
@@ -159,14 +165,14 @@ const CollectionManagement = () => {
             
             <Pressable
               style={styles.menuOption}
-              onPress={() => setActiveView('view')}
+              onPress={handleOpenCamera}
             >
               <View style={styles.menuOptionContent}>
-                <Text style={styles.menuOptionIcon}>📚</Text>
+                <Text style={styles.menuOptionIcon}>📷</Text>
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Manage my games collection</Text>
+                  <Text style={styles.menuOptionTitle}>Inventory my collection using AI</Text>
                   <Text style={styles.menuOptionDescription}>
-                    Browse your {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''}
+                    Take photos of your games to identify and add them
                   </Text>
                 </View>
                 <Text style={styles.menuOptionArrow}>→</Text>
@@ -175,14 +181,14 @@ const CollectionManagement = () => {
 
             <Pressable
               style={styles.menuOption}
-              onPress={handleOpenCamera}
+              onPress={() => setActiveView('view')}
             >
               <View style={styles.menuOptionContent}>
-                <Text style={styles.menuOptionIcon}>📷</Text>
+                <Text style={styles.menuOptionIcon}>📚</Text>
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Add games using my camera</Text>
+                  <Text style={styles.menuOptionTitle}>View my games</Text>
                   <Text style={styles.menuOptionDescription}>
-                    Take a photo to identify games with Claude AI
+                    Browse your {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''}
                   </Text>
                 </View>
                 <Text style={styles.menuOptionArrow}>→</Text>
@@ -209,45 +215,43 @@ const CollectionManagement = () => {
 
         {activeView === 'view' && (
           <View style={styles.viewContent}>
-            <View style={styles.viewHeader}>
-              <Pressable
-                style={styles.backButton}
-                onPress={() => setActiveView('menu')}
-              >
-                <Text style={styles.backButtonText}>← Back</Text>
-              </Pressable>
-              <Text style={styles.viewTitle}>My Games</Text>
-            </View>
-
-            {/* Sort Options */}
+            {/* AI Inventory Button and Sort Options */}
             {sortedCollection.length > 0 && (
               <View style={styles.sortContainer}>
-                <Text style={styles.sortLabel}>Sort by:</Text>
-                <View style={styles.sortButtons}>
-                  <Pressable
-                    style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
-                    onPress={() => setSortBy('rating')}
-                  >
-                    <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
-                      ⭐ Rating
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.sortButton, sortBy === 'category' && styles.sortButtonActive]}
-                    onPress={() => setSortBy('category')}
-                  >
-                    <Text style={[styles.sortButtonText, sortBy === 'category' && styles.sortButtonTextActive]}>
-                      🏷️ Category
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
-                    onPress={() => setSortBy('title')}
-                  >
-                    <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
-                      A-Z
-                    </Text>
-                  </Pressable>
+                <Pressable
+                  style={styles.aiInventoryButton}
+                  onPress={handleOpenCamera}
+                >
+                  <Text style={styles.aiInventoryButtonText}>Inventory my collection using AI</Text>
+                </Pressable>
+                <View style={styles.sortRow}>
+                  <Text style={styles.sortLabel}>Sort by:</Text>
+                  <View style={styles.sortButtons}>
+                    <Pressable
+                      style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
+                      onPress={() => setSortBy('rating')}
+                    >
+                      <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
+                        ⭐ Rating
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.sortButton, sortBy === 'category' && styles.sortButtonActive]}
+                      onPress={() => setSortBy('category')}
+                    >
+                      <Text style={[styles.sortButtonText, sortBy === 'category' && styles.sortButtonTextActive]}>
+                        🏷️ Category
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
+                      onPress={() => setSortBy('title')}
+                    >
+                      <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
+                        A-Z
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             )}
@@ -256,12 +260,12 @@ const CollectionManagement = () => {
               <View style={styles.emptyCollection}>
                 <Text style={styles.emptyTitle}>No games yet</Text>
                 <Text style={styles.emptyText}>
-                  Add games to your collection by using your camera or importing from BoardGameGeek.
+                  Add games to your collection by using AI inventory or importing from BoardGameGeek.
                 </Text>
                 <View style={styles.emptyActions}>
                   <Button
-                    label="Add Games with Camera"
-                    onPress={() => setActiveView('add')}
+                    label="Inventory my collection using AI"
+                    onPress={handleOpenCamera}
                     style={styles.emptyButton}
                   />
                   <Button
@@ -271,16 +275,26 @@ const CollectionManagement = () => {
                     style={styles.emptyButton}
                   />
                 </View>
+                <View style={styles.emptyBggLogoContainer}>
+                  <PoweredByBGG size="small" />
+                </View>
               </View>
             ) : (
-              <FlatList
-                data={sortedCollection}
-                keyExtractor={(item) => item.id}
-                renderItem={renderGameCard}
-                contentContainerStyle={styles.listContainer}
-                scrollEnabled={true}
-                showsVerticalScrollIndicator={false}
-              />
+              <>
+                <FlatList
+                  data={sortedCollection}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderGameCard}
+                  numColumns={2}
+                  columnWrapperStyle={styles.row}
+                  contentContainerStyle={styles.listContainer}
+                  scrollEnabled={true}
+                  showsVerticalScrollIndicator={false}
+                />
+                <View style={styles.bggLogoContainer}>
+                  <PoweredByBGG size="small" />
+                </View>
+              </>
             )}
           </View>
         )}
@@ -288,6 +302,7 @@ const CollectionManagement = () => {
         {/* Camera and Results Modals */}
         <ClaudeGameIdentifier 
           onAddToCollection={handleAddToCollection}
+          onRemoveFromCollection={handleRemoveFromCollection}
           onDone={handleDoneIdentifying}
           showCameraModal={showCameraModal}
           showResultsModal={showResultsModal}
@@ -401,28 +416,47 @@ const styles = StyleSheet.create({
   },
   viewContent: {
     flex: 1,
-    minHeight: 400,
+    paddingBottom: 0,
   },
   sortContainer: {
-    marginBottom: 16,
-    paddingVertical: 12,
+    marginBottom: 12,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
+  sortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 8,
+  },
   sortLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#666',
-    marginBottom: 8,
+    marginRight: 4,
   },
   sortButtons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    flex: 1,
   },
-  sortButton: {
-    paddingHorizontal: 12,
+  aiInventoryButton: {
+    paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,
+    backgroundColor: '#4a90e2',
+    alignSelf: 'flex-start',
+  },
+  aiInventoryButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  sortButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#e0e0e0',
     backgroundColor: '#fff',
@@ -441,6 +475,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   content: {
+    flex: 1,
     padding: 20,
   },
   tabContent: {
@@ -476,12 +511,20 @@ const styles = StyleSheet.create({
   emptyButton: {
     marginBottom: 12,
   },
-  listContainer: {
-    paddingBottom: 20,
-  },
-  cardWrapper: {
+  emptyBggLogoContainer: {
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
     width: '100%',
-    marginBottom: 12,
+  },
+  listContainer: {
+    paddingBottom: 10,
+    paddingHorizontal: 8,
+  },
+  row: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
   },
   gameCard: {
     backgroundColor: '#fff',
@@ -520,6 +563,14 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 4,
   },
+  bggLogoContainer: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#f9f9f9',
+  },
 });
 
-export default CollectionManagement;
+export default CollectionScreen;

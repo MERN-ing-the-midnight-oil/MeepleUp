@@ -11,11 +11,9 @@ import LandingScreen from './src/screens/Landing';
 import AuthScreen from './src/screens/Auth';
 import VerifyEmailScreen from './src/screens/VerifyEmail';
 import OnboardingScreen from './src/screens/Onboarding';
-import HomeScreen from './src/screens/Home';
 import EventHubScreen from './src/screens/EventHub';
-import CollectionManagementScreen from './src/screens/CollectionManagement';
-import UserProfileScreen from './src/screens/UserProfile';
-import EventDiscoveryScreen from './src/screens/EventDiscovery';
+import CollectionScreen from './src/screens/CollectionScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 import LoadingSpinner from './src/components/common/LoadingSpinner';
 import Navigation from './src/components/Navigation';
 // Fonts are now loaded on-demand, no need to load all at startup
@@ -72,6 +70,7 @@ function AppNavigator() {
         <Navigation navigationRef={navigationRef} currentRouteName={currentRouteName} />
       )}
       <Stack.Navigator
+        initialRouteName={!isAuthenticated ? 'Landing' : isVerified ? 'Onboarding' : 'VerifyEmail'}
         screenOptions={{
           headerShown: false,
         }}
@@ -88,11 +87,9 @@ function AppNavigator() {
         {isAuthenticated && isVerified && (
           <>
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-            <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="EventHub" component={EventHubScreen} />
-            <Stack.Screen name="Collection" component={CollectionManagementScreen} />
-            <Stack.Screen name="Profile" component={UserProfileScreen} />
-            <Stack.Screen name="Discover" component={EventDiscoveryScreen} />
+            <Stack.Screen name="Collection" component={CollectionScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
           </>
         )}
       </Stack.Navigator>

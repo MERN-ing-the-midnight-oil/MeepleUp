@@ -10,151 +10,198 @@ import * as Font from 'expo-font';
 import { Platform } from 'react-native';
 
 // Import all font packages statically (required for React Native)
-// Bold/Geometric Sans
-import * as BebasNeue from '@expo-google-fonts/bebas-neue';
-import * as Anton from '@expo-google-fonts/anton';
-import * as FrancoisOne from '@expo-google-fonts/francois-one';
-import * as PassionOne from '@expo-google-fonts/passion-one';
-import * as ArchivoBlack from '@expo-google-fonts/archivo-black';
 
-// Medium Weight Sans
-import * as Roboto from '@expo-google-fonts/roboto';
-import * as Montserrat from '@expo-google-fonts/montserrat';
-import * as Lato from '@expo-google-fonts/lato';
-import * as Poppins from '@expo-google-fonts/poppins';
-import * as Raleway from '@expo-google-fonts/raleway';
-
-// Rounded/Friendly Sans
-import * as Quicksand from '@expo-google-fonts/quicksand';
-import * as Comfortaa from '@expo-google-fonts/comfortaa';
-import * as Fredoka from '@expo-google-fonts/fredoka';
-import * as Nunito from '@expo-google-fonts/nunito';
-
-// Condensed
-import * as RobotoCondensed from '@expo-google-fonts/roboto-condensed';
-import * as BarlowCondensed from '@expo-google-fonts/barlow-condensed';
-import * as FjallaOne from '@expo-google-fonts/fjalla-one';
-import * as YanoneKaffeesatz from '@expo-google-fonts/yanone-kaffeesatz';
-
-// Playful/Display
+// Heavy/Bold Sans-Serif
 import * as Bangers from '@expo-google-fonts/bangers';
-import * as PermanentMarker from '@expo-google-fonts/permanent-marker';
 import * as TitanOne from '@expo-google-fonts/titan-one';
+import * as Bungee from '@expo-google-fonts/bungee';
+import * as BlackOpsOne from '@expo-google-fonts/black-ops-one';
 import * as Righteous from '@expo-google-fonts/righteous';
-import * as LuckiestGuy from '@expo-google-fonts/luckiest-guy';
 
-// Elegant Serif
-import * as PlayfairDisplay from '@expo-google-fonts/playfair-display';
+// Condensed/Narrow
+import * as BebasNeue from '@expo-google-fonts/bebas-neue';
+import * as Oswald from '@expo-google-fonts/oswald';
+import * as FjallaOne from '@expo-google-fonts/fjalla-one';
+import * as Antonio from '@expo-google-fonts/antonio';
+import * as PathwayGothicOne from '@expo-google-fonts/pathway-gothic-one';
+
+// Rounded/Circular
+import * as Fredoka from '@expo-google-fonts/fredoka';
+import * as BubblegumSans from '@expo-google-fonts/bubblegum-sans';
+import * as Signika from '@expo-google-fonts/signika';
+import * as VarelaRound from '@expo-google-fonts/varela-round';
+import * as Comfortaa from '@expo-google-fonts/comfortaa';
+
+// Script/Cursive (Connected Strokes)
+import * as Kalam from '@expo-google-fonts/kalam';
+import * as Satisfy from '@expo-google-fonts/satisfy';
+import * as Caveat from '@expo-google-fonts/caveat';
+import * as ShadowsIntoLight from '@expo-google-fonts/shadows-into-light';
+
+// Display Serif (High Contrast)
 import * as Cinzel from '@expo-google-fonts/cinzel';
-import * as Cormorant from '@expo-google-fonts/cormorant';
-import * as LibreBaskerville from '@expo-google-fonts/libre-baskerville';
-import * as Merriweather from '@expo-google-fonts/merriweather';
-
-// Bold Serif
+import * as PlayfairDisplay from '@expo-google-fonts/playfair-display';
 import * as AbrilFatface from '@expo-google-fonts/abril-fatface';
-import * as AlfaSlabOne from '@expo-google-fonts/alfa-slab-one';
+import * as BodoniModa from '@expo-google-fonts/bodoni-moda';
+import * as YesevaOne from '@expo-google-fonts/yeseva-one';
+
+// Old Style/Medieval Serif
+import * as MedievalSharp from '@expo-google-fonts/medievalsharp';
+import * as IMFellDWPica from '@expo-google-fonts/im-fell-dw-pica';
+import * as CrimsonText from '@expo-google-fonts/crimson-text';
+
+// Slab Serif (Blocky)
+import * as CreteRound from '@expo-google-fonts/crete-round';
+import * as ZillaSlab from '@expo-google-fonts/zilla-slab';
 import * as BreeSerif from '@expo-google-fonts/bree-serif';
 
-// Vintage/Retro
-import * as SpecialElite from '@expo-google-fonts/special-elite';
-import * as Staatliches from '@expo-google-fonts/staatliches';
-import * as Audiowide from '@expo-google-fonts/audiowide';
-import * as Monoton from '@expo-google-fonts/monoton';
-
-// Script/Handwritten
-import * as Pacifico from '@expo-google-fonts/pacifico';
-import * as Caveat from '@expo-google-fonts/caveat';
-import * as AmaticSC from '@expo-google-fonts/amatic-sc';
-
-// Monospace/Pixel
+// Decorative/Ornamental
+import * as Creepster from '@expo-google-fonts/creepster';
+import * as Eater from '@expo-google-fonts/eater';
+import * as Rye from '@expo-google-fonts/rye';
 import * as PressStart2P from '@expo-google-fonts/press-start-2p';
+import * as BungeeShade from '@expo-google-fonts/bungee-shade';
+
+// Stencil (Disconnected Strokes)
+import * as Sarpanch from '@expo-google-fonts/sarpanch';
+import * as SairaStencilOne from '@expo-google-fonts/saira-stencil-one';
+import * as Wallpoet from '@expo-google-fonts/wallpoet';
+
+// Expanded/Wide
+import * as ConcertOne from '@expo-google-fonts/concert-one';
+import * as Arvo from '@expo-google-fonts/arvo';
+import * as ChangaOne from '@expo-google-fonts/changa-one';
+
+// Handwritten/Marker
+import * as PermanentMarker from '@expo-google-fonts/permanent-marker';
+import * as IndieFlower from '@expo-google-fonts/indie-flower';
+import * as PatrickHand from '@expo-google-fonts/patrick-hand';
+
+// Monospace
+import * as CourierPrime from '@expo-google-fonts/courier-prime';
 import * as SpaceMono from '@expo-google-fonts/space-mono';
 
 // Font package mapping - maps Claude font names to their package exports
 const FONT_PACKAGES = {
-  'Bebas Neue': BebasNeue,
-  'Anton': Anton,
-  'Francois One': FrancoisOne,
-  'Passion One': PassionOne,
-  'Archivo Black': ArchivoBlack,
-  'Roboto': Roboto,
-  'Montserrat': Montserrat,
-  'Lato': Lato,
-  'Poppins': Poppins,
-  'Raleway': Raleway,
-  'Quicksand': Quicksand,
-  'Comfortaa': Comfortaa,
-  'Fredoka': Fredoka,
-  'Nunito': Nunito,
-  'Roboto Condensed': RobotoCondensed,
-  'Barlow Condensed': BarlowCondensed,
-  'Fjalla One': FjallaOne,
-  'Yanone Kaffeesatz': YanoneKaffeesatz,
+  // Heavy/Bold Sans-Serif
   'Bangers': Bangers,
-  'Permanent Marker': PermanentMarker,
   'Titan One': TitanOne,
+  'Bungee': Bungee,
+  'Black Ops One': BlackOpsOne,
   'Righteous': Righteous,
-  'Luckiest Guy': LuckiestGuy,
-  'Playfair Display': PlayfairDisplay,
-  'Cinzel': Cinzel,
-  'Cormorant': Cormorant,
-  'Libre Baskerville': LibreBaskerville,
-  'Merriweather': Merriweather,
-  'Abril Fatface': AbrilFatface,
-  'Alfa Slab One': AlfaSlabOne,
-  'Bree Serif': BreeSerif,
-  'Special Elite': SpecialElite,
-  'Staatliches': Staatliches,
-  'Audiowide': Audiowide,
-  'Monoton': Monoton,
-  'Pacifico': Pacifico,
+  // Condensed/Narrow
+  'Bebas Neue': BebasNeue,
+  'Oswald': Oswald,
+  'Fjalla One': FjallaOne,
+  'Antonio': Antonio,
+  'Pathway Gothic One': PathwayGothicOne,
+  // Rounded/Circular
+  'Fredoka': Fredoka,
+  'Bubblegum Sans': BubblegumSans,
+  'Signika': Signika,
+  'Varela Round': VarelaRound,
+  'Comfortaa': Comfortaa,
+  // Script/Cursive
+  'Kalam': Kalam,
+  'Satisfy': Satisfy,
   'Caveat': Caveat,
-  'Amatic SC': AmaticSC,
+  'Shadows Into Light': ShadowsIntoLight,
+  // Display Serif
+  'Cinzel': Cinzel,
+  'Playfair Display': PlayfairDisplay,
+  'Abril Fatface': AbrilFatface,
+  'Bodoni Moda': BodoniModa,
+  'Yeseva One': YesevaOne,
+  // Old Style/Medieval Serif
+  'MedievalSharp': MedievalSharp,
+  'IM Fell DW Pica': IMFellDWPica,
+  'Crimson Text': CrimsonText,
+  // Slab Serif
+  'Crete Round': CreteRound,
+  'Zilla Slab': ZillaSlab,
+  'Bree Serif': BreeSerif,
+  // Decorative/Ornamental
+  'Creepster': Creepster,
+  'Eater': Eater,
+  'Rye': Rye,
   'Press Start 2P': PressStart2P,
+  'Bungee Shade': BungeeShade,
+  // Stencil
+  'Sarpanch': Sarpanch,
+  'Saira Stencil One': SairaStencilOne,
+  'Wallpoet': Wallpoet,
+  // Expanded/Wide
+  'Concert One': ConcertOne,
+  'Arvo': Arvo,
+  'Changa One': ChangaOne,
+  // Handwritten/Marker
+  'Permanent Marker': PermanentMarker,
+  'Indie Flower': IndieFlower,
+  'Patrick Hand': PatrickHand,
+  // Monospace
+  'Courier Prime': CourierPrime,
   'Space Mono': SpaceMono,
 };
 
 // Font family name mappings - maps Claude's font names to React Native font family names
 const FONT_FAMILY_MAPPINGS = {
-  'Bebas Neue': 'BebasNeue_400Regular',
-  'Anton': 'Anton_400Regular',
-  'Francois One': 'FrancoisOne_400Regular',
-  'Passion One': 'PassionOne_400Regular',
-  'Archivo Black': 'ArchivoBlack_400Regular',
-  'Roboto': 'Roboto_400Regular',
-  'Montserrat': 'Montserrat_400Regular',
-  'Lato': 'Lato_400Regular',
-  'Poppins': 'Poppins_400Regular',
-  'Raleway': 'Raleway_400Regular',
-  'Quicksand': 'Quicksand_400Regular',
-  'Comfortaa': 'Comfortaa_400Regular',
-  'Fredoka': 'Fredoka_400Regular',
-  'Nunito': 'Nunito_400Regular',
-  'Roboto Condensed': 'RobotoCondensed_400Regular',
-  'Barlow Condensed': 'BarlowCondensed_400Regular',
-  'Fjalla One': 'FjallaOne_400Regular',
-  'Yanone Kaffeesatz': 'YanoneKaffeesatz_400Regular',
+  // Heavy/Bold Sans-Serif
   'Bangers': 'Bangers_400Regular',
-  'Permanent Marker': 'PermanentMarker_400Regular',
   'Titan One': 'TitanOne_400Regular',
+  'Bungee': 'Bungee_400Regular',
+  'Black Ops One': 'BlackOpsOne_400Regular',
   'Righteous': 'Righteous_400Regular',
-  'Luckiest Guy': 'LuckiestGuy_400Regular',
-  'Playfair Display': 'PlayfairDisplay_400Regular',
-  'Cinzel': 'Cinzel_400Regular',
-  'Cormorant': 'Cormorant_400Regular',
-  'Libre Baskerville': 'LibreBaskerville_400Regular',
-  'Merriweather': 'Merriweather_400Regular',
-  'Abril Fatface': 'AbrilFatface_400Regular',
-  'Alfa Slab One': 'AlfaSlabOne_400Regular',
-  'Bree Serif': 'BreeSerif_400Regular',
-  'Special Elite': 'SpecialElite_400Regular',
-  'Staatliches': 'Staatliches_400Regular',
-  'Audiowide': 'Audiowide_400Regular',
-  'Monoton': 'Monoton_400Regular',
-  'Pacifico': 'Pacifico_400Regular',
+  // Condensed/Narrow
+  'Bebas Neue': 'BebasNeue_400Regular',
+  'Oswald': 'Oswald_400Regular',
+  'Fjalla One': 'FjallaOne_400Regular',
+  'Antonio': 'Antonio_400Regular',
+  'Pathway Gothic One': 'PathwayGothicOne_400Regular',
+  // Rounded/Circular
+  'Fredoka': 'Fredoka_400Regular',
+  'Bubblegum Sans': 'BubblegumSans_400Regular',
+  'Signika': 'Signika_400Regular',
+  'Varela Round': 'VarelaRound_400Regular',
+  'Comfortaa': 'Comfortaa_400Regular',
+  // Script/Cursive
+  'Kalam': 'Kalam_400Regular',
+  'Satisfy': 'Satisfy_400Regular',
   'Caveat': 'Caveat_400Regular',
-  'Amatic SC': 'AmaticSC_400Regular',
+  'Shadows Into Light': 'ShadowsIntoLight_400Regular',
+  // Display Serif
+  'Cinzel': 'Cinzel_400Regular',
+  'Playfair Display': 'PlayfairDisplay_400Regular',
+  'Abril Fatface': 'AbrilFatface_400Regular',
+  'Bodoni Moda': 'BodoniModa_400Regular',
+  'Yeseva One': 'YesevaOne_400Regular',
+  // Old Style/Medieval Serif
+  'MedievalSharp': 'MedievalSharp_400Regular',
+  'IM Fell DW Pica': 'IMFellDWPica_400Regular',
+  'Crimson Text': 'CrimsonText_400Regular',
+  // Slab Serif
+  'Crete Round': 'CreteRound_400Regular',
+  'Zilla Slab': 'ZillaSlab_400Regular',
+  'Bree Serif': 'BreeSerif_400Regular',
+  // Decorative/Ornamental
+  'Creepster': 'Creepster_400Regular',
+  'Eater': 'Eater_400Regular',
+  'Rye': 'Rye_400Regular',
   'Press Start 2P': 'PressStart2P_400Regular',
+  'Bungee Shade': 'BungeeShade_400Regular',
+  // Stencil
+  'Sarpanch': 'Sarpanch_400Regular',
+  'Saira Stencil One': 'SairaStencilOne_400Regular',
+  'Wallpoet': 'Wallpoet_400Regular',
+  // Expanded/Wide
+  'Concert One': 'ConcertOne_400Regular',
+  'Arvo': 'Arvo_400Regular',
+  'Changa One': 'ChangaOne_400Regular',
+  // Handwritten/Marker
+  'Permanent Marker': 'PermanentMarker_400Regular',
+  'Indie Flower': 'IndieFlower_400Regular',
+  'Patrick Hand': 'PatrickHand_400Regular',
+  // Monospace
+  'Courier Prime': 'CourierPrime_400Regular',
   'Space Mono': 'SpaceMono_400Regular',
 };
 

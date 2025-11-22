@@ -409,15 +409,29 @@ function processSearchResults(snapshot, searchTerm, limit) {
     const gameNameLower = game.nameLower || game.name?.toLowerCase() || '';
     
     // Normalize both strings for comparison (remove extra spaces, punctuation)
-    const normalizedSearch = searchTerm.trim().toLowerCase();
-    const normalizedGame = gameNameLower.trim().toLowerCase();
+    // Also remove spaces for better matching (e.g., "small world" matches "smallworld")
+    const normalizedSearch = searchTerm.trim().toLowerCase().replace(/\s+/g, '');
+    const normalizedGame = gameNameLower.trim().toLowerCase().replace(/\s+/g, '');
     
-    if (normalizedGame === normalizedSearch) {
+    // Also keep version with spaces for exact matching
+    const searchWithSpaces = searchTerm.trim().toLowerCase();
+    const gameWithSpaces = gameNameLower.trim().toLowerCase();
+    
+    if (gameWithSpaces === searchWithSpaces) {
       exactMatches.push({ doc, game, similarity: 1.0, matchType: 'exact' });
-    } else if (normalizedGame.startsWith(normalizedSearch)) {
+    } else if (normalizedGame === normalizedSearch) {
+      // Exact match when spaces are removed (e.g., "smallworld" = "small world")
+      exactMatches.push({ doc, game, similarity: 0.98, matchType: 'exact' });
+    } else if (gameWithSpaces.startsWith(searchWithSpaces)) {
       startsWithMatches.push({ doc, game, similarity: 1.0, matchType: 'startsWith' });
-    } else if (normalizedGame.includes(normalizedSearch)) {
+    } else if (normalizedGame.startsWith(normalizedSearch)) {
+      // Starts with match when spaces are removed
+      startsWithMatches.push({ doc, game, similarity: 0.98, matchType: 'startsWith' });
+    } else if (gameWithSpaces.includes(searchWithSpaces)) {
       containsMatches.push({ doc, game, similarity: 1.0, matchType: 'contains' });
+    } else if (normalizedGame.includes(normalizedSearch)) {
+      // Contains match when spaces are removed
+      containsMatches.push({ doc, game, similarity: 0.95, matchType: 'contains' });
     } else {
       // Also check if search term is contained in game name (reverse check)
       // This helps with cases like searching "imperius" but game is "imperious"
@@ -549,6 +563,13 @@ export async function getGameById(gameId) {
       average: game.average || '',
       bayesAverage: game.bayesAverage || '',
       usersRated: game.usersRated || '',
+      thumbnail: game.thumbnail || null,
+      image: game.image || null,
+      minPlayers: game.minPlayers || null,
+      maxPlayers: game.maxPlayers || null,
+      playingTime: game.playingTime || null,
+      minAge: game.minAge || null,
+      description: game.description || null,
       abstractsRank: game.abstractsRank || '',
       cgsRank: game.cgsRank || '',
       childrensGamesRank: game.childrensGamesRank || '',

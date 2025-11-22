@@ -1,297 +1,176 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
-import Button from '../components/common/Button';
-import Input from '../components/common/Input';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
+import Input from '../components/common/Input';
+import Button from '../components/common/Button';
 
-const MODES = {
-  LOGIN: 'login',
-  SIGNUP: 'signup',
-  FORGOT: 'forgot',
-};
+const Auth = () => {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const { login, signup } = useAuth();
+  const mode = route.params?.mode || 'login'; // 'login' or 'register'
 
-const initialFormState = {
-  email: '',
-  password: '',
-  confirmPassword: '',
-  name: '',
-};
-
-const AuthScreen = ({ route, navigation }) => {
-  const { login, signup, resetPassword } = useAuth();
-  const initialModeParam = route?.params?.mode;
-  const getValidatedMode = (value) =>
-    Object.values(MODES).includes(value) ? value : MODES.LOGIN;
-
-  const [mode, setMode] = useState(getValidatedMode(initialModeParam));
-  const [form, setForm] = useState(initialFormState);
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [name, setName] = useState('');
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const title = useMemo(() => {
-    switch (mode) {
-      case MODES.SIGNUP:
-        return 'Create your MeepleUp account';
-      case MODES.FORGOT:
-        return 'Reset your password';
-      default:
-        return 'Welcome back to MeepleUp';
-    }
-  }, [mode]);
-
-  const subtitle = useMemo(() => {
-    switch (mode) {
-      case MODES.SIGNUP:
-        return 'Join the community and organise unforgettable board game nights.';
-      case MODES.FORGOT:
-        return 'Enter your email address and we will send you a reset link.';
-      default:
-        return 'Sign in to plan events, manage your collection, and connect with other gamers.';
-    }
-  }, [mode]);
-
-  const handleChange = (field, value) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+  const handleSubmit = async () => {
     setError('');
-    setMessage('');
-  };
 
-  const switchMode = (nextMode) => {
-    setMode(getValidatedMode(nextMode));
-    setForm((prev) => ({
-      ...prev,
-      password: '',
-      confirmPassword: '',
-    }));
-    setError('');
-    setMessage('');
-  };
-
-  useEffect(() => {
-    const requestedMode = getValidatedMode(route?.params?.mode);
-    if (requestedMode !== mode) {
-      setMode(requestedMode);
-      setForm((prev) => ({
-        ...prev,
-        password: '',
-        confirmPassword: '',
-      }));
-      setError('');
-      setMessage('');
-    }
-  }, [mode, route?.params?.mode]);
-
-  const handleLogin = async () => {
-    if (!form.email.trim() || !form.password) {
-      setError('Please enter your email and password.');
+    if (!email.trim()) {
+      setError('Please enter your email');
       return;
+    }
+
+    if (!password.trim()) {
+      setError('Please enter your password');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    if (mode === 'register') {
+      if (!name.trim()) {
+        setError('Please enter your name');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
     }
 
     setLoading(true);
+
     try {
-      await login({ email: form.email, password: form.password });
-    } catch (authError) {
-      setError(authError.message || 'Unable to sign in. Please try again.');
+      if (mode === 'register') {
+        await signup({ email, password, name });
+        Alert.alert(
+          'Account Created',
+          'Please check your email to verify your account before signing in.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.navigate('Auth', { mode: 'login' }),
+            },
+          ]
+        );
+      } else {
+        await login({ email, password });
+        // Navigation will happen automatically via auth state change
+      }
+    } catch (err) {
+      setError(err.message || 'An error occurred. Please try again.');
+      console.error('Auth error:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSignup = async () => {
-    if (!form.name.trim()) {
-      setError('Please provide your name so friends recognise you.');
-      return;
-    }
-
-    if (!form.email.trim()) {
-      setError('Email is required.');
-      return;
-    }
-
-    if (!form.password || form.password.length < 6) {
-      setError('Password should be at least 6 characters long.');
-      return;
-    }
-
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await signup({
-        email: form.email,
-        password: form.password,
-        name: form.name,
-      });
-      setMessage('Account created! Please check your email for a verification link.');
-    } catch (authError) {
-      setError(authError.message || 'Unable to create account. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReset = async () => {
-    if (!form.email.trim()) {
-      setError('Enter the email address associated with your account.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await resetPassword(form.email);
-      setMessage('Password reset email sent! Check your inbox (and spam).');
-    } catch (authError) {
-      setError(authError.message || 'Unable to send reset email. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = () => {
-    switch (mode) {
-      case MODES.SIGNUP:
-        handleSignup();
-        break;
-      case MODES.FORGOT:
-        handleReset();
-        break;
-      default:
-        handleLogin();
-    }
-  };
-
-  const renderFooter = () => {
-    switch (mode) {
-      case MODES.LOGIN:
-        return (
-          <View style={styles.footerActions}>
-            <Button
-              label="Forgot password?"
-              onPress={() => switchMode(MODES.FORGOT)}
-              variant="outline"
-              style={styles.secondaryButton}
-            />
-            <Button
-              label="Create account"
-              onPress={() => switchMode(MODES.SIGNUP)}
-              variant="outline"
-            />
-          </View>
-        );
-      case MODES.SIGNUP:
-        return (
-          <View style={styles.footerActions}>
-            <Text style={styles.inlineText}>Already have an account?</Text>
-            <Button
-              label="Sign in"
-              onPress={() => switchMode(MODES.LOGIN)}
-              variant="outline"
-            />
-          </View>
-        );
-      case MODES.FORGOT:
-        return (
-          <View style={styles.footerActions}>
-            <Text style={styles.inlineText}>Remembered your password?</Text>
-            <Button
-              label="Back to sign in"
-              onPress={() => switchMode(MODES.LOGIN)}
-              variant="outline"
-            />
-          </View>
-        );
-      default:
-        return null;
     }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.topRow}>
-        {navigation.canGoBack() && (
-          <Pressable onPress={() => navigation.goBack()} accessibilityRole="button">
-            <Text style={styles.backText}>Back</Text>
-          </Pressable>
-        )}
-      </View>
+      <View style={styles.content}>
+        <Button
+          label="← Back"
+          onPress={() => navigation.goBack()}
+          variant="outline"
+          style={styles.backButton}
+        />
 
-      <View style={styles.card}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={styles.title}>
+          {mode === 'register' ? 'Create Account' : 'Sign In'}
+        </Text>
+        <Text style={styles.subtitle}>
+          {mode === 'register'
+            ? 'Join MeepleUp to connect with board game enthusiasts'
+            : 'Welcome back! Sign in to continue'}
+        </Text>
 
-        {error ? (
-          <View style={[styles.banner, styles.errorBanner]}>
-            <Text style={styles.bannerText}>{error}</Text>
-          </View>
-        ) : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {message ? (
-          <View style={[styles.banner, styles.infoBanner]}>
-            <Text style={styles.bannerText}>{message}</Text>
-          </View>
-        ) : null}
-
-        {mode === MODES.SIGNUP && (
+        {mode === 'register' && (
           <Input
-            placeholder="Name"
-            value={form.name}
-            onChangeText={(value) => handleChange('name', value)}
+            placeholder="Full Name"
+            value={name}
+            onChangeText={(text) => {
+              setName(text);
+              setError('');
+            }}
+            autoCapitalize="words"
             style={styles.input}
           />
         )}
 
         <Input
           placeholder="Email"
-          value={form.email}
-          onChangeText={(value) => handleChange('email', value)}
+          value={email}
+          onChangeText={(text) => {
+            setEmail(text);
+            setError('');
+          }}
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
           style={styles.input}
         />
 
-        {mode !== MODES.FORGOT && (
-          <Input
-            placeholder="Password"
-            value={form.password}
-            onChangeText={(value) => handleChange('password', value)}
-            secureTextEntry
-            style={styles.input}
-          />
-        )}
+        <Input
+          placeholder="Password"
+          value={password}
+          onChangeText={(text) => {
+            setPassword(text);
+            setError('');
+          }}
+          secureTextEntry
+          style={styles.input}
+        />
 
-        {mode === MODES.SIGNUP && (
+        {mode === 'register' && (
           <Input
-            placeholder="Confirm password"
-            value={form.confirmPassword}
-            onChangeText={(value) => handleChange('confirmPassword', value)}
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChangeText={(text) => {
+              setConfirmPassword(text);
+              setError('');
+            }}
             secureTextEntry
             style={styles.input}
           />
         )}
 
         <Button
-          label={
-            loading
-              ? 'Please wait...'
-              : mode === MODES.SIGNUP
-              ? 'Create account'
-              : mode === MODES.FORGOT
-              ? 'Send reset email'
-              : 'Sign in'
-          }
+          label={loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Sign In'}
           onPress={handleSubmit}
           disabled={loading}
-          style={styles.primaryButton}
+          style={styles.submitButton}
         />
 
-        {renderFooter()}
+        <View style={styles.switchContainer}>
+          <Text style={styles.switchText}>
+            {mode === 'register'
+              ? 'Already have an account? '
+              : "Don't have an account? "}
+          </Text>
+          <Pressable
+            onPress={() =>
+              navigation.navigate('Auth', {
+                mode: mode === 'register' ? 'login' : 'register',
+              })
+            }
+          >
+            <Text style={styles.switchLink}>
+              {mode === 'register' ? 'Sign In' : 'Create Account'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </ScrollView>
   );
@@ -300,81 +179,62 @@ const AuthScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
     backgroundColor: '#f5f5f5',
   },
-  topRow: {
-    minHeight: 24,
-    marginBottom: 16,
+  content: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+    maxWidth: 400,
+    width: '100%',
+    alignSelf: 'center',
   },
-  backText: {
-    color: '#4a90e2',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: 20,
   },
   title: {
-    fontSize: 26,
-    fontWeight: '700',
+    fontSize: 32,
+    fontWeight: 'bold',
     color: '#d45d5d',
-    backgroundColor: '#f3f3f3',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 12,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#555',
+    color: '#666',
+    marginBottom: 32,
     textAlign: 'center',
-    marginBottom: 24,
   },
   input: {
-    marginBottom: 12,
-  },
-  primaryButton: {
-    marginTop: 8,
     marginBottom: 16,
   },
-  footerActions: {
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  inlineText: {
+  error: {
+    color: '#d32f2f',
     fontSize: 14,
-    color: '#555',
-    marginBottom: 8,
-  },
-  secondaryButton: {
-    marginBottom: 12,
-  },
-  banner: {
-    padding: 12,
-    borderRadius: 8,
     marginBottom: 16,
-  },
-  errorBanner: {
-    backgroundColor: '#fdecea',
-  },
-  infoBanner: {
-    backgroundColor: '#e8f4fd',
-  },
-  bannerText: {
-    fontSize: 14,
-    color: '#333',
     textAlign: 'center',
+  },
+  submitButton: {
+    width: '100%',
+    marginTop: 8,
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 24,
+    flexWrap: 'wrap',
+  },
+  switchText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  switchLink: {
+    fontSize: 14,
+    color: '#4a90e2',
+    fontWeight: '600',
   },
 });
 
-export default AuthScreen;
+export default Auth;
+

@@ -23,6 +23,7 @@ For each game you identify, return a JSON object with this structure:
   "title": "EXACT GAME TITLE AS IT APPEARS (translated to English if foreign language)",
   "additionalText": "string or null - any text on the spine that is NOT part of the actual game title (subtitles, taglines, publisher names, edition info, designer names, etc.). Set to null if no additional text is present.",
   "confidence": "high|medium|low",
+  "boxDescription": "string or null - REQUIRED when confidence is 'low'. Briefly describe the game box in terms of pictures, patterns, colors, and size (e.g., 'small red box with a dragon on it', 'large blue box with geometric patterns'). Set to null for high/medium confidence.",
   "notes": "optional string - edition notes, original language if translated, or font size variations observed within the title",
   "styling": {
     "backgroundColor": "hex color code (e.g., #D97D3A) - primary/dominant background color of the spine",
@@ -46,65 +47,75 @@ For each game you identify, return a JSON object with this structure:
 
 AVAILABLE FONTS (choose ONLY from this list - match custom fonts to the closest one based on characteristics):
 
-Bold/Geometric Sans (High Impact):
-- Bebas Neue - Ultra-condensed, all-caps display font with uniform stroke width. Strong vertical emphasis, no lowercase. Perfect for bold headlines.
-- Anton - Extra bold sans-serif with compressed width. Very heavy weight, geometric construction. Commanding presence.
-- Francois One - Bold condensed sans with rounded corners. Friendly but strong. Good readability despite weight.
-- Passion One - Ultra-bold display font with tight spacing. Very impactful, condensed proportions.
-- Archivo Black - Ultra-bold sans-serif with slight geometric influence. Very heavy strokes, excellent for display.
+Heavy/Bold Sans-Serif:
+- Bangers - Extreme weight contrast, angled terminals, condensed.
+- Titan One - Ultra-bold, low contrast, rounded corners.
+- Bungee - Inline (internal line detail), monoline, geometric.
+- Black Ops One - Extremely heavy weight, high x-height, condensed.
+- Righteous - Bold weight, angled stress, geometric construction.
 
-Medium Weight Sans (Versatile):
-- Roboto - Neo-grotesque sans with mechanical skeleton. Neutral, readable, modern standard.
-- Montserrat - Geometric sans inspired by urban typography. Clean, modern, multiple weights.
-- Lato - Semi-rounded humanist sans. Warm, stable, professional.
-- Poppins - Geometric sans with circular forms. International, modern, very readable.
-- Raleway - Elegant sans with unique 'w'. Thin to black weights, sophisticated.
+Condensed/Narrow:
+- Bebas Neue - Tall x-height, ultra-condensed, no serifs, geometric.
+- Oswald - Condensed, vertical stress, small apertures.
+- Fjalla One - Condensed, medium contrast, slightly rounded terminals.
+- Antonio - Condensed, geometric, minimal contrast.
+- Pathway Gothic One - Narrow, uniform stroke width, tall ascenders.
 
-Rounded/Friendly Sans:
-- Quicksand - Geometric rounded sans with circular forms. Friendly, modern, clean.
-- Comfortaa - Rounded geometric sans with soft curves. Very friendly, approachable.
-- Fredoka - Rounded display sans with playful character. Multiple weights, very friendly.
-- Nunito - Rounded sans with balanced proportions. Soft, readable, versatile.
+Rounded/Circular:
+- Fredoka - Low contrast, circular forms, open apertures, large x-height.
+- Bubblegum Sans - Monoweight, circular letterforms, closed counters.
+- Signika - Rounded terminals, open apertures, humanist proportions.
+- Varela Round - Uniform rounded terminals, geometric, low contrast.
+- Comfortaa - Circular forms, geometric, low contrast, large apertures.
 
-Condensed Fonts:
-- Roboto Condensed - Condensed version of Roboto. Clean, efficient, modern.
-- Barlow Condensed - Slightly rounded condensed sans. Tall x-height, versatile.
-- Fjalla One - Bold condensed sans with strong presence. Medium contrast.
-- Yanone Kaffeesatz - Narrow sans with elegant proportions. Light to bold.
+Script/Cursive (Connected Strokes):
+- Kalam - Handwritten, irregular baseline, variable stroke width.
+- Satisfy - Connected letterforms, high slant angle, thick-thin contrast.
+- Caveat - Handwritten, irregular spacing, variable stroke weight.
+- Shadows Into Light - Handwritten, upright posture, casual baseline variation.
 
-Playful/Display/Comic:
-- Bangers - Comic book style with irregular baseline. Bold, energetic, fun.
-- Permanent Marker - Hand-drawn marker font. Irregular, casual, authentic.
-- Titan One - Bold display with playful proportions. Strong, friendly.
-- Righteous - Futuristic display with geometric forms. Bold, sci-fi influenced.
-- Luckiest Guy - Heavy casual display. Very bold, cheerful.
+Display Serif (High Contrast):
+- Cinzel - High contrast, bracketed serifs, classical proportions, vertical stress.
+- Playfair Display - High contrast serifs, large x-height, transitional style.
+- Abril Fatface - Extreme contrast, heavy weight, thin serifs, condensed.
+- Bodoni Moda - Extreme thick-thin contrast, hairline serifs, geometric.
+- Yeseva One - High contrast, decorative serifs, compressed letterforms.
 
-Elegant/Sophisticated Serif:
-- Playfair Display - High-contrast transitional serif. Elegant, sophisticated, large display.
-- Cinzel - Classical Roman-inspired capitals. Strong serifs, elegant proportions.
-- Cormorant - Delicate display serif with calligraphic influence. Elegant, refined.
-- Libre Baskerville - Classic serif for body text. Traditional, readable.
-- Merriweather - Condensed serif with strong character. Slightly bold, very readable.
+Old Style/Medieval Serif:
+- MedievalSharp - Blackletter/Gothic, angular, ornamental, heavy vertical strokes.
+- IM Fell DW Pica - Old style serifs, diagonal stress, moderate contrast.
+- Crimson Text - Old style, angled stress, bracketed serifs.
 
-Bold/Display Serif (Slab):
-- Abril Fatface - Ultra-bold display serif with high contrast. Dramatic, elegant.
-- Alfa Slab One - Ultra-bold slab serif display. Very heavy, retro feel.
-- Bree Serif - Upright italic slab serif. Friendly, distinctive.
+Slab Serif (Blocky):
+- Crete Round - Rounded slab serifs, low contrast, large x-height.
+- Zilla Slab - Modern slab, slightly condensed, medium weight.
+- Bree Serif - Rounded slab terminals, friendly curves, condensed.
 
-Vintage/Retro/Technical:
-- Special Elite - Typewriter font with authentic imperfections. Vintage, distinctive.
-- Staatliches - Industrial condensed display. Strong, geometric, vintage industrial.
-- Audiowide - Futuristic/retro display. Geometric, sci-fi influenced.
-- Monoton - Art deco inline display. Elegant, vintage, geometric.
+Decorative/Ornamental:
+- Creepster - Dripping terminals, irregular baseline, horror-style distortion.
+- Eater - Eroded/distressed edges, irregular outlines, heavy weight.
+- Rye - Inline detail, Western style, decorative serifs, ornamental.
+- Press Start 2P - Pixel/bitmap, monospace, 8x8 grid construction.
+- Bungee Shade - 3D shadow effect, inline detail, geometric.
 
-Script/Handwritten:
-- Pacifico - Casual brush script. Friendly, flowing, relaxed.
-- Caveat - Handwritten marker style. Casual, authentic, irregular.
-- Amatic SC - Hand-drawn narrow font. Casual, distinctive.
+Stencil (Disconnected Strokes):
+- Sarpanch - Stencil gaps, heavy weight, devanagari-influenced.
+- Saira Stencil One - Uniform stencil breaks, geometric, condensed.
+- Wallpoet - Stencil gaps, geometric, monoline.
 
-Monospace/Pixel:
-- Press Start 2P - 8-bit pixel font. Video game aesthetic, blocky.
-- Space Mono - Geometric monospace with personality. Modern, distinctive.
+Expanded/Wide:
+- Concert One - Wide letterforms, rounded, low contrast.
+- Arvo - Slab serif, geometric, wide proportions.
+- Changa One - Extended width, heavy weight, rounded.
+
+Handwritten/Marker:
+- Permanent Marker - Thick strokes, irregular edges, marker texture.
+- Indie Flower - Light weight, handwritten, irregular baseline.
+- Patrick Hand - Natural handwriting, consistent weight, casual.
+
+Monospace:
+- Courier Prime - Fixed width, typewriter style, serifs.
+- Space Mono - Fixed width, geometric, retro-futuristic.
 
 IMPORTANT GUIDELINES:
 
@@ -121,6 +132,7 @@ IMPORTANT GUIDELINES:
 - Use "high" confidence only when you're certain of the title and can see the complete box side.
 - Use "medium" confidence when you're fairly sure but there's some ambiguity.
 - Use "low" confidence when the title is unclear even though the box side is complete.
+- IMPORTANT: When confidence is "low", you MUST provide a "boxDescription" field describing the box in terms of pictures, patterns, colors, and size (e.g., "small red box with a dragon on it", "large blue box with geometric patterns"). This helps the user identify which box to type the title for.
 - If you see multiple copies or editions, list them separately and note the edition in the "notes" field.
 - Look for additional text on the spine that is NOT part of the game title (subtitles, taglines, publisher names, edition info, designer names, etc.). Include this in the "additionalText" field. Only include text that is clearly visible and separate from the main title.
 - If lighting is poor, glare is excessive, or visibility is compromised, return an empty games array and include guidance in comments.

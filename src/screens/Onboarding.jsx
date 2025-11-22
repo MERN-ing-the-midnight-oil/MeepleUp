@@ -71,11 +71,22 @@ const Onboarding = () => {
         return;
       }
 
-      navigation.replace('Home');
+      // Only navigate if navigation is available and user is authenticated
+      if (navigation && navigation.replace) {
+        try {
+          navigation.replace('Collection');
+        } catch (navErr) {
+          console.error('Navigation error:', navErr);
+          setError('Event joined! Please use the menu to navigate.');
+          setLoading(false);
+        }
+      } else {
+        setError('Event joined! Please use the menu to navigate.');
+        setLoading(false);
+      }
     } catch (err) {
       setError('Something went wrong. Please try again.');
       console.error(err);
-    } finally {
       setLoading(false);
     }
   };
@@ -94,11 +105,22 @@ const Onboarding = () => {
     setLoading(true);
     try {
       await updateUser({ location: location.trim() });
-      navigation.replace('Discover');
+      // Only navigate if navigation is available and user is authenticated
+      if (navigation && navigation.replace) {
+        try {
+          navigation.replace('Collection');
+        } catch (navErr) {
+          console.error('Navigation error:', navErr);
+          setError('Location saved! Please use the menu to navigate.');
+          setLoading(false);
+        }
+      } else {
+        setError('Location saved! Please use the menu to navigate.');
+        setLoading(false);
+      }
     } catch (err) {
       setError('Something went wrong. Please try again.');
       console.error(err);
-    } finally {
       setLoading(false);
     }
   };

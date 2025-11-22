@@ -2,10 +2,16 @@ import axios from 'axios';
 import { API_CONFIG } from '../config/api';
 import * as bggLocalDB from './bggLocalDB';
 
-// RapidAPI Barcode Lookup configuration
+// ============================================================================
+// ARCHIVED: Barcode Scanning Feature
+// The barcode scanning functionality has been archived to src/archive/barcode-scanner/
+// These functions are preserved but not actively used.
+// ============================================================================
+
+// RapidAPI Barcode Lookup configuration (ARCHIVED - kept for deprecated functions)
 const RAPIDAPI_BARCODE_BASE = 'https://barcodes-lookup.p.rapidapi.com';
 
-// GameUPC API configuration
+// GameUPC API configuration (ARCHIVED - kept for deprecated functions)
 const GAMEUPC_BASE = 'https://api.gameupc.com/test';
 
 /**
@@ -13,6 +19,7 @@ const GAMEUPC_BASE = 'https://api.gameupc.com/test';
  * This helps when searching BoardGameGeek API
  * @param {string} title - The title from the barcode scanner
  * @returns {string} - Cleaned title without "Board Game", "Board", "Game" words
+ * @deprecated This function is part of the archived barcode scanning feature
  */
 export const cleanScannerTitle = (title) => {
   if (!title) return '';
@@ -24,6 +31,8 @@ export const cleanScannerTitle = (title) => {
  * @param {string} barcode - The UPC/EAN barcode number
  * @param {boolean} searchBGG - Whether to automatically search BGG after barcode lookup
  * @returns {Promise<Object>} Combined product information from barcode and BGG
+ * @deprecated ARCHIVED - This function is part of the archived barcode scanning feature
+ * See src/archive/barcode-scanner/barcodeApi.js for the archived implementation
  */
 export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
   try {
@@ -102,6 +111,8 @@ export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
  * @param {string} barcode - The UPC/EAN barcode number
  * @param {string} searchTerms - Optional search terms for additional search
  * @returns {Promise<Object>} Game information from GameUPC
+ * @deprecated ARCHIVED - This function is part of the archived barcode scanning feature
+ * See src/archive/barcode-scanner/barcodeApi.js for the archived implementation
  */
 export const searchGameUPC = async (barcode, searchTerms = null) => {
   try {
@@ -144,6 +155,8 @@ export const searchGameUPC = async (barcode, searchTerms = null) => {
  * @param {number} bggId - The BGG ID selected by the user
  * @param {string} userId - Unique user identifier (at least 8 characters)
  * @returns {Promise<Object>} Update result
+ * @deprecated ARCHIVED - This function is part of the archived barcode scanning feature
+ * See src/archive/barcode-scanner/barcodeApi.js for the archived implementation
  */
 export const updateGameUPCSelection = async (barcode, bggId, userId) => {
   try {
@@ -165,6 +178,8 @@ export const updateGameUPCSelection = async (barcode, bggId, userId) => {
  * Search for a game by barcode/UPC using RapidAPI, with GameUPC as fallback
  * @param {string} barcode - The UPC/EAN barcode number
  * @returns {Promise<Object>} Product information from the barcode lookup
+ * @deprecated ARCHIVED - This function is part of the archived barcode scanning feature
+ * See src/archive/barcode-scanner/barcodeApi.js for the archived implementation
  */
 export const searchGameByBarcode = async (barcode) => {
   if (!barcode || !barcode.trim()) {
@@ -175,6 +190,7 @@ export const searchGameByBarcode = async (barcode) => {
   let primaryResult = null;
   let primaryError = null;
 
+  // ARCHIVED: Barcode scanning feature is archived
   // Try primary barcode lookup API first
   try {
     const response = await axios.get(`${RAPIDAPI_BARCODE_BASE}/`, {
@@ -243,8 +259,10 @@ export const searchGameByBarcode = async (barcode) => {
     return primaryResult;
   }
 
+  // ARCHIVED: GameUPC fallback is part of archived barcode scanning
   // Otherwise, try GameUPC as fallback
   try {
+    // Note: searchGameUPC is also archived - this will fail if called
     const gameUPCResult = await searchGameUPC(cleanBarcode);
     
     // Handle GameUPC response
@@ -324,10 +342,12 @@ export const searchGameByBarcode = async (barcode) => {
 
 /**
  * Search for games by name
- * Priority: Firebase Firestore -> Local DB
- * Returns empty array if no results found
+ * Priority: Firebase Firestore -> Local DB -> BGG API (if fallbackToBGG is true)
+ * @param {string} query - Game name to search for
+ * @param {boolean} fallbackToBGG - If true, fall back to BGG API when backend returns no results
+ * @returns {Promise<Array>} Array of matching games
  */
-export const searchGamesByName = async (query) => {
+export const searchGamesByName = async (query, fallbackToBGG = false) => {
   try {
     if (__DEV__) {
       console.log('[Game Search] Searching for:', query);
@@ -393,6 +413,27 @@ export const searchGamesByName = async (query) => {
       }
     }
 
+    // No results found in backend - try BGG API if fallback is enabled
+    if (fallbackToBGG) {
+      if (__DEV__) {
+        console.log('[Game Search] No results in backend, trying BGG API...');
+      }
+      try {
+        const { searchBGGAPI } = await import('../services/bggApi');
+        const bggResults = await searchBGGAPI(query, 50);
+        if (bggResults && bggResults.length > 0) {
+          if (__DEV__) {
+            console.log(`[BGG API] Found ${bggResults.length} games`);
+          }
+          return bggResults;
+        }
+      } catch (bggError) {
+        if (__DEV__) {
+          console.warn('[BGG API] Search failed:', bggError);
+        }
+      }
+    }
+
     // No results found
     if (__DEV__) {
       console.log('[Game Search] No results found, returning empty array');
@@ -406,13 +447,17 @@ export const searchGamesByName = async (query) => {
 
 /**
  * Get detailed game information by BGG ID
- * Priority: Firebase Firestore -> Local DB
+ * Priority: Firebase Firestore -> Local DB -> BGG API
+ * BGG API is used to fetch thumbnails/images when not available in Firestore
  */
 export const getGameDetails = async (gameId) => {
   try {
     if (__DEV__) {
       console.log('[Game Details] Fetching game:', gameId);
     }
+
+    let gameData = null;
+    let hasThumbnail = false;
 
     // Try Firebase Firestore first
     try {
@@ -424,7 +469,7 @@ export const getGameDetails = async (gameId) => {
           console.log(`[Firestore] Found game: ${firestoreGame.name}`);
         }
         // Format to match BGG API response format
-        return {
+        gameData = {
           id: firestoreGame.id,
           name: firestoreGame.name,
           yearPublished: firestoreGame.yearPublished || '',
@@ -432,9 +477,15 @@ export const getGameDetails = async (gameId) => {
           bayesAverage: firestoreGame.bayesAverage || '',
           average: firestoreGame.average || '',
           usersRated: firestoreGame.usersRated || '',
-          thumbnail: null,
-          image: null,
+          thumbnail: firestoreGame.thumbnail || null,
+          image: firestoreGame.image || null,
+          minPlayers: firestoreGame.minPlayers || null,
+          maxPlayers: firestoreGame.maxPlayers || null,
+          playingTime: firestoreGame.playingTime || null,
+          minAge: firestoreGame.minAge || null,
+          description: firestoreGame.description || null,
         };
+        hasThumbnail = !!(gameData.thumbnail || gameData.image);
       }
     } catch (firestoreError) {
       if (__DEV__) {
@@ -443,22 +494,95 @@ export const getGameDetails = async (gameId) => {
     }
 
     // Fallback: Local database
-    try {
-      const localGame = await bggLocalDB.getGameById(gameId);
-      if (localGame) {
-        if (__DEV__) {
-          console.log(`[Local DB] Found game: ${localGame.name}`);
+    if (!gameData) {
+      try {
+        const localGame = await bggLocalDB.getGameById(gameId);
+        if (localGame) {
+          if (__DEV__) {
+            console.log(`[Local DB] Found game: ${localGame.name}`);
+          }
+          gameData = bggLocalDB.parseBGGGameDetails(localGame);
+          hasThumbnail = !!(gameData?.thumbnail || gameData?.image);
         }
-        return bggLocalDB.parseBGGGameDetails(localGame);
+      } catch (localError) {
+        // Local DB not available
       }
-    } catch (localError) {
-      // Local DB not available
     }
 
-    if (__DEV__) {
-      console.warn('[Game Details] Game not found:', gameId);
+    // If we have game data but no thumbnail, fetch from BGG API
+    if (gameData && !hasThumbnail) {
+      try {
+        if (__DEV__) {
+          console.log('[BGG API] Fetching thumbnail for game:', gameId);
+        }
+        const { fetchBGGGameDetails } = await import('../services/bggApi');
+        const bggData = await fetchBGGGameDetails(gameId);
+        
+        if (bggData) {
+          // Merge BGG API data (thumbnails) with existing game data
+          gameData.thumbnail = bggData.thumbnail || gameData.thumbnail || null;
+          gameData.image = bggData.image || gameData.image || null;
+          
+          // Also update other fields if they're missing
+          if (!gameData.minPlayers && bggData.minPlayers) gameData.minPlayers = bggData.minPlayers;
+          if (!gameData.maxPlayers && bggData.maxPlayers) gameData.maxPlayers = bggData.maxPlayers;
+          if (!gameData.playingTime && bggData.playingTime) gameData.playingTime = bggData.playingTime;
+          if (!gameData.minAge && bggData.minAge) gameData.minAge = bggData.minAge;
+          if (!gameData.description && bggData.description) gameData.description = bggData.description;
+          
+          if (__DEV__) {
+            console.log('[BGG API] Successfully fetched thumbnail:', gameData.thumbnail ? 'yes' : 'no');
+          }
+        }
+      } catch (bggError) {
+        if (__DEV__) {
+          console.warn('[BGG API] Failed to fetch thumbnail:', bggError);
+        }
+      }
     }
-    return null;
+
+    // If no game data found at all, try BGG API as last resort
+    if (!gameData) {
+      try {
+        if (__DEV__) {
+          console.log('[BGG API] Game not in database, fetching from BGG API');
+        }
+        const { fetchBGGGameDetails } = await import('../services/bggApi');
+        const bggData = await fetchBGGGameDetails(gameId);
+        
+        if (bggData) {
+          gameData = {
+            id: bggData.id,
+            name: bggData.name,
+            yearPublished: bggData.yearPublished || '',
+            rank: bggData.rank || '',
+            bayesAverage: bggData.bayesAverage || '',
+            average: bggData.average || '',
+            usersRated: bggData.usersRated || '',
+            thumbnail: bggData.thumbnail || null,
+            image: bggData.image || null,
+            minPlayers: bggData.minPlayers || null,
+            maxPlayers: bggData.maxPlayers || null,
+            playingTime: bggData.playingTime || null,
+            minAge: bggData.minAge || null,
+            description: bggData.description || null,
+          };
+        }
+      } catch (bggError) {
+        if (__DEV__) {
+          console.warn('[BGG API] Failed to fetch game:', bggError);
+        }
+      }
+    }
+
+    if (!gameData) {
+      if (__DEV__) {
+        console.warn('[Game Details] Game not found:', gameId);
+      }
+      return null;
+    }
+
+    return gameData;
   } catch (error) {
     console.error('[Game Details] Error:', error);
     return null;
