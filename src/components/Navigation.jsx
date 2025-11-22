@@ -15,10 +15,15 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
   };
 
   const isActive = (routeName) => {
+    // Special handling for Events tab - it uses Onboarding route
+    if (routeName === 'Onboarding' && currentRouteName === 'Onboarding') {
+      return true;
+    }
     return currentRouteName === routeName;
   };
 
   const navItems = [
+    { name: 'Events', route: 'Onboarding' },
     { name: 'Collection', route: 'Collection' },
     { name: 'Profile', route: 'Profile' },
   ];

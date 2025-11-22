@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
 import { validateJoinCode } from '../utils/api';
 import { getUserLocation } from '../utils/helpers';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
+import PoweredByBGG from '../components/PoweredByBGG';
 
 const Onboarding = () => {
   const navigation = useNavigation();
+  const { width } = useWindowDimensions();
   const { user, updateUser } = useAuth();
   const { joinEventWithCode, createEvent } = useEvents();
   const [joinCode, setJoinCode] = useState('');
@@ -199,9 +201,14 @@ const Onboarding = () => {
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.content}>
           <Text style={styles.title}>Welcome to MeepleUp!</Text>
-          <Text style={styles.subtitle}>
-            Connect with your board game community and discover game nights near you.
-          </Text>
+          <View style={[styles.bggLogoContainer, { width: width * 0.5 }]}>
+            <PoweredByBGG 
+              size="extraLarge" 
+              variant="color" 
+              containerWidth={width * 0.5}
+            />
+          </View>
+    
           
           <View style={styles.options}>
             <Pressable
@@ -420,8 +427,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 20,
     textAlign: 'center',
+  },
+  bggLogoContainer: {
+    marginBottom: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    maxWidth: '100%',
   },
   subtitle: {
     fontSize: 16,

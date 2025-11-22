@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { fetchBGGCollection, getGameDetails } from '../utils/api';
-import Input from '../components/common/Input';
-import Button from '../components/common/Button';
-import LoadingSpinner from '../components/common/LoadingSpinner';
-import './BGGImport.css';
+import Input from './common/Input';
+import Button from './common/Button';
+import LoadingSpinner from './common/LoadingSpinner';
 
 const BGGImport = ({ onImportComplete }) => {
   const { user, updateUser } = useAuth();
-  const { addGameToCollection } = useCollections();
+  const { addGameToCollection, getUserCollection } = useCollections();
   const userIdentifier = user?.uid || user?.id;
   const [bggUsername, setBggUsername] = useState(user?.bggUsername || '');
   const [loading, setLoading] = useState(false);
@@ -20,21 +20,81 @@ const BGGImport = ({ onImportComplete }) => {
   const [importedGames, setImportedGames] = useState([]);
 
   const handleFetchCollection = async () => {
-    // BGG API import is no longer available
-    setError('BGG collection import is no longer available. Please add games manually using the camera feature or by searching for games.');
-  };
+    if (!bggUsername.trim()) {
+      setError('Please enter your BGG username');
+      return;
+    }
 
-  const handleImportGames = async () => {
-    if (!collection || collection.length === 0) return;
-
-    setImporting(true);
+    setLoading(true);
     setError('');
-    setImportProgress({ current: 0, total: collection.length });
+    setCollection(null);
     setImportedGames([]);
 
     try {
-      for (let i = 0; i < collection.length; i++) {
-        const game = collection[i];
+      // Save username to profile if it changed
+      if (bggUsername.trim() !== user?.bggUsername) {
+        await updateUser({ bggUsername: bggUsername.trim() });
+      }
+
+      const fetchedCollection = await fetchBGGCollection(bggUsername.trim());
+      
+      if (!fetchedCollection || fetchedCollection.length === 0) {
+        setError('No games found in your BGG collection. Make sure your collection is set to public on BoardGameGeek.');
+        setLoading(false);
+        return;
+      }
+
+      setCollection(fetchedCollection);
+      setLoading(false);
+      
+      // Automatically start importing after fetching
+      // Small delay to let the UI update
+      setTimeout(() => {
+        handleImportGames(fetchedCollection);
+      }, 500);
+    } catch (err) {
+      setError(err.message || 'Failed to fetch collection. Please check your username and try again.');
+      console.error('BGG collection fetch error:', err);
+      setLoading(false);
+    }
+  };
+
+  const handleImportGames = async (gamesToImport = null) => {
+    const games = gamesToImport || collection;
+    if (!games || games.length === 0) return;
+
+    setImporting(true);
+    setError('');
+    setImportProgress({ current: 0, total: games.length });
+    setImportedGames([]);
+    
+    // Update collection state if we're importing from fetched games
+    if (gamesToImport) {
+      setCollection(gamesToImport);
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+    let skippedCount = 0;
+
+    // Get existing collection to check for duplicates
+    const existingCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
+    const existingBggIds = new Set(
+      existingCollection
+        .filter((g) => g.bggId)
+        .map((g) => g.bggId.toString())
+    );
+
+    try {
+      for (let i = 0; i < games.length; i++) {
+        const game = games[i];
+        
+        // Skip if game already exists in collection
+        if (existingBggIds.has(game.bggId.toString())) {
+          skippedCount++;
+          setImportProgress({ current: i + 1, total: games.length });
+          continue;
+        }
         
         try {
           // Get full game details from BGG
@@ -51,7 +111,7 @@ const BGGImport = ({ onImportComplete }) => {
             minPlayers: gameDetails?.minPlayers,
             maxPlayers: gameDetails?.maxPlayers,
             playingTime: gameDetails?.playingTime,
-            bggRating: gameDetails?.averageRating || game.averageRating,
+            bggRating: gameDetails?.average || gameDetails?.averageRating || game.rating,
             userRating: game.rating,
             numplays: game.numplays,
             addedAt: new Date().toISOString(),
@@ -62,23 +122,59 @@ const BGGImport = ({ onImportComplete }) => {
           if (userIdentifier) {
             addGameToCollection(userIdentifier, gameData);
             setImportedGames((prev) => [...prev, gameData]);
+            existingBggIds.add(game.bggId.toString()); // Track as added
+            successCount++;
           }
 
-          setImportProgress({ current: i + 1, total: collection.length });
+          setImportProgress({ current: i + 1, total: games.length });
           
           // Small delay to avoid rate limiting
-          if (i < collection.length - 1) {
+          if (i < games.length - 1) {
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
         } catch (gameError) {
           console.warn(`Failed to import game ${game.name}:`, gameError);
+          failCount++;
           // Continue with next game
         }
       }
 
-      const finalCount = importedGames.length;
-      if (onImportComplete && finalCount > 0) {
-        onImportComplete(finalCount);
+      if (successCount > 0) {
+        let message = `Successfully imported ${successCount} game${successCount !== 1 ? 's' : ''}`;
+        if (skippedCount > 0) {
+          message += ` (${skippedCount} already in collection)`;
+        }
+        if (failCount > 0) {
+          message += ` (${failCount} failed)`;
+        }
+        
+        Alert.alert('Import Complete', message, [
+          {
+            text: 'OK',
+            onPress: () => {
+              if (onImportComplete) {
+                onImportComplete(successCount);
+              }
+            },
+          },
+        ]);
+      } else if (skippedCount > 0) {
+        Alert.alert(
+          'All Games Already Imported',
+          `All ${skippedCount} game${skippedCount !== 1 ? 's' : ''} from your BGG collection are already in your MeepleUp collection.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                if (onImportComplete) {
+                  onImportComplete(0);
+                }
+              },
+            },
+          ]
+        );
+      } else {
+        setError('Failed to import any games. Please try again.');
       }
     } catch (err) {
       setError(err.message || 'Failed to import games. Some games may have been imported.');
@@ -88,146 +184,259 @@ const BGGImport = ({ onImportComplete }) => {
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !loading) {
-      handleFetchCollection();
-    }
-  };
-
   return (
-    <div className="bgg-import">
-      <div className="bgg-import-header">
-        <h2>Import collectionfrom BoardGameGeek</h2>
-        <p className="text-secondary">
+    <ScrollView style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.title}>Import from BoardGameGeek</Text>
+        <Text style={styles.subtitle}>
           Import your BGG collection to quickly populate your MeepleUp collection.
-        </p>
-      </div>
+          Make sure your BGG collection is set to public.
+        </Text>
 
-      <div className="bgg-import-form">
-        <div className="bgg-username-input">
+        <View style={styles.form}>
           <Input
-            type="text"
             placeholder="Enter your BGG username"
             value={bggUsername}
-            onChange={(e) => {
-              setBggUsername(e.target.value);
+            onChangeText={(text) => {
+              setBggUsername(text);
               setError('');
               setCollection(null);
             }}
-            onKeyPress={handleKeyPress}
-            disabled={loading || importing}
+            autoCapitalize="none"
+            style={styles.input}
+            editable={!loading && !importing}
           />
           <Button
             label={loading ? 'Loading...' : 'Fetch Collection'}
-            onClick={handleFetchCollection}
+            onPress={handleFetchCollection}
             disabled={loading || importing || !bggUsername.trim()}
-            className="bgg-fetch-btn"
+            style={styles.button}
           />
-        </div>
+        </View>
 
-        {error && (
-          <div className="error-message" role="alert">
-            {error}
-          </div>
-        )}
+        {error ? (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
 
         {loading && (
-          <div className="loading-container">
+          <View style={styles.loadingContainer}>
             <LoadingSpinner />
-            <p className="text-secondary">
+            <Text style={styles.loadingText}>
               Fetching your BGG collection... This may take a few seconds.
-            </p>
-          </div>
+            </Text>
+          </View>
         )}
-      </div>
 
-      {collection && collection.length > 0 && (
-        <div className="bgg-collection-preview">
-          <div className="collection-summary">
-            <h3>Collection Found</h3>
-            <p className="text-secondary">
-              Found <strong>{collection.length}</strong> game{collection.length !== 1 ? 's' : ''} in your BGG collection.
-            </p>
-          </div>
+        {collection && collection.length > 0 && (
+          <View style={styles.collectionPreview}>
+            <Text style={styles.collectionTitle}>Collection Found</Text>
+            <Text style={styles.collectionSummary}>
+              Found {collection.length} game{collection.length !== 1 ? 's' : ''} in your BGG collection.
+            </Text>
 
-          {!importing && (
-            <div className="import-actions">
-              <Button
-                label={`Import ${collection.length} Games`}
-                onClick={handleImportGames}
-                className="btn btn-primary btn-full"
-              />
-              <p className="text-secondary" style={{ fontSize: '0.85em', marginTop: 'var(--spacing-sm)' }}>
-                This will add all games from your BGG collection to your MeepleUp collection.
-              </p>
-            </div>
-          )}
-
-          {importing && (
-            <div className="import-progress">
-              <div className="progress-bar-container">
-                <div
-                  className="progress-bar"
-                  style={{
-                    width: `${(importProgress.current / importProgress.total) * 100}%`,
-                  }}
-                />
-              </div>
-              <p className="text-secondary">
-                Importing {importProgress.current} of {importProgress.total} games...
-              </p>
-            </div>
-          )}
-
-          {importedGames.length > 0 && !importing && (
-            <div className="import-success">
-              <div className="success-message">
-                ✓ Successfully imported {importedGames.length} game{importedGames.length !== 1 ? 's' : ''}!
-              </div>
-              {onImportComplete && (
+            {!importing && importedGames.length === 0 && (
+              <View style={styles.importActions}>
+                <Text style={styles.importHint}>
+                  Games will be automatically imported. Click below to import manually if needed.
+                </Text>
                 <Button
-                  label="View Collection"
-                  onClick={() => onImportComplete(importedGames.length)}
-                  className="btn btn-outline"
-                  style={{ marginTop: 'var(--spacing-md)' }}
+                  label={`Import ${collection.length} Games`}
+                  onPress={() => handleImportGames()}
+                  style={styles.importButton}
                 />
-              )}
-            </div>
-          )}
+              </View>
+            )}
 
-          {/* Show first few games as preview */}
-          {!importing && importedGames.length === 0 && (
-            <div className="collection-preview-list">
-              <h4>Preview (first 5 games):</h4>
-              <ul>
+            {importing && (
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBarContainer}>
+                  <View
+                    style={[
+                      styles.progressBar,
+                      { width: `${(importProgress.current / importProgress.total) * 100}%` },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.progressText}>
+                  Importing {importProgress.current} of {importProgress.total} games...
+                </Text>
+              </View>
+            )}
+
+            {importedGames.length > 0 && !importing && (
+              <View style={styles.successContainer}>
+                <Text style={styles.successText}>
+                  ✓ Successfully imported {importedGames.length} game{importedGames.length !== 1 ? 's' : ''}!
+                </Text>
+              </View>
+            )}
+
+            {/* Show first few games as preview */}
+            {!importing && importedGames.length === 0 && collection.length > 0 && (
+              <View style={styles.previewContainer}>
+                <Text style={styles.previewTitle}>Preview (first 5 games):</Text>
                 {collection.slice(0, 5).map((game) => (
-                  <li key={game.bggId}>
-                    {game.thumbnail && (
-                      <img
-                        src={game.thumbnail}
-                        alt={game.name}
-                        className="preview-thumbnail"
-                      />
-                    )}
-                    <span>{game.name}</span>
-                    {game.yearPublished && (
-                      <span className="text-secondary"> ({game.yearPublished})</span>
-                    )}
-                  </li>
+                  <View key={game.bggId} style={styles.previewItem}>
+                    <Text style={styles.previewGameName}>
+                      {game.name}
+                      {game.yearPublished ? ` (${game.yearPublished})` : ''}
+                    </Text>
+                  </View>
                 ))}
-              </ul>
-              {collection.length > 5 && (
-                <p className="text-secondary" style={{ fontSize: '0.85em', marginTop: 'var(--spacing-sm)' }}>
-                  ... and {collection.length - 5} more games
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+                {collection.length > 5 && (
+                  <Text style={styles.previewMore}>
+                    ... and {collection.length - 5} more games
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    </ScrollView>
   );
 };
 
-export default BGGImport;
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  content: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  form: {
+    marginBottom: 20,
+  },
+  input: {
+    marginBottom: 12,
+  },
+  button: {
+    width: '100%',
+  },
+  errorContainer: {
+    backgroundColor: '#f8d7da',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#721c24',
+    fontSize: 14,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  collectionPreview: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  collectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  collectionSummary: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
+  },
+  importActions: {
+    marginBottom: 20,
+  },
+  importButton: {
+    width: '100%',
+    marginBottom: 8,
+  },
+  importHint: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  progressContainer: {
+    marginBottom: 20,
+  },
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#4a90e2',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  successContainer: {
+    backgroundColor: '#d4edda',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  successText: {
+    color: '#155724',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  previewContainer: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  previewTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  previewItem: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  previewGameName: {
+    fontSize: 14,
+    color: '#333',
+  },
+  previewMore: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+});
 
+export default BGGImport;

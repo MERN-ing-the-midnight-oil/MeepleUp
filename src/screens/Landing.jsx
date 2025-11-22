@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from '../components/common/Button';
+import { bggLogoColor } from '../components/BGGLogoAssets';
 
 const Landing = () => {
   const navigation = useNavigation();
@@ -9,9 +10,19 @@ const Landing = () => {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
+        <Image 
+          source={require('../../assets/images/app-icon.png')} 
+          style={styles.meepleUpLogo}
+          resizeMode="contain"
+        />
         <Text style={styles.title}>MeepleUp</Text>
+        <Image 
+          source={bggLogoColor} 
+          style={styles.bggLogo}
+          resizeMode="contain"
+        />
         <Text style={styles.subtitle}>
-          Connect with your board game community
+          Evolve your tabletop socials
         </Text>
         
         <View style={styles.actions}>
@@ -45,12 +56,24 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
+  meepleUpLogo: {
+    width: 120,
+    height: 120,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
   title: {
     fontSize: 48,
     fontWeight: 'bold',
     color: '#d45d5d',
-    marginBottom: 12,
+    marginBottom: 16,
     textAlign: 'center',
+  },
+  bggLogo: {
+    width: 200,
+    height: 60,
+    alignSelf: 'center',
+    marginBottom: 16,
   },
   subtitle: {
     fontSize: 18,

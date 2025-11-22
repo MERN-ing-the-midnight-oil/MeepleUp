@@ -47,3 +47,4 @@ If you want to restore this feature:
 - The camera permission in `app.json` may still reference barcode scanning, but it's also used for the Claude Vision game identification feature
 - The `cleanScannerTitle` function may still be used elsewhere in the codebase
 
+

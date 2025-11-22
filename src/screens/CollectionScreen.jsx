@@ -6,6 +6,7 @@ import Button from '../components/common/Button';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import GameCard from '../components/GameCard';
 import PoweredByBGG from '../components/PoweredByBGG';
+import BGGImport from '../components/BGGImport';
 import { getGameById } from '../services/gameDatabase';
 import { getStarRating } from '../utils/gameBadges';
 // Note: BarcodeScanner has been archived (see src/archive/barcode-scanner/)
@@ -322,16 +323,13 @@ const CollectionScreen = () => {
               <Text style={styles.viewTitle}>Import from BGG</Text>
             </View>
             <View style={styles.tabContent}>
-              <Text style={styles.placeholderText}>
-                BGG Import will be implemented here
-              </Text>
-              {/* <BGGImport
+              <BGGImport
                 onImportComplete={(count) => {
                   if (count > 0) {
                     setActiveView('view');
                   }
                 }}
-              /> */}
+              />
             </View>
           </View>
         )}

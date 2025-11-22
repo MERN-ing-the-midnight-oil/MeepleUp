@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
+import { bggLogoColor } from '../components/BGGLogoAssets';
 
 const Auth = () => {
   const navigation = useNavigation();
@@ -75,104 +76,126 @@ const Auth = () => {
     }
   };
 
+  const lastInputRef = useRef(null);
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.content}>
-        <Button
-          label="← Back"
-          onPress={() => navigation.goBack()}
-          variant="outline"
-          style={styles.backButton}
-        />
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <ScrollView 
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.content}>
+          <Button
+            label="← Back"
+            onPress={() => navigation.goBack()}
+            variant="outline"
+            style={styles.backButton}
+          />
 
-        <Text style={styles.title}>
-          {mode === 'register' ? 'Create Account' : 'Sign In'}
-        </Text>
-        <Text style={styles.subtitle}>
-          {mode === 'register'
-            ? 'Join MeepleUp to connect with board game enthusiasts'
-            : 'Welcome back! Sign in to continue'}
-        </Text>
+          <Text style={styles.title}>MeepleUp</Text>
+          <Image 
+            source={bggLogoColor} 
+            style={styles.bggLogo}
+            resizeMode="contain"
+          />
+          <Text style={styles.subtitle}>
+            {mode === 'register'
+              ? 'Join MeepleUp to connect with board game enthusiasts'
+              : 'Welcome back! Sign in to continue'}
+          </Text>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {mode === 'register' && (
+          {mode === 'register' && (
+            <Input
+              placeholder="Full Name"
+              value={name}
+              onChangeText={(text) => {
+                setName(text);
+                setError('');
+              }}
+              autoCapitalize="words"
+              style={styles.input}
+              returnKeyType="next"
+              blurOnSubmit={false}
+            />
+          )}
+
           <Input
-            placeholder="Full Name"
-            value={name}
+            placeholder="Email"
+            value={email}
             onChangeText={(text) => {
-              setName(text);
+              setEmail(text);
               setError('');
             }}
-            autoCapitalize="words"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
             style={styles.input}
+            returnKeyType="next"
+            blurOnSubmit={false}
           />
-        )}
 
-        <Input
-          placeholder="Email"
-          value={email}
-          onChangeText={(text) => {
-            setEmail(text);
-            setError('');
-          }}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={styles.input}
-        />
-
-        <Input
-          placeholder="Password"
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            setError('');
-          }}
-          secureTextEntry
-          style={styles.input}
-        />
-
-        {mode === 'register' && (
           <Input
-            placeholder="Confirm Password"
-            value={confirmPassword}
+            placeholder="Password"
+            value={password}
             onChangeText={(text) => {
-              setConfirmPassword(text);
+              setPassword(text);
               setError('');
             }}
             secureTextEntry
             style={styles.input}
+            returnKeyType={mode === 'register' ? 'next' : 'done'}
+            blurOnSubmit={mode === 'register' ? false : true}
+            onSubmitEditing={mode === 'register' ? undefined : handleSubmit}
+            ref={mode === 'register' ? undefined : lastInputRef}
           />
-        )}
 
-        <Button
-          label={loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Sign In'}
-          onPress={handleSubmit}
-          disabled={loading}
-          style={styles.submitButton}
-        />
+          {mode === 'register' && (
+            <Input
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                setError('');
+              }}
+              secureTextEntry
+              style={styles.input}
+              returnKeyType="done"
+              blurOnSubmit={true}
+              onSubmitEditing={handleSubmit}
+              ref={lastInputRef}
+            />
+          )}
 
-        <View style={styles.switchContainer}>
-          <Text style={styles.switchText}>
-            {mode === 'register'
-              ? 'Already have an account? '
-              : "Don't have an account? "}
-          </Text>
-          <Pressable
-            onPress={() =>
-              navigation.navigate('Auth', {
-                mode: mode === 'register' ? 'login' : 'register',
-              })
-            }
-          >
-            <Text style={styles.switchLink}>
-              {mode === 'register' ? 'Sign In' : 'Create Account'}
+          <Button
+            label={loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Sign In'}
+            onPress={handleSubmit}
+            disabled={loading}
+            style={styles.submitButton}
+          />
+
+          <View style={styles.switchContainer}>
+            <Text style={styles.switchText}>
+              {mode === 'register'
+                ? 'Already have an account? '
+                : "Don't have an account? "}
             </Text>
-          </Pressable>
+            <Pressable
+              onPress={() =>
+                navigation.navigate('Auth', {
+                  mode: mode === 'register' ? 'login' : 'register',
+                })
+              }
+            >
+              <Text style={styles.switchLink}>
+                {mode === 'register' ? 'Sign In' : 'Create Account'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </TouchableWithoutFeedback>
   );
 };
 
@@ -197,8 +220,14 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     color: '#d45d5d',
-    marginBottom: 8,
+    marginBottom: 16,
     textAlign: 'center',
+  },
+  bggLogo: {
+    width: 200,
+    height: 60,
+    alignSelf: 'center',
+    marginBottom: 16,
   },
   subtitle: {
     fontSize: 16,

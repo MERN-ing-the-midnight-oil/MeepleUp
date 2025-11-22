@@ -613,8 +613,120 @@ export const validateJoinCode = (code) => {
  * NOTE: BGG API is no longer used. This function is deprecated.
  * @deprecated BGG API integration has been removed
  */
-export const fetchBGGCollection = async () => {
-  throw new Error('BGG collection import is no longer available. Please add games manually or use the camera feature.');
+/**
+ * Fetch a user's collection from BoardGameGeek using their username
+ * Uses BGG's public XML API - no authentication required
+ * @param {string} username - BGG username
+ * @returns {Promise<Array>} Array of games in the collection
+ */
+export const fetchBGGCollection = async (username) => {
+  if (!username || !username.trim()) {
+    throw new Error('BGG username is required');
+  }
+
+  try {
+    const encodedUsername = encodeURIComponent(username.trim());
+    const url = `https://boardgamegeek.com/xmlapi2/collection?username=${encodedUsername}&own=1&stats=1`;
+    
+    if (__DEV__) {
+      console.log('[BGG Collection] Fetching collection for:', username);
+    }
+
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      if (response.status === 202) {
+        // BGG returns 202 when collection is being generated - need to poll
+        throw new Error('BGG is generating your collection. Please try again in a few moments.');
+      }
+      throw new Error(`Failed to fetch collection: ${response.status} ${response.statusText}`);
+    }
+
+    const xmlText = await response.text();
+    
+    if (!xmlText || xmlText.trim().length === 0) {
+      throw new Error('No collection data returned. Make sure your BGG collection is set to public.');
+    }
+
+    // Check for errors in XML
+    const errorMatch = xmlText.match(/<error[^>]*message="([^"]+)"/);
+    if (errorMatch) {
+      throw new Error(errorMatch[1] || 'Error fetching collection from BGG');
+    }
+
+    // Parse XML using regex (React Native compatible)
+    const collection = [];
+    const itemRegex = /<item[^>]*objectid="(\d+)"[^>]*>([\s\S]*?)<\/item>/g;
+    let match;
+
+    while ((match = itemRegex.exec(xmlText)) !== null) {
+      const objectId = match[1];
+      const itemXml = match[2];
+
+      // Extract name
+      const primaryNameMatch = itemXml.match(/<name[^>]*type="primary"[^>]*>([^<]+)<\/name>/);
+      const nameMatch = itemXml.match(/<name[^>]*>([^<]+)<\/name>/);
+      const name = primaryNameMatch ? primaryNameMatch[1].trim() : (nameMatch ? nameMatch[1].trim() : '');
+
+      // Extract year published
+      const yearMatch = itemXml.match(/<yearpublished[^>]*value="(\d+)"/);
+      const yearPublished = yearMatch ? yearMatch[1] : null;
+
+      // Extract thumbnail
+      const thumbnailMatch = itemXml.match(/<thumbnail>([^<]+)<\/thumbnail>/);
+      const thumbnail = thumbnailMatch ? thumbnailMatch[1].trim() : null;
+
+      // Extract image
+      const imageMatch = itemXml.match(/<image>([^<]+)<\/image>/);
+      const image = imageMatch ? imageMatch[1].trim() : null;
+
+      // Extract stats
+      let rating = null;
+      let numplays = null;
+      
+      const statsMatch = itemXml.match(/<stats[^>]*>([\s\S]*?)<\/stats>/);
+      if (statsMatch) {
+        const statsXml = statsMatch[1];
+        
+        // Extract rating value
+        const ratingMatch = statsXml.match(/<rating[^>]*>([\s\S]*?)<\/rating>/);
+        if (ratingMatch) {
+          const ratingXml = ratingMatch[1];
+          const valueMatch = ratingXml.match(/<value[^>]*>([^<]+)<\/value>/);
+          if (valueMatch) {
+            rating = parseFloat(valueMatch[1]);
+          }
+        }
+
+        // Extract numplays
+        const numplaysMatch = statsXml.match(/<numplays[^>]*>(\d+)<\/numplays>/);
+        if (numplaysMatch) {
+          numplays = parseInt(numplaysMatch[1], 10);
+        }
+      }
+
+      if (objectId && name) {
+        collection.push({
+          bggId: objectId,
+          name: name,
+          yearPublished: yearPublished || null,
+          thumbnail: thumbnail || null,
+          image: image || null,
+          rating: rating,
+          numplays: numplays || 0,
+        });
+      }
+    }
+
+    if (__DEV__) {
+      console.log(`[BGG Collection] Found ${collection.length} games`);
+    }
+
+    return collection;
+  } catch (error) {
+    console.error('[BGG Collection] Error:', error);
+    throw error;
+  }
 };
 
 // BGG API XML parsing utilities removed - BGG API is no longer used

@@ -1,7 +1,7 @@
 import React from 'react';
 import { TextInput, StyleSheet } from 'react-native';
 
-const Input = ({
+const Input = React.forwardRef(({
   placeholder,
   value,
   onChangeText,
@@ -16,9 +16,10 @@ const Input = ({
   numberOfLines = multiline ? 4 : 1,
   textAlignVertical = multiline ? 'top' : 'center',
   ...rest
-}) => {
+}, ref) => {
   return (
     <TextInput
+      ref={ref}
       style={[
         styles.input,
         multiline && styles.multiline,
@@ -41,7 +42,9 @@ const Input = ({
       {...rest}
     />
   );
-};
+});
+
+Input.displayName = 'Input';
 
 const styles = StyleSheet.create({
   input: {
