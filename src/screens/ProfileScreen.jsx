@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
+import Modal from '../components/common/Modal';
 
 const ProfileScreen = () => {
   const {
@@ -13,6 +14,7 @@ const ProfileScreen = () => {
     refreshUser,
     isEmailVerified,
     logout,
+    deleteAccount,
   } = useAuth();
 
   const [userData, setUserData] = useState({
@@ -38,6 +40,9 @@ const ProfileScreen = () => {
     message: '',
     error: '',
   });
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -212,6 +217,31 @@ const ProfileScreen = () => {
         message: '',
         error: error.message || 'Unable to refresh verification status at the moment.',
       });
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.toLowerCase() !== 'delete') {
+      Alert.alert('Confirmation Required', 'Please type "DELETE" to confirm account deletion.');
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      // Show a message that this may take a moment
+      console.log('Starting account deletion...');
+      await deleteAccount();
+      // User will be logged out automatically
+      console.log('Account deletion successful');
+    } catch (error) {
+      setDeleting(false);
+      console.error('Account deletion error:', error);
+      const errorMessage = error.message || 'Failed to delete account. Please try again or contact support.';
+      Alert.alert(
+        'Error',
+        errorMessage + (errorMessage.includes('timeout') ? ' The operation may have partially completed.' : ''),
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -402,6 +432,81 @@ const ProfileScreen = () => {
           style={styles.logoutButton}
         />
       </View>
+
+      <View style={styles.form}>
+        <Text style={styles.sectionTitle}>Danger Zone</Text>
+        <View style={styles.dangerZone}>
+          <Text style={styles.dangerText}>
+            Deleting your account will permanently remove all your data, including your profile, games, events, and posts. This action cannot be undone.
+          </Text>
+          <Button
+            label="Delete Account"
+            onPress={() => setShowDeleteModal(true)}
+            variant="outline"
+            style={styles.deleteButton}
+          />
+        </View>
+      </View>
+
+      <Modal
+        isOpen={showDeleteModal}
+        onClose={() => {
+          setShowDeleteModal(false);
+          setDeleteConfirmText('');
+        }}
+        title="Delete Account"
+      >
+        <View style={styles.deleteModalContent}>
+          <Text style={styles.deleteWarningText}>
+            This action cannot be undone. This will permanently delete:
+          </Text>
+          <View style={styles.deleteList}>
+            <Text style={styles.deleteListItem}>• Your profile and account information</Text>
+            <Text style={styles.deleteListItem}>• All your game collections</Text>
+            <Text style={styles.deleteListItem}>• All events you've created or joined</Text>
+            <Text style={styles.deleteListItem}>• All your posts and comments</Text>
+            <Text style={styles.deleteListItem}>• Your availability profile</Text>
+          </View>
+          <Text style={styles.deleteWarningText}>
+            If you are an organizer of any events, those events will be archived.
+          </Text>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>
+              Type <Text style={styles.confirmText}>DELETE</Text> to confirm:
+            </Text>
+            <Input
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+              placeholder="Type DELETE to confirm"
+              style={styles.input}
+              autoCapitalize="none"
+            />
+          </View>
+          <View style={styles.deleteModalButtons}>
+            <Button
+              label="Cancel"
+              onPress={() => {
+                setShowDeleteModal(false);
+                setDeleteConfirmText('');
+              }}
+              variant="outline"
+              style={styles.cancelButton}
+              disabled={deleting}
+            />
+            {deleting && (
+              <Text style={styles.deletingNote}>
+                This may take a few moments. Please don't close the app...
+              </Text>
+            )}
+            <Button
+              label={deleting ? 'Deleting Account...' : 'Delete My Account'}
+              onPress={handleDeleteAccount}
+              style={styles.confirmDeleteButton}
+              disabled={deleting || deleteConfirmText.toLowerCase() !== 'delete'}
+            />
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -496,6 +601,65 @@ const styles = StyleSheet.create({
   logoutButton: {
     marginTop: 8,
     borderColor: '#d45d5d',
+  },
+  dangerZone: {
+    padding: 16,
+    backgroundColor: '#fff5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#feb2b2',
+  },
+  dangerText: {
+    fontSize: 14,
+    color: '#721c24',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  deleteButton: {
+    borderColor: '#dc3545',
+    backgroundColor: '#fff',
+  },
+  deleteModalContent: {
+    padding: 8,
+  },
+  deleteWarningText: {
+    fontSize: 14,
+    color: '#721c24',
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  deleteList: {
+    marginBottom: 16,
+    paddingLeft: 8,
+  },
+  deleteListItem: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 6,
+    lineHeight: 20,
+  },
+  confirmText: {
+    fontWeight: 'bold',
+    color: '#dc3545',
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  cancelButton: {
+    flex: 1,
+  },
+  confirmDeleteButton: {
+    flex: 1,
+    backgroundColor: '#dc3545',
+  },
+  deletingNote: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginBottom: 12,
+    textAlign: 'center',
   },
 });
 

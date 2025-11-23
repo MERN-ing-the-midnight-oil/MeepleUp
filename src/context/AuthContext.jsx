@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import storage from '../utils/storage';
-import firebase, { auth } from '../config/firebase';
+import firebase, { auth, db } from '../config/firebase';
 
 const AuthContext = createContext();
 
@@ -273,6 +273,281 @@ export const AuthProvider = ({ children }) => {
     return updatedUser;
   };
 
+  const deleteAccount = async () => {
+    if (!auth.currentUser) {
+      throw new Error('No authenticated user');
+    }
+
+    const userId = auth.currentUser.uid;
+
+    // Add timeout wrapper (5 minutes max)
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('Account deletion timed out. Please try again or contact support.'));
+      }, 5 * 60 * 1000); // 5 minutes
+    });
+
+    const deleteOperation = async () => {
+      try {
+        console.log('[deleteAccount] Starting account deletion for user:', userId);
+
+      // 1. Delete all Firestore data
+      if (db) {
+        // Delete user profile, games, and availability in parallel
+        const deletePromises = [];
+
+        // Delete user profile document
+        const userRef = db.collection('users').doc(userId);
+        deletePromises.push(
+          userRef.delete().catch((error) => {
+            console.error('Error deleting user profile:', error);
+          })
+        );
+
+        // Delete user games subcollection
+        const deleteUserGames = async () => {
+          const userGamesRef = db.collection('userGames').doc(userId);
+          const userGamesDoc = await userGamesRef.get().catch(() => null);
+          if (userGamesDoc?.exists) {
+            const gamesSnapshot = await userGamesRef.collection('games').get().catch(() => null);
+            if (gamesSnapshot && !gamesSnapshot.empty) {
+              // Delete games in batches of 500
+              const games = gamesSnapshot.docs;
+              for (let i = 0; i < games.length; i += 500) {
+                const batch = db.batch();
+                games.slice(i, i + 500).forEach((doc) => {
+                  batch.delete(doc.ref);
+                });
+                await batch.commit().catch((error) => {
+                  console.error('Error deleting user games batch:', error);
+                });
+              }
+            }
+            await userGamesRef.delete().catch((error) => {
+              console.error('Error deleting userGames document:', error);
+            });
+          }
+        };
+        deletePromises.push(deleteUserGames());
+
+        // Delete availability profile
+        const availabilityRef = db.collection('availabilityProfiles').doc(userId);
+        deletePromises.push(
+          availabilityRef.delete().catch((error) => {
+            console.error('Error deleting availability profile:', error);
+          })
+        );
+
+        await Promise.all(deletePromises);
+        console.log('[deleteAccount] Deleted user profile, games, and availability');
+
+        // Find all gaming groups where user is a member or organizer
+        const [groupsByMemberQuery, groupsByOrganizerQuery] = await Promise.all([
+          db
+            .collection('gamingGroups')
+            .where('memberIds', 'array-contains', userId)
+            .get()
+            .catch(() => ({ docs: [] })),
+          db
+            .collection('gamingGroups')
+            .where('organizerId', '==', userId)
+            .get()
+            .catch(() => ({ docs: [] })),
+        ]);
+
+        // Combine and deduplicate groups
+        const allGroupDocs = new Map();
+        groupsByMemberQuery.docs.forEach((doc) => {
+          allGroupDocs.set(doc.id, doc);
+        });
+        groupsByOrganizerQuery.docs.forEach((doc) => {
+          allGroupDocs.set(doc.id, doc);
+        });
+
+        const groupDocs = Array.from(allGroupDocs.values());
+        console.log(`[deleteAccount] Found ${groupDocs.length} groups to update`);
+
+        if (groupDocs.length > 0) {
+          // Process groups in smaller batches to avoid timeout
+          const BATCH_SIZE = 10; // Process 10 groups at a time
+          for (let i = 0; i < groupDocs.length; i += BATCH_SIZE) {
+            const groupBatch = groupDocs.slice(i, i + BATCH_SIZE);
+            const batch = db.batch();
+            const groupsToUpdate = [];
+
+            for (const groupDoc of groupBatch) {
+              const groupData = groupDoc.data();
+              const groupRef = groupDoc.ref;
+
+              // Remove user from members subcollection
+              const memberRef = groupRef.collection('members').doc(userId);
+              batch.delete(memberRef);
+
+              // Update memberIds array
+              const updatedMemberIds = (groupData.memberIds || []).filter((id) => id !== userId);
+              groupsToUpdate.push({
+                ref: groupRef,
+                data: groupData,
+                updatedMemberIds,
+              });
+            }
+
+            // Update all groups in this batch
+            for (const { ref, data, updatedMemberIds } of groupsToUpdate) {
+              const isOrganizer = data.organizerId === userId;
+
+              if (isOrganizer) {
+                // If user is organizer, archive the group
+                batch.update(ref, {
+                  isActive: false,
+                  deletedAt: firebase.firestore.Timestamp.now(),
+                  updatedAt: firebase.firestore.Timestamp.now(),
+                  memberIds: updatedMemberIds,
+                  memberCount: Math.max(0, (data.memberCount || 1) - 1),
+                });
+              } else {
+                // Just remove from memberIds
+                batch.update(ref, {
+                  memberIds: updatedMemberIds,
+                  memberCount: Math.max(0, (data.memberCount || 1) - 1),
+                  updatedAt: firebase.firestore.Timestamp.now(),
+                });
+              }
+            }
+
+            await batch.commit().catch((error) => {
+              console.error('Error updating gaming groups batch:', error);
+            });
+          }
+
+          console.log('[deleteAccount] Updated all gaming groups');
+
+          // Clean up posts, comments, and game interests in parallel for each group
+          // But limit concurrency to avoid overwhelming Firestore
+          const CONCURRENT_GROUPS = 3;
+          for (let i = 0; i < groupDocs.length; i += CONCURRENT_GROUPS) {
+            const groupBatch = groupDocs.slice(i, i + CONCURRENT_GROUPS);
+            await Promise.all(
+              groupBatch.map(async (groupDoc) => {
+                const groupRef = groupDoc.ref;
+                try {
+                  // Get all posts by this user
+                  const postsSnapshot = await groupRef
+                    .collection('posts')
+                    .where('userId', '==', userId)
+                    .get()
+                    .catch(() => null);
+
+                  if (postsSnapshot && !postsSnapshot.empty) {
+                    // Process posts in batches
+                    const posts = postsSnapshot.docs;
+                    for (let j = 0; j < posts.length; j += 500) {
+                      const postsBatch = db.batch();
+                      const postBatch = posts.slice(j, j + 500);
+                      
+                      for (const postDoc of postBatch) {
+                        // Mark post as deleted
+                        postsBatch.update(postDoc.ref, {
+                          deleted: true,
+                          content: '[Deleted]',
+                          updatedAt: firebase.firestore.Timestamp.now(),
+                        });
+                      }
+                      await postsBatch.commit().catch((error) => {
+                        console.error('Error deleting posts batch:', error);
+                      });
+                    }
+                  }
+
+                  // Get all comments by this user (simplified - mark as deleted)
+                  const allPostsSnapshot = await groupRef
+                    .collection('posts')
+                    .limit(100) // Limit to avoid too many queries
+                    .get()
+                    .catch(() => null);
+
+                  if (allPostsSnapshot && !allPostsSnapshot.empty) {
+                    const commentPromises = allPostsSnapshot.docs.map(async (postDoc) => {
+                      const commentsSnapshot = await postDoc.ref
+                        .collection('comments')
+                        .where('userId', '==', userId)
+                        .get()
+                        .catch(() => null);
+                      
+                      if (commentsSnapshot && !commentsSnapshot.empty) {
+                        const commentsBatch = db.batch();
+                        commentsSnapshot.docs.forEach((commentDoc) => {
+                          commentsBatch.update(commentDoc.ref, {
+                            deleted: true,
+                            content: '[Deleted]',
+                            updatedAt: firebase.firestore.Timestamp.now(),
+                          });
+                        });
+                        await commentsBatch.commit().catch((error) => {
+                          console.error('Error deleting comments:', error);
+                        });
+                      }
+                    });
+                    await Promise.all(commentPromises);
+                  }
+
+                  // Delete game interests by this user
+                  const interestsSnapshot = await groupRef
+                    .collection('gameInterests')
+                    .where('interestedUserId', '==', userId)
+                    .get()
+                    .catch(() => null);
+                  
+                  if (interestsSnapshot && !interestsSnapshot.empty) {
+                    const interests = interestsSnapshot.docs;
+                    for (let k = 0; k < interests.length; k += 500) {
+                      const interestsBatch = db.batch();
+                      interests.slice(k, k + 500).forEach((interestDoc) => {
+                        interestsBatch.delete(interestDoc.ref);
+                      });
+                      await interestsBatch.commit().catch((error) => {
+                        console.error('Error deleting game interests:', error);
+                      });
+                    }
+                  }
+                } catch (error) {
+                  console.error(`Error cleaning up group ${groupDoc.id}:`, error);
+                }
+              })
+            );
+          }
+
+          console.log('[deleteAccount] Cleaned up posts, comments, and interests');
+        }
+      }
+
+      // 2. Clear local storage
+      try {
+        await storage.removeItem(PROFILE_STORAGE_KEY(userId));
+        await storage.removeItem('meepleup_collections');
+        await storage.removeItem('meepleup_events');
+        console.log('[deleteAccount] Cleared local storage');
+      } catch (error) {
+        console.error('Error clearing local storage:', error);
+      }
+
+      // 3. Delete Firebase Auth user
+      console.log('[deleteAccount] Deleting Firebase Auth user');
+      await auth.currentUser.delete();
+
+        // 4. Clear user state
+        setUser(null);
+        console.log('[deleteAccount] Account deletion complete');
+      } catch (error) {
+        console.error('[deleteAccount] Error deleting account:', error);
+        throw error;
+      }
+    };
+
+    // Race between delete operation and timeout
+    return Promise.race([deleteOperation(), timeoutPromise]);
+  };
+
   const value = useMemo(() => ({
     user,
     loading,
@@ -286,6 +561,7 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     refreshUser,
     updateUser,
+    deleteAccount,
   }), [user, loading]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -22,7 +22,7 @@ const Landing = () => {
           resizeMode="contain"
         />
         <Text style={styles.subtitle}>
-          It's tabletop o'clock somewhere!
+          It's tabletop o'clock.
         </Text>
         
         <View style={styles.actions}>

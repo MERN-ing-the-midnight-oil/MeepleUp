@@ -272,32 +272,7 @@ export const EventsProvider = ({ children }) => {
             createdBy: organizerId,
           };
           
-          console.log('[createEvent] 💾 Saving event to Firestore:', {
-            eventId: baseEvent.id,
-            joinCode: normalizedJoinCode,
-            name: baseEvent.name
-          });
-          
           await eventsRef.set(firestoreData);
-          console.log('[createEvent] ✅ Event saved to Firestore');
-          
-          // Verify the event is queryable by joinCode (this helps ensure index is ready)
-          // This is a workaround for Firestore index initialization delays
-          try {
-            console.log('[createEvent] 🔍 Verifying event is queryable by joinCode...');
-            const verifyQuery = await db.collection('gamingGroups')
-              .where('joinCode', '==', normalizedJoinCode)
-              .limit(1)
-              .get();
-            
-            if (verifyQuery.empty) {
-              console.warn('[createEvent] ⚠️ Event saved but not immediately queryable by joinCode (index may be initializing)');
-            } else {
-              console.log('[createEvent] ✅ Event is queryable by joinCode');
-            }
-          } catch (verifyError) {
-            console.warn('[createEvent] ⚠️ Could not verify queryability (index may need time to initialize):', verifyError.message);
-          }
           
           // Save organizer as member in subcollection
           if (organizerId) {
@@ -524,39 +499,12 @@ export const EventsProvider = ({ children }) => {
             // Only try fallback once per join attempt to avoid expensive repeated queries
             if (snapshot.empty && !fallbackTried) {
               fallbackTried = true;
-              console.log(`[${attemptId}] 🔄 Indexed query returned empty, trying fallback query (recent events)...`);
               try {
-                const fallbackStartTime = Date.now();
                 // Query recent events and filter in memory (bypasses index requirement)
                 const recentSnapshot = await eventsRef
                   .orderBy('createdAt', 'desc')
                   .limit(100) // Get recent events to search through
                   .get();
-                const fallbackDuration = Date.now() - fallbackStartTime;
-                
-                console.log(`[${attemptId}] 🔄 Fallback query completed in ${fallbackDuration}ms:`, {
-                  totalDocs: recentSnapshot.docs.length
-                });
-                
-                // Log all joinCodes found in fallback for debugging
-                const allJoinCodes = recentSnapshot.docs.map(doc => {
-                  const data = doc.data();
-                  const rawJoinCode = data.joinCode || '';
-                  const normalizedJoinCode = rawJoinCode.trim().toLowerCase().replace(/[\s-]+/g, ' ');
-                  return {
-                    id: doc.id,
-                    raw: rawJoinCode,
-                    normalized: normalizedJoinCode,
-                    isActive: data.isActive,
-                    deletedAt: data.deletedAt,
-                    name: data.name
-                  };
-                });
-                
-                console.log(`[${attemptId}] 📋 All joinCodes from fallback query:`, {
-                  searchingFor: normalized,
-                  found: allJoinCodes
-                });
                 
                 // Filter for matching joinCode and active status in memory
                 const matchingDocs = recentSnapshot.docs.filter(doc => {
@@ -564,42 +512,17 @@ export const EventsProvider = ({ children }) => {
                   const docJoinCode = (data.joinCode || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
                   const matchesCode = docJoinCode === normalized;
                   const isActive = data.isActive !== false && !data.deletedAt;
-                  
-                  console.log(`[${attemptId}] 🔍 Checking fallback doc ${doc.id}:`, {
-                    rawJoinCode: data.joinCode,
-                    normalizedJoinCode: docJoinCode,
-                    searchingFor: normalized,
-                    matchesCode: matchesCode,
-                    isActive: isActive,
-                    passesFilter: matchesCode && isActive
-                  });
-                  
-                  if (matchesCode) {
-                    console.log(`[${attemptId}] 🎯 Found matching joinCode in fallback:`, {
-                      id: doc.id,
-                      joinCode: data.joinCode,
-                      normalized: docJoinCode,
-                      isActive: isActive
-                    });
-                  }
-                  
                   return matchesCode && isActive;
                 });
                 
                 if (matchingDocs.length > 0) {
-                  console.log(`[${attemptId}] ✅ Found ${matchingDocs.length} event(s) via fallback query`);
                   snapshot = {
                     docs: matchingDocs,
                     empty: false
                   };
-                } else {
-                  console.log(`[${attemptId}] ⚠️ Fallback query also found no matches`, {
-                    searchedFor: normalized,
-                    foundJoinCodes: allJoinCodes.map(j => j.normalized)
-                  });
                 }
               } catch (fallbackError) {
-                console.error(`[${attemptId}] ❌ Fallback query failed:`, fallbackError);
+                console.error('Error in fallback query for join code:', fallbackError);
                 // Continue with original empty snapshot
               }
             }
@@ -607,30 +530,12 @@ export const EventsProvider = ({ children }) => {
             // Filter for active events in memory
             const activeDocs = snapshot.docs.filter(doc => {
               const data = doc.data();
-              const isActive = data.isActive !== false && !data.deletedAt;
-              console.log(`[${attemptId}] 🔍 Checking doc ${doc.id}:`, {
-                isActive: data.isActive,
-                deletedAt: data.deletedAt,
-                passesFilter: isActive
-              });
-              return isActive;
-            });
-            
-            console.log(`[${attemptId}] 🎯 Active docs after filtering:`, {
-              total: snapshot.docs.length,
-              active: activeDocs.length,
-              activeIds: activeDocs.map(d => d.id)
+              return data.isActive !== false && !data.deletedAt;
             });
             
             if (activeDocs.length > 0) {
               const doc = activeDocs[0];
               const firestoreEvent = doc.data();
-              console.log(`[${attemptId}] ✅ Found active event in Firestore:`, {
-                eventId: doc.id,
-                name: firestoreEvent.name,
-                joinCode: firestoreEvent.joinCode,
-                isActive: firestoreEvent.isActive
-              });
               
               // Convert Firestore event format to local event format
               const localEventData = {
@@ -656,89 +561,48 @@ export const EventsProvider = ({ children }) => {
               
               event = normalizeEvent(localEventData);
               eventFromFirestore = true;
-              console.log(`[${attemptId}] 📦 Normalized event:`, {
-                id: event.id,
-                name: event.name,
-                joinCode: event.joinCode
-              });
               
               // Add to local events if not already present
-              // Use a functional update to ensure we have the latest state
               setEvents((prev) => {
                 const exists = prev.find((e) => e.id === event.id);
-                console.log(`[${attemptId}] 💾 Adding to local events:`, {
-                  eventId: event.id,
-                  alreadyExists: !!exists,
-                  prevEventsCount: prev.length
-                });
                 if (!exists) {
                   return [...prev, event];
                 }
                 return prev;
               });
               
-              // Store the event reference so joinEvent can find it even if state hasn't updated yet
-              // We'll update the event in state after joinEvent runs
-              
-              const attemptDuration = Date.now() - attemptStartTime;
-              console.log(`[${attemptId}] ✅ Successfully found event on attempt ${attempt + 1} (${attemptDuration}ms total)`);
-              
               // Found the event, break out of retry loop
               break;
-            } else {
-              console.log(`[${attemptId}] ⚠️ No active events found in Firestore query`);
             }
             
             // If not found and not the last attempt, wait before retrying
             if (attempt < maxRetries - 1) {
               const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff: 500ms, 1s, 2s, 4s
-              console.log(`[${attemptId}] ⏳ Waiting ${delay}ms before retry...`);
               await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-              console.log(`[${attemptId}] ❌ All ${maxRetries} attempts exhausted, no event found`);
             }
           } catch (error) {
-            const attemptDuration = Date.now() - attemptStartTime;
-            console.error(`[${attemptId}] ❌ Error on attempt ${attempt + 1}/${maxRetries} (${attemptDuration}ms):`, {
-              error: error.message,
-              code: error.code,
-              stack: error.stack
-            });
+            console.error('Error querying Firestore for join code:', error);
             
             // If not the last attempt, wait before retrying
             if (attempt < maxRetries - 1) {
               const delay = baseDelay * Math.pow(2, attempt);
-              console.log(`[${attemptId}] ⏳ Waiting ${delay}ms before retry after error...`);
               await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-              // Last attempt failed, give up
-              console.error(`[${attemptId}] ❌ Failed to query Firestore after all ${maxRetries} retries`);
             }
           }
         }
-      } else if (!db) {
-        console.log(`[${attemptId}] ⚠️ Firestore db not available`);
       }
       
       if (!event) {
-        console.log(`[${attemptId}] ❌ No event found, returning null`);
         return null;
       }
-      
-      console.log(`[${attemptId}] ✅ Event found, proceeding to join membership`);
 
       // Save membership to Firestore if db is available and event exists in Firestore
       if (db && event.id) {
-        console.log(`[${attemptId}] 💾 Saving membership to Firestore:`, { eventId: event.id, userId });
         try {
           const groupRef = db.collection('gamingGroups').doc(event.id);
-          
-          // Check if the event document exists in Firestore
           const groupDoc = await groupRef.get();
-          console.log(`[${attemptId}] 📄 Group document check:`, { exists: groupDoc.exists, eventId: event.id });
           
           if (groupDoc.exists) {
-            // Document exists, proceed with membership update
             const membersRef = groupRef.collection('members').doc(userId);
             
             // Use current user's data from Auth context if this is the current user joining
@@ -751,7 +615,6 @@ export const EventsProvider = ({ children }) => {
               userName = userData?.data()?.name || userData?.data()?.email || '';
             }
             
-            console.log(`[${attemptId}] 👤 Setting member document:`, { userId, userName });
             await membersRef.set({
               userId,
               userName: userName || userId, // Fallback to userId if no name found
@@ -761,33 +624,20 @@ export const EventsProvider = ({ children }) => {
             }, { merge: true });
             
             // Update memberIds array in the group document
-            console.log(`[${attemptId}] 📝 Updating memberIds array`);
             await groupRef.update({
               memberIds: firebase.firestore.FieldValue.arrayUnion(userId),
               updatedAt: firebase.firestore.Timestamp.now(),
             });
-            console.log(`[${attemptId}] ✅ Membership saved to Firestore successfully`);
-          } else {
-            console.log(`[${attemptId}] ⚠️ Group document does not exist in Firestore, skipping Firestore membership save`);
           }
         } catch (error) {
-          console.error(`[${attemptId}] ❌ Error saving membership to Firestore:`, {
-            error: error.message,
-            code: error.code,
-            stack: error.stack
-          });
+          console.error('Error saving membership to Firestore:', error);
           // Continue with local join even if Firestore update fails
         }
-      } else {
-        console.log(`[${attemptId}] ⚠️ Skipping Firestore membership save:`, { hasDb: !!db, hasEventId: !!event?.id });
       }
 
-      console.log(`[${attemptId}] 🔗 Calling joinEvent:`, { eventId: event.id, userId });
-      
       // If event was just added from Firestore, ensure it's in state before calling joinEvent
       // by using a functional update that includes the member
       if (eventFromFirestore) {
-        console.log(`[${attemptId}] 🔄 Event from Firestore, ensuring it's in state with member...`);
         setEvents((prev) => {
           const existingEvent = prev.find((e) => e.id === event.id);
           if (existingEvent) {
@@ -811,29 +661,14 @@ export const EventsProvider = ({ children }) => {
         
         // Return the event with the member added
         const membersWithUser = addOrUpdateMember(event, userId);
-        const result = {
+        return {
           ...event,
           members: membersWithUser,
           lastUpdatedAt: new Date().toISOString(),
         };
-        const totalDuration = Date.now() - startTime;
-        console.log(`[${attemptId}] ✅ joinEventWithCode completed (Firestore event):`, { 
-          success: !!result, 
-          eventId: result?.id,
-          memberCount: result.members.length,
-          totalDuration: `${totalDuration}ms`
-        });
-        return result;
       } else {
         // Event was found locally, use the normal joinEvent function
-        const result = joinEvent(event.id, userId);
-        const totalDuration = Date.now() - startTime;
-        console.log(`[${attemptId}] ✅ joinEventWithCode completed:`, { 
-          success: !!result, 
-          eventId: result?.id,
-          totalDuration: `${totalDuration}ms`
-        });
-        return result;
+        return joinEvent(event.id, userId);
       }
     },
     [getEventByJoinCode, joinEvent, user],
