@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import {
   View,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
+import { db } from '../config/firebase';
 import Button from '../components/common/Button';
 
 const EventHub = () => {
@@ -24,6 +25,8 @@ const EventHub = () => {
     regenerateJoinCode,
     updateContactRequest,
     contactStatus,
+    leaveEvent,
+    archiveEvent,
   } = useEvents();
   const { user } = useAuth();
 
@@ -38,18 +41,73 @@ const EventHub = () => {
   const isMember = memberStatus === membershipStatus.MEMBER;
   const isOrganizer = event?.organizerId && event.organizerId === userId;
 
+  const [memberNames, setMemberNames] = useState({});
+
   const members = useMemo(
     () => (event?.members || []).filter((member) => member.status === membershipStatus.MEMBER),
     [event, membershipStatus],
   );
 
+  // Fetch user names for all members
+  useEffect(() => {
+    if (!members.length || !db || !event?.id) return;
+
+    const fetchMemberNames = async () => {
+      const names = {};
+      
+      for (const member of members) {
+        if (!member.userId || names[member.userId]) continue;
+        
+        // First check if this is the current user - use Auth context data
+        if (user && member.userId === (user.uid || user.id)) {
+          names[member.userId] = user.name || user.email || member.userId;
+          continue;
+        }
+        
+        try {
+          // First try to get from members subcollection (has denormalized userName)
+          if (event.id) {
+            const memberDoc = await db.collection('gamingGroups').doc(event.id)
+              .collection('members').doc(member.userId).get();
+            
+            if (memberDoc.exists) {
+              const memberData = memberDoc.data();
+              if (memberData.userName) {
+                names[member.userId] = memberData.userName;
+                continue;
+              }
+            }
+          }
+          
+          // Fallback to users collection
+          const userDoc = await db.collection('users').doc(member.userId).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            names[member.userId] = userData.name || userData.email || member.userId;
+          } else {
+            // Fallback to userId if no profile found
+            names[member.userId] = member.userId;
+          }
+        } catch (error) {
+          console.error(`Error fetching name for user ${member.userId}:`, error);
+          // Fallback to userId on error
+          names[member.userId] = member.userId;
+        }
+      }
+      
+      setMemberNames(names);
+    };
+
+    fetchMemberNames();
+  }, [members, event?.id, user]);
+
   if (!event) {
     return (
       <ScrollView style={styles.container}>
         <View style={styles.content}>
-          <Text style={styles.title}>Event Hub</Text>
+          <Text style={styles.title}>MeepleUp Hub</Text>
           <Text style={styles.subtitle}>
-            We couldn&apos;t find that event. It may have been removed or you might not have
+            We couldn&apos;t find that MeepleUp. It may have been removed or you might not have
             permission to view it yet.
           </Text>
           <Button
@@ -62,8 +120,10 @@ const EventHub = () => {
     );
   }
 
-  const deepLink = `meepleup://join/${event.joinCode}`;
-  const webLink = `https://meepleup.app/join/${event.joinCode}`;
+  // Encode join code for URLs (replace spaces with hyphens for cleaner URLs)
+  const encodedJoinCode = (event.joinCode || '').replace(/\s+/g, '-');
+  const deepLink = `meepleup://join/${encodedJoinCode}`;
+  const webLink = `https://meepleup.app/join/${encodedJoinCode}`;
 
   const handleRegenerateJoinCode = () => {
     if (regenerateBusy) {
@@ -82,9 +142,10 @@ const EventHub = () => {
             try {
               setRegenerateBusy(true);
               const newCode = regenerateJoinCode(event.id);
+              const newEncodedCode = newCode.replace(/\s+/g, '-');
               Alert.alert(
                 'New code ready',
-                `Share this invite:\n\nCode: ${newCode}\nDeep link: ${deepLink.replace(event.joinCode, newCode)}`,
+                `Share this invite:\n\nCode: ${newCode}\nDeep link: ${deepLink.replace(encodedJoinCode, newEncodedCode)}`,
               );
             } catch (error) {
               Alert.alert('Could not refresh', 'Please try again in a moment.');
@@ -102,13 +163,80 @@ const EventHub = () => {
     updateContactRequest(event.id, requestId, { status: contactStatus.RESPONDED });
   };
 
+  const handleLeaveEvent = () => {
+    if (!userId) {
+      Alert.alert('Error', 'You must be signed in to leave a MeepleUp.');
+      return;
+    }
+
+    Alert.alert(
+      'Leave MeepleUp?',
+      `Are you sure you want to leave "${event.name}"? You'll need a join code to rejoin.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave MeepleUp',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await leaveEvent(event.id, userId);
+              Alert.alert('Left MeepleUp', 'You have left the MeepleUp.', [
+                {
+                  text: 'OK',
+                  onPress: () => navigation.goBack(),
+                },
+              ]);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to leave MeepleUp. Please try again.');
+              console.error(error);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleArchiveEvent = () => {
+    if (!userId || !isOrganizer) {
+      Alert.alert('Error', 'Only the organizer can archive a MeepleUp.');
+      return;
+    }
+
+    Alert.alert(
+      'Archive MeepleUp?',
+      `Are you sure you want to archive "${event.name}"? This will hide it from all members. You can restore it later from your archived MeepleUps.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Archive MeepleUp',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await archiveEvent(event.id, userId);
+              Alert.alert('MeepleUp Archived', 'The MeepleUp has been archived. You can restore it from your archived MeepleUps section.', [
+                {
+                  text: 'OK',
+                  onPress: () => navigation.goBack(),
+                },
+              ]);
+            } catch (error) {
+              const errorMessage = error.message || 'Failed to archive MeepleUp. Please try again.';
+              Alert.alert('Error', errorMessage);
+              console.error(error);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>{event.name || 'Event Hub'}</Text>
+        <Text style={styles.title}>{event.name || 'MeepleUp Hub'}</Text>
         <Text style={styles.subtitle}>
           {isMember
-            ? 'Your event space with members-only details.'
+            ? 'Your MeepleUp space with members-only details.'
             : 'Organizers share full details once they grant you membership.'}
         </Text>
 
@@ -133,7 +261,7 @@ const EventHub = () => {
 
         {isMember ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Event details</Text>
+            <Text style={styles.sectionTitle}>MeepleUp details</Text>
             <Text style={styles.sectionCopy}>
               {event.description ||
                 'Add notes about what to bring, parking tips, or table preferences.'}
@@ -203,11 +331,14 @@ const EventHub = () => {
                 Invite trusted players so they can see everyone&apos;s collections and coordinate.
               </Text>
             ) : (
-              members.map((member) => (
-                <Text key={member.userId} style={styles.sectionCopy}>
-                  {member.role === 'organizer' ? 'Organizer' : 'Member'} • {member.userId}
-                </Text>
-              ))
+              members.map((member) => {
+                const displayName = memberNames[member.userId] || member.userId;
+                return (
+                  <Text key={member.userId} style={styles.sectionCopy}>
+                    {member.role === 'organizer' ? 'Organizer' : 'Member'} • {displayName}
+                  </Text>
+                );
+              })
             )}
           </View>
         ) : (
@@ -218,6 +349,32 @@ const EventHub = () => {
             </Text>
           </View>
         )}
+
+        {/* Leave/Archive Actions */}
+        {isMember && !isOrganizer ? (
+          <View style={styles.section}>
+            <Button
+              label="Leave MeepleUp"
+              onPress={handleLeaveEvent}
+              variant="outline"
+              style={styles.dangerAction}
+            />
+          </View>
+        ) : null}
+
+        {isOrganizer ? (
+          <View style={styles.section}>
+            <Button
+              label="Archive MeepleUp"
+              onPress={handleArchiveEvent}
+              variant="outline"
+              style={styles.dangerAction}
+            />
+            <Text style={styles.sectionHint}>
+              Archiving will hide this MeepleUp from all members. This action cannot be undone.
+            </Text>
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -353,6 +510,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '500',
+  },
+  dangerAction: {
+    marginTop: 8,
+    borderColor: '#d45d5d',
   },
 });
 

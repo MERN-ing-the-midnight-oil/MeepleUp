@@ -40,9 +40,9 @@ const EventsScreen = () => {
     return (
       <View style={styles.container}>
         <View style={styles.content}>
-          <Text style={styles.title}>Events</Text>
+          <Text style={styles.title}>MeepleUps</Text>
           <Text style={styles.subtitle}>
-            Events management is available on the web version. Use the Collection or Profile screens on mobile.
+            MeepleUps management is available on the web version. Use the Collection or Profile screens on mobile.
           </Text>
         </View>
       </View>
@@ -52,17 +52,23 @@ const EventsScreen = () => {
   const {
     events,
     getUserEvents,
+    getUserArchivedEvents,
     createEvent,
     joinEventWithCode,
     getMembershipStatus,
     submitContactRequest,
+    unarchiveEvent,
+    leaveEvent,
+    getEventById,
     membershipStatus,
   } = useEvents();
 
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
+  const [joinCodeWord1, setJoinCodeWord1] = useState('');
+  const [joinCodeWord2, setJoinCodeWord2] = useState('');
+  const [joinCodeWord3, setJoinCodeWord3] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joinLoading, setJoinLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -79,9 +85,14 @@ const EventsScreen = () => {
 
   const userIdentifier = user?.uid || user?.id;
   const userEvents = userIdentifier ? getUserEvents(userIdentifier) : [];
+  const archivedEvents = userIdentifier ? getUserArchivedEvents(userIdentifier) : [];
 
   const publicEvents = useMemo(
-    () => events.filter((event) => event.allowStrangerMessages),
+    () => events.filter((event) => 
+      event.allowStrangerMessages && 
+      !event.deletedAt && 
+      event.isActive !== false
+    ),
     [events],
   );
 
@@ -89,21 +100,35 @@ const EventsScreen = () => {
     navigate(`/event/${eventId}`);
   };
 
-  const handleJoinCodeChange = (text) => {
-    setJoinCode(text.toUpperCase().trim());
+  const handleJoinCodeWordChange = (wordIndex, text) => {
+    // Keep lowercase for word phrases, just trim
+    const trimmed = text.trim().toLowerCase();
+    if (wordIndex === 1) {
+      setJoinCodeWord1(trimmed);
+    } else if (wordIndex === 2) {
+      setJoinCodeWord2(trimmed);
+    } else if (wordIndex === 3) {
+      setJoinCodeWord3(trimmed);
+    }
     setJoinError('');
   };
 
   const handleJoinEvent = async () => {
     if (!userIdentifier) {
-      setJoinError('Please sign in to join an event.');
+      setJoinError('Please sign in to join a MeepleUp.');
       return;
     }
 
-    if (!joinCode.trim()) {
-      setJoinError('Please enter a join code');
+    const word1 = joinCodeWord1.trim().toLowerCase();
+    const word2 = joinCodeWord2.trim().toLowerCase();
+    const word3 = joinCodeWord3.trim().toLowerCase();
+
+    if (!word1 || !word2 || !word3) {
+      setJoinError('Please enter all three words of the join code');
       return;
     }
+
+    const joinCode = `${word1} ${word2} ${word3}`;
 
     if (!validateJoinCode(joinCode)) {
       setJoinError('Invalid join code format');
@@ -114,17 +139,19 @@ const EventsScreen = () => {
     setJoinError('');
 
     try {
-      const joinedEvent = joinEventWithCode(joinCode, userIdentifier);
+      const joinedEvent = await joinEventWithCode(joinCode, userIdentifier);
 
       if (!joinedEvent) {
-        setJoinError('Event not found. Please check your join code.');
+        setJoinError('MeepleUp not found. Please double-check your join code. If the event was just created, wait a moment and try again.');
         setJoinLoading(false);
         return;
       }
 
       setShowJoinModal(false);
-      setJoinCode('');
-      Alert.alert('Success', 'You have joined the event!');
+      setJoinCodeWord1('');
+      setJoinCodeWord2('');
+      setJoinCodeWord3('');
+      Alert.alert('Success', 'You have joined the MeepleUp!');
     } catch (err) {
       setJoinError('Something went wrong. Please try again.');
       console.error(err);
@@ -133,9 +160,9 @@ const EventsScreen = () => {
     }
   };
 
-  const handleCreateEvent = () => {
+  const handleCreateEvent = async () => {
     if (!userIdentifier) {
-      Alert.alert('Error', 'Please sign in to create an event.');
+      Alert.alert('Error', 'Please sign in to host a MeepleUp.');
       return;
     }
 
@@ -144,17 +171,22 @@ const EventsScreen = () => {
       return;
     }
 
-    const newEvent = createEvent({
-      name: eventForm.name.trim(),
-      generalLocation: eventForm.generalLocation.trim() || 'Location TBD',
-      scheduledFor: eventForm.scheduledFor.trim() || '',
-      description: eventForm.description.trim() || '',
-      visibility: 'private',
-    });
+    try {
+      const newEvent = await createEvent({
+        name: eventForm.name.trim(),
+        generalLocation: eventForm.generalLocation.trim() || 'Location TBD',
+        scheduledFor: eventForm.scheduledFor.trim() || '',
+        description: eventForm.description.trim() || '',
+        visibility: 'private',
+      });
 
-    setShowCreateModal(false);
-    setEventForm({ name: '', generalLocation: '', scheduledFor: '', description: '' });
-    Alert.alert('Event Created', `Your event "${newEvent.name}" has been created! Share join code: ${newEvent.joinCode}`);
+      setShowCreateModal(false);
+      setEventForm({ name: '', generalLocation: '', scheduledFor: '', description: '' });
+      Alert.alert('MeepleUp Hosted', `Your MeepleUp "${newEvent.name}" has been hosted! Share join code: ${newEvent.joinCode}`);
+    } catch (error) {
+      console.error('Error creating event:', error);
+      Alert.alert('Error', 'Failed to create MeepleUp. Please try again.');
+    }
   };
 
   const handleOpenContact = (event) => {
@@ -195,23 +227,102 @@ const EventsScreen = () => {
     }
   };
 
+  const handleUnarchiveEvent = async (eventId) => {
+    if (!userIdentifier) {
+      Alert.alert('Error', 'You must be signed in to unarchive an event.');
+      return;
+    }
+
+    // Verify user is the organizer of this event
+    const event = events.find((e) => e.id === eventId);
+    if (!event) {
+      Alert.alert('Error', 'MeepleUp not found.');
+      return;
+    }
+
+    if (event.organizerId !== userIdentifier) {
+      Alert.alert('Error', 'Only the organizer can unarchive this MeepleUp.');
+      return;
+    }
+
+    Alert.alert(
+      'Unarchive MeepleUp?',
+      'This will restore the MeepleUp and make it visible to all members again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unarchive',
+          onPress: async () => {
+            try {
+              await unarchiveEvent(eventId, userIdentifier);
+              Alert.alert('MeepleUp Restored', 'The MeepleUp has been unarchived and is now active.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to unarchive MeepleUp. Please try again.');
+              console.error(error);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleLeaveEvent = async (eventId) => {
+    if (!userIdentifier) {
+      Alert.alert('Error', 'You must be signed in to leave a MeepleUp.');
+      return;
+    }
+
+    const event = getEventById(eventId);
+    if (!event) {
+      Alert.alert('Error', 'MeepleUp not found.');
+      return;
+    }
+
+    // Don't allow organizer to leave
+    if (event.organizerId === userIdentifier) {
+      Alert.alert('Cannot Leave', 'As the organizer, you cannot leave this MeepleUp. You can archive it instead.');
+      return;
+    }
+
+    Alert.alert(
+      'Leave MeepleUp?',
+      'Are you sure you want to leave this MeepleUp? You will need to get a new invitation to rejoin.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await leaveEvent(eventId, userIdentifier);
+              Alert.alert('Left MeepleUp', 'You have successfully left the MeepleUp.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to leave MeepleUp. Please try again.');
+              console.error(error);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <>
       <ScrollView style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>My Events</Text>
-          <Text style={styles.subtitle}>Manage your game night events</Text>
+          <Text style={styles.title}>My MeepleUps</Text>
+          <Text style={styles.subtitle}>Manage your game night MeepleUps</Text>
         </View>
 
         {/* Action Buttons */}
         <View style={styles.actions}>
           <Button
-            label="+ Create Event"
+            label="+ Host MeepleUp"
             onPress={() => setShowCreateModal(true)}
             style={styles.actionButton}
           />
           <Button
-            label="Join Event"
+            label="Join MeepleUp"
             onPress={() => setShowJoinModal(true)}
             variant="outline"
             style={styles.actionButton}
@@ -221,46 +332,59 @@ const EventsScreen = () => {
         {/* User's Events */}
         {userEvents.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No events yet</Text>
+            <Text style={styles.emptyTitle}>No MeepleUps yet</Text>
             <Text style={styles.emptyText}>
-              Create a new event or join one with a code.
+              Host a new MeepleUp or join one with a code.
             </Text>
           </View>
         ) : (
           <View style={styles.eventsSection}>
-            <Text style={styles.sectionTitle}>My Events</Text>
+            <Text style={styles.sectionTitle}>My MeepleUps</Text>
             {userEvents.map((event) => {
               const memberCount = (event.members || []).filter(
                 (member) => member.status === 'member',
               ).length;
+              const isOrganizer = event.organizerId === userIdentifier;
 
               return (
-                <Pressable
-                  key={event.id}
-                  style={styles.eventTile}
-                  onPress={() => handleEventClick(event.id)}
-                >
-                  <View style={styles.eventHeader}>
-                    <View style={styles.eventInfo}>
-                      <Text style={styles.eventTitle}>
-                        {event.name || 'Untitled Event'}
-                      </Text>
-                      <Text style={styles.eventMeta}>
-                        {event.generalLocation || event.exactLocation || 'Location TBD'}
-                      </Text>
+                <View key={event.id} style={styles.eventTile}>
+                  <Pressable
+                    style={styles.eventTileContent}
+                    onPress={() => handleEventClick(event.id)}
+                  >
+                    <View style={styles.eventHeader}>
+                      <View style={styles.eventInfo}>
+                        <Text style={styles.eventTitle}>
+                          {event.name || 'Untitled MeepleUp'}
+                        </Text>
+                        <Text style={styles.eventMeta}>
+                          {event.generalLocation || event.exactLocation || 'Location TBD'}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                  {event.scheduledFor && (
-                    <Text style={styles.eventDate}>
-                      {formatDate(event.scheduledFor) || event.scheduledFor}
-                    </Text>
+                    {event.scheduledFor && (
+                      <Text style={styles.eventDate}>
+                        {formatDate(event.scheduledFor) || event.scheduledFor}
+                      </Text>
+                    )}
+                    {event.members && (
+                      <Text style={styles.eventMembers}>
+                        {memberCount} member{memberCount !== 1 ? 's' : ''}
+                      </Text>
+                    )}
+                  </Pressable>
+                  {!isOrganizer && (
+                    <Pressable
+                      style={styles.leaveButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleLeaveEvent(event.id);
+                      }}
+                    >
+                      <Text style={styles.leaveButtonText}>Leave</Text>
+                    </Pressable>
                   )}
-                  {event.members && (
-                    <Text style={styles.eventMembers}>
-                      {memberCount} member{memberCount !== 1 ? 's' : ''}
-                    </Text>
-                  )}
-                </Pressable>
+                </View>
               );
             })}
           </View>
@@ -269,7 +393,7 @@ const EventsScreen = () => {
         {/* Public Events */}
         {publicEvents.length > 0 && (
           <View style={styles.eventsSection}>
-            <Text style={styles.sectionTitle}>Discover Events</Text>
+            <Text style={styles.sectionTitle}>Discover MeepleUps</Text>
             {infoMessage ? (
               <View style={styles.infoMessage}>
                 <Text style={styles.infoText}>{infoMessage}</Text>
@@ -288,7 +412,7 @@ const EventsScreen = () => {
                 <View key={event.id} style={styles.eventCard}>
                   <View style={styles.eventHeader}>
                     <Text style={styles.eventTitle}>
-                      {event.name || 'Untitled Event'}
+                      {event.name || 'Untitled MeepleUp'}
                     </Text>
                     <View
                       style={[
@@ -324,7 +448,7 @@ const EventsScreen = () => {
                   <View style={styles.cardActions}>
                     {isMember ? (
                       <Button
-                        label="View Event"
+                        label="View MeepleUp"
                         onPress={() => handleEventClick(event.id)}
                         style={styles.cardButton}
                       />
@@ -351,6 +475,57 @@ const EventsScreen = () => {
             })}
           </View>
         )}
+
+        {/* Archived Events - Only visible to organizers */}
+        {archivedEvents.length > 0 && (
+          <View style={styles.eventsSection}>
+            <Text style={styles.sectionTitle}>Your Archived MeepleUps</Text>
+            <Text style={styles.sectionSubtitle}>
+              MeepleUps you've hosted and archived. Only you can see and restore these.
+            </Text>
+            {archivedEvents.map((event) => {
+              const memberCount = (event.members || []).filter(
+                (member) => member.status === 'member',
+              ).length;
+
+              return (
+                <View key={event.id} style={[styles.eventCard, styles.archivedCard]}>
+                  <View style={styles.eventHeader}>
+                    <View style={styles.eventInfo}>
+                      <Text style={[styles.eventTitle, styles.archivedTitle]}>
+                        {event.name || 'Untitled MeepleUp'}
+                      </Text>
+                      <Text style={styles.eventMeta}>
+                        {event.generalLocation || event.exactLocation || 'Location TBD'}
+                      </Text>
+                    </View>
+                    <View style={styles.archivedBadge}>
+                      <Text style={styles.archivedBadgeText}>Archived</Text>
+                    </View>
+                  </View>
+                  {event.scheduledFor && (
+                    <Text style={styles.eventDate}>
+                      {formatDate(event.scheduledFor) || event.scheduledFor}
+                    </Text>
+                  )}
+                  {event.members && (
+                    <Text style={styles.eventMembers}>
+                      {memberCount} member{memberCount !== 1 ? 's' : ''}
+                    </Text>
+                  )}
+                  <View style={styles.cardActions}>
+                    <Button
+                      label="Unarchive MeepleUp"
+                      onPress={() => handleUnarchiveEvent(event.id)}
+                      variant="outline"
+                      style={styles.cardButton}
+                    />
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
 
       {/* Join Event Modal */}
@@ -358,38 +533,60 @@ const EventsScreen = () => {
         isOpen={showJoinModal}
         onClose={() => {
           setShowJoinModal(false);
-          setJoinCode('');
+          setJoinCodeWord1('');
+          setJoinCodeWord2('');
+          setJoinCodeWord3('');
           setJoinError('');
         }}
-        title="Join Event"
+        title="Join MeepleUp"
       >
         <View style={styles.modalContent}>
           <Text style={styles.modalText}>
-            Enter the 6-character join code provided by the event organizer.
+            Enter the three-word join code provided by the MeepleUp organizer.
           </Text>
-          <Input
-            value={joinCode}
-            onChangeText={handleJoinCodeChange}
-            placeholder="Enter join code"
-            autoCapitalize="characters"
-            maxLength={6}
-            style={styles.modalInput}
-          />
+          <View style={styles.joinCodeFields}>
+            <Input
+              value={joinCodeWord1}
+              onChangeText={(text) => handleJoinCodeWordChange(1, text)}
+              placeholder="Word 1"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.modalInput, styles.joinCodeInput]}
+            />
+            <Input
+              value={joinCodeWord2}
+              onChangeText={(text) => handleJoinCodeWordChange(2, text)}
+              placeholder="Word 2"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.modalInput, styles.joinCodeInput]}
+            />
+            <Input
+              value={joinCodeWord3}
+              onChangeText={(text) => handleJoinCodeWordChange(3, text)}
+              placeholder="Word 3"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.modalInput, styles.joinCodeInput]}
+            />
+          </View>
           {joinError ? (
             <Text style={styles.errorText}>{joinError}</Text>
           ) : null}
           <View style={styles.modalActions}>
             <Button
-              label={joinLoading ? 'Joining...' : 'Join Event'}
+              label={joinLoading ? 'Joining...' : 'Join MeepleUp'}
               onPress={handleJoinEvent}
-              disabled={joinLoading || !joinCode.trim()}
+              disabled={joinLoading || !joinCodeWord1.trim() || !joinCodeWord2.trim() || !joinCodeWord3.trim()}
               style={styles.modalButton}
             />
             <Button
               label="Cancel"
               onPress={() => {
                 setShowJoinModal(false);
-                setJoinCode('');
+                setJoinCodeWord1('');
+                setJoinCodeWord2('');
+                setJoinCodeWord3('');
                 setJoinError('');
               }}
               variant="outline"
@@ -399,20 +596,21 @@ const EventsScreen = () => {
         </View>
       </Modal>
 
-      {/* Create Event Modal */}
+      {/* Host Event Modal */}
       <Modal
         isOpen={showCreateModal}
         onClose={() => {
           setShowCreateModal(false);
           setEventForm({ name: '', generalLocation: '', scheduledFor: '', description: '' });
         }}
-        title="Create Event"
+        title="Host MeepleUp"
       >
         <View style={styles.modalContent}>
+          <Text style={styles.fieldLabel}>MeepleUp name <Text style={styles.requiredAsterisk}>*</Text></Text>
           <Input
             value={eventForm.name}
             onChangeText={(text) => setEventForm({ ...eventForm, name: text })}
-            placeholder="Event name"
+            placeholder="MeepleUp name"
             style={styles.modalInput}
           />
           <Input
@@ -437,7 +635,7 @@ const EventsScreen = () => {
           />
           <View style={styles.modalActions}>
             <Button
-              label="Create Event"
+              label="Host MeepleUp"
               onPress={handleCreateEvent}
               style={styles.modalButton}
             />
@@ -537,10 +735,25 @@ const styles = StyleSheet.create({
   eventTile: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    overflow: 'hidden',
+  },
+  eventTileContent: {
+    padding: 16,
+  },
+  leaveButton: {
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#fff5f5',
+  },
+  leaveButtonText: {
+    color: '#d45d5d',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   eventHeader: {
     flexDirection: 'row',
@@ -665,6 +878,47 @@ const styles = StyleSheet.create({
     color: '#d45d5d',
     fontSize: 14,
     marginBottom: 12,
+  },
+  joinCodeFields: {
+    marginBottom: 16,
+  },
+  joinCodeInput: {
+    marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  requiredAsterisk: {
+    color: '#d45d5d',
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+  },
+  archivedCard: {
+    opacity: 0.7,
+    borderColor: '#999',
+  },
+  archivedTitle: {
+    opacity: 0.8,
+  },
+  archivedBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  archivedBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#666',
+    textTransform: 'uppercase',
   },
 });
 

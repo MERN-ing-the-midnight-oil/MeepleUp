@@ -49,7 +49,7 @@ const VerifyEmail = () => {
           <Text style={styles.email}>{user?.email}</Text>
         </Text>
         <Text style={styles.instructions}>
-          Please check your inbox and click the verification link to activate your account.
+          Please check your inbox/SPAM folder and click the verification link to activate your account.
         </Text>
 
         {message ? (

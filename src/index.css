@@ -226,7 +226,7 @@ p {
   color: var(--primary-color);
 }
 
-/* Event tiles */
+/* MeepleUp tiles */
 .event-tile {
   background-color: var(--surface-color);
   border-radius: var(--radius-lg);

@@ -171,9 +171,9 @@ const CollectionScreen = () => {
               <View style={styles.menuOptionContent}>
                 <Text style={styles.menuOptionIcon}>📷</Text>
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Inventory my collection using AI</Text>
+                  <Text style={styles.menuOptionTitle}>Inventory your home game collection using Shelf Elf AI</Text>
                   <Text style={styles.menuOptionDescription}>
-                    Take photos of your games to identify and add them
+                    Simply take side-view photos of your stacks of game boxes for instant inventory creation
                   </Text>
                 </View>
                 <Text style={styles.menuOptionArrow}>→</Text>
@@ -187,7 +187,7 @@ const CollectionScreen = () => {
               <View style={styles.menuOptionContent}>
                 <Text style={styles.menuOptionIcon}>📚</Text>
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>View my games</Text>
+                  <Text style={styles.menuOptionTitle}>View my inventoried games</Text>
                   <Text style={styles.menuOptionDescription}>
                     Browse your {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''}
                   </Text>
@@ -203,9 +203,9 @@ const CollectionScreen = () => {
               <View style={styles.menuOptionContent}>
                 <Text style={styles.menuOptionIcon}>🌐</Text>
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Import games from my BGG collection</Text>
+                  <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
                   <Text style={styles.menuOptionDescription}>
-                    Sync your BoardGameGeek collection
+                    Your "Discoverability" must be toggled to "Include me in the Gamer Database" at https://boardgamegeek.com/settings/privacy
                   </Text>
                 </View>
                 <Text style={styles.menuOptionArrow}>→</Text>
@@ -265,7 +265,7 @@ const CollectionScreen = () => {
                 </Text>
                 <View style={styles.emptyActions}>
                   <Button
-                    label="Inventory my collection using AI"
+                    label="Inventory your collection using AI"
                     onPress={handleOpenCamera}
                     style={styles.emptyButton}
                   />

@@ -13,6 +13,7 @@ const parseProfile = (profile) => {
       bio: '',
       bggUsername: '',
       location: '',
+      zipcode: '',
     };
   }
 
@@ -21,6 +22,7 @@ const parseProfile = (profile) => {
     bio: profile.bio || '',
     bggUsername: profile.bggUsername || '',
     location: profile.location || '',
+    zipcode: profile.zipcode || profile.location || '', // Support both for backward compatibility
   };
 };
 
@@ -40,6 +42,7 @@ const mapUser = (firebaseUser, storedProfile = {}) => {
     bio: profile.bio,
     bggUsername: profile.bggUsername,
     location: profile.location,
+    zipcode: profile.zipcode,
     photoURL: firebaseUser.photoURL || null,
     metadata: {
       creationTime: firebaseUser.metadata?.creationTime,
@@ -183,6 +186,7 @@ export const AuthProvider = ({ children }) => {
       bio: '',
       bggUsername: '',
       location: '',
+      zipcode: '',
     });
 
     setUser(mapUser(credential.user, storedProfile));

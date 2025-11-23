@@ -592,20 +592,28 @@ export const getGameDetails = async (gameId) => {
 /**
  * Generate a random join code for events
  */
+import { wordlist } from './wordlist';
+
 export const generateJoinCode = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  const words = [];
+  for (let i = 0; i < 3; i++) {
+    const randomIndex = Math.floor(Math.random() * wordlist.length);
+    words.push(wordlist[randomIndex]);
   }
-  return code;
+  return words.join(' ');
 };
 
 /**
- * Validate join code format
+ * Validate join code format - expects 3 lowercase words separated by spaces or hyphens
  */
 export const validateJoinCode = (code) => {
-  return /^[A-Z0-9]{6}$/.test(code);
+  if (!code || typeof code !== 'string') {
+    return false;
+  }
+  // Normalize: trim, lowercase, and check for 3 words separated by spaces or hyphens
+  const normalized = code.trim().toLowerCase();
+  const words = normalized.split(/[\s-]+/);
+  return words.length === 3 && words.every(word => /^[a-z]+$/.test(word) && word.length > 0);
 };
 
 /**
@@ -614,46 +622,164 @@ export const validateJoinCode = (code) => {
  * @deprecated BGG API integration has been removed
  */
 /**
+ * Get BGG API bearer token from config
+ * @returns {string|null} Bearer token or null if not configured
+ */
+function getBGGToken() {
+  try {
+    // Try direct environment variable access first (for Expo)
+    let token = process.env.EXPO_PUBLIC_BGG_API_TOKEN || 
+                process.env.EXPO_PUBLIC_BGGbearerToken ||
+                process.env.BGGbearerToken ||
+                process.env.REACT_APP_BGG_API_TOKEN ||
+                null;
+    
+    // If not found, try API_CONFIG
+    if (!token) {
+      token = API_CONFIG.BGG_API_TOKEN || null;
+    }
+    
+    if (__DEV__) {
+      if (token) {
+        console.log('[BGG Collection] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
+      } else {
+        console.warn('[BGG Collection] No token found. Checked:', {
+          EXPO_PUBLIC_BGG_API_TOKEN: !!process.env.EXPO_PUBLIC_BGG_API_TOKEN,
+          EXPO_PUBLIC_BGGbearerToken: !!process.env.EXPO_PUBLIC_BGGbearerToken,
+          BGGbearerToken: !!process.env.BGGbearerToken,
+          REACT_APP_BGG_API_TOKEN: !!process.env.REACT_APP_BGG_API_TOKEN,
+        });
+      }
+    }
+    return token;
+  } catch (error) {
+    console.warn('[BGG Collection] Error loading API config:', error);
+    return null;
+  }
+}
+
+/**
  * Fetch a user's collection from BoardGameGeek using their username
- * Uses BGG's public XML API - no authentication required
+ * Uses BGG's XML API with Bearer token authentication
+ * Handles 202 responses (when BGG is processing) with automatic retry
  * @param {string} username - BGG username
+ * @param {Object} options - Optional parameters
+ * @param {boolean} options.own - Filter to owned games (default: true)
+ * @param {boolean} options.stats - Include statistics (default: true)
+ * @param {string} options.subtype - Filter by subtype, e.g. 'boardgame' (default: 'boardgame')
  * @returns {Promise<Array>} Array of games in the collection
  */
-export const fetchBGGCollection = async (username) => {
+export const fetchBGGCollection = async (username, options = {}) => {
   if (!username || !username.trim()) {
     throw new Error('BGG username is required');
   }
 
+  const {
+    own = true,
+    stats = true,
+    subtype = 'boardgame',
+    maxRetries = 5,
+    retryDelay = 2000,
+  } = options;
+
   try {
-    const encodedUsername = encodeURIComponent(username.trim());
-    const url = `https://boardgamegeek.com/xmlapi2/collection?username=${encodedUsername}&own=1&stats=1`;
+    const trimmedUsername = username.trim();
+    const params = new URLSearchParams({
+      username: trimmedUsername, // URLSearchParams handles encoding automatically
+      ...(own && { own: '1' }),
+      ...(stats && { stats: '1' }),
+      ...(subtype && { subtype }),
+    });
+    
+    const url = `https://boardgamegeek.com/xmlapi2/collection?${params.toString()}`;
+    const token = getBGGToken();
     
     if (__DEV__) {
       console.log('[BGG Collection] Fetching collection for:', username);
+      console.log('[BGG Collection] URL:', url);
     }
 
-    const response = await fetch(url);
+    // Retry logic for 202 responses
+    let retries = 0;
+    let xmlText = null;
     
-    if (!response.ok) {
-      if (response.status === 202) {
-        // BGG returns 202 when collection is being generated - need to poll
-        throw new Error('BGG is generating your collection. Please try again in a few moments.');
+    while (retries < maxRetries) {
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
-      throw new Error(`Failed to fetch collection: ${response.status} ${response.statusText}`);
+      
+      const response = await fetch(url, {
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+      });
+      
+      if (__DEV__) {
+        console.log(`[BGG Collection] Response status: ${response.status} (attempt ${retries + 1}/${maxRetries})`);
+      }
+      
+      if (response.status === 200) {
+        xmlText = await response.text();
+        break;
+      } else if (response.status === 202) {
+        // BGG is processing the request - wait and retry
+        if (__DEV__) {
+          console.log(`[BGG Collection] BGG is processing request (202). Waiting ${retryDelay}ms before retry...`);
+        }
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        retries++;
+      } else if (response.status === 401) {
+        const body = await response.text();
+        throw new Error(`Authentication failed (401). ${token ? 'Token may be invalid.' : 'Bearer token required. Make sure BGGbearerToken is set in your .env file.'}`);
+      } else {
+        const body = await response.text();
+        throw new Error(`Failed to fetch collection: ${response.status} ${response.statusText}. ${body || ''}`);
+      }
     }
-
-    const xmlText = await response.text();
+    
+    if (!xmlText) {
+      throw new Error('Max retries exceeded. BGG may still be processing your collection. Please try again in a few moments.');
+    }
     
     if (!xmlText || xmlText.trim().length === 0) {
-      throw new Error('No collection data returned. Make sure your BGG collection is set to public.');
+      throw new Error('No collection data returned. Make sure your BGG collection is set to public and "Include me in the Gamer Database" is enabled in privacy settings.');
     }
 
-    // Check for errors in XML
-    const errorMatch = xmlText.match(/<error[^>]*message="([^"]+)"/);
+    // Check for errors in XML (BGG returns errors with 200 status)
+    // Handle both <errors><error><message> and <error><message> formats
+    const errorMatch = xmlText.match(/<errors>[\s\S]*?<error[^>]*>[\s\S]*?<message>([^<]+)<\/message>[\s\S]*?<\/error>[\s\S]*?<\/errors>/i) ||
+                      xmlText.match(/<error[^>]*>[\s\S]*?<message>([^<]+)<\/message>[\s\S]*?<\/error>/i);
     if (errorMatch) {
-      throw new Error(errorMatch[1] || 'Error fetching collection from BGG');
+      const errorMessage = errorMatch[1] ? errorMatch[1].trim() : 'Error fetching collection from BGG';
+      
+      // Check for specific error cases and provide helpful messages
+      if (errorMessage.toLowerCase().includes('invalid username')) {
+        throw new Error(`Invalid username: "${username.trim()}". Please check the username and try again.`);
+      }
+      
+      // Check for privacy/access related errors
+      const lowerErrorMessage = errorMessage.toLowerCase();
+      if (lowerErrorMessage.includes('private') || 
+          lowerErrorMessage.includes('not available') ||
+          lowerErrorMessage.includes('access denied') ||
+          lowerErrorMessage.includes('permission')) {
+        throw new Error(
+          'Unable to access collection. Please make sure your BGG collection is set to public and "Include me in the Gamer Database" is enabled in your privacy settings.\n\n' +
+          'Go to: https://boardgamegeek.com/settings/privacy\n' +
+          'And toggle "Include Me in the Gamer Database" to ON.'
+        );
+      }
+      
+      // For other errors, throw the original message
+      throw new Error(errorMessage);
     }
 
+    // Check if we have an items element (even if empty)
+    const hasItemsElement = xmlText.includes('<items') || xmlText.includes('<items>');
+    
+    // Check for totalitems attribute to see if collection is empty
+    const totalItemsMatch = xmlText.match(/<items[^>]*totalitems="(\d+)"/);
+    const totalItems = totalItemsMatch ? parseInt(totalItemsMatch[1], 10) : null;
+    
     // Parse XML using regex (React Native compatible)
     const collection = [];
     const itemRegex = /<item[^>]*objectid="(\d+)"[^>]*>([\s\S]*?)<\/item>/g;
@@ -680,6 +806,21 @@ export const fetchBGGCollection = async (username) => {
       const imageMatch = itemXml.match(/<image>([^<]+)<\/image>/);
       const image = imageMatch ? imageMatch[1].trim() : null;
 
+      // Extract collection status
+      const statusMatch = itemXml.match(/<status[^>]*>([\s\S]*?)<\/status>/);
+      let status = {};
+      if (statusMatch) {
+        const statusXml = statusMatch[1];
+        status.own = statusXml.includes('<own>1</own>') || !!statusXml.match(/<own[^>]*>1<\/own>/);
+        status.prevowned = statusXml.includes('<prevowned>1</prevowned>') || !!statusXml.match(/<prevowned[^>]*>1<\/prevowned>/);
+        status.fortrade = statusXml.includes('<fortrade>1</fortrade>') || !!statusXml.match(/<fortrade[^>]*>1<\/fortrade>/);
+        status.want = statusXml.includes('<want>1</want>') || !!statusXml.match(/<want[^>]*>1<\/want>/);
+        status.wanttoplay = statusXml.includes('<wanttoplay>1</wanttoplay>') || !!statusXml.match(/<wanttoplay[^>]*>1<\/wanttoplay>/);
+        status.wanttobuy = statusXml.includes('<wanttobuy>1</wanttobuy>') || !!statusXml.match(/<wanttobuy[^>]*>1<\/wanttobuy>/);
+        status.wishlist = statusXml.includes('<wishlist>1</wishlist>') || !!statusXml.match(/<wishlist[^>]*>1<\/wishlist>/);
+        status.preordered = statusXml.includes('<preordered>1</preordered>') || !!statusXml.match(/<preordered[^>]*>1<\/preordered>/);
+      }
+
       // Extract stats
       let rating = null;
       let numplays = null;
@@ -705,6 +846,14 @@ export const fetchBGGCollection = async (username) => {
         }
       }
 
+      // Extract comment
+      const commentMatch = itemXml.match(/<comment>([\s\S]*?)<\/comment>/);
+      const comment = commentMatch ? commentMatch[1].trim() : null;
+
+      // Extract wishlist priority
+      const wishlistMatch = itemXml.match(/<wishlistpriority>(\d+)<\/wishlistpriority>/);
+      const wishlistPriority = wishlistMatch ? parseInt(wishlistMatch[1], 10) : null;
+
       if (objectId && name) {
         collection.push({
           bggId: objectId,
@@ -714,12 +863,34 @@ export const fetchBGGCollection = async (username) => {
           image: image || null,
           rating: rating,
           numplays: numplays || 0,
+          comment: comment || null,
+          wishlistPriority: wishlistPriority || null,
+          status: status,
         });
       }
     }
 
     if (__DEV__) {
       console.log(`[BGG Collection] Found ${collection.length} games`);
+    }
+
+    // If collection is empty and we don't have an items element, it might be a privacy issue
+    // However, if we have an items element with totalitems="0", that's valid (user just has no games)
+    if (collection.length === 0) {
+      if (!hasItemsElement) {
+        // No items element at all - likely a privacy or access issue
+        throw new Error(
+          'Unable to access collection. Please make sure your BGG collection is set to public and "Include me in the Gamer Database" is enabled in your privacy settings.\n\n' +
+          'Go to: https://boardgamegeek.com/settings/privacy\n' +
+          'And toggle "Include Me in the Gamer Database" to ON.'
+        );
+      } else if (totalItems === 0) {
+        // Valid response with 0 items - user has no games matching the criteria
+        // This is fine, return empty array
+        if (__DEV__) {
+          console.log('[BGG Collection] User has no games matching the criteria (own=1, subtype=boardgame)');
+        }
+      }
     }
 
     return collection;

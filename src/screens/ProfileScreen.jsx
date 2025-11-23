@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
@@ -20,8 +20,9 @@ const ProfileScreen = () => {
     email: '',
     bio: '',
     bggUsername: '',
-    location: '',
+    zipcode: '',
   });
+  const [zipcodeError, setZipcodeError] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [passwordState, setPasswordState] = useState({
@@ -45,10 +46,22 @@ const ProfileScreen = () => {
         email: user.email || '',
         bio: user.bio || '',
         bggUsername: user.bggUsername || '',
-        location: user.location || '',
+        zipcode: user.zipcode || user.location || '', // Support both for backward compatibility
       });
     }
   }, [user]);
+
+  const validateZipcode = (zipcode) => {
+    if (!zipcode || zipcode.trim() === '') {
+      return ''; // Empty is valid (optional field)
+    }
+    // US zipcode format: 5 digits, or 5+4 format (12345-6789)
+    const zipcodeRegex = /^\d{5}(-\d{4})?$/;
+    if (!zipcodeRegex.test(zipcode.trim())) {
+      return 'Please enter a valid zipcode (e.g., 12345 or 12345-6789)';
+    }
+    return '';
+  };
 
   const handleChange = (field, value) => {
     setUserData({
@@ -56,18 +69,33 @@ const ProfileScreen = () => {
       [field]: value,
     });
     setMessage('');
+    
+    // Validate zipcode on change
+    if (field === 'zipcode') {
+      const error = validateZipcode(value);
+      setZipcodeError(error);
+    }
   };
 
   const handleSubmit = async () => {
+    // Validate zipcode before submitting
+    const zipcodeValidationError = validateZipcode(userData.zipcode);
+    if (zipcodeValidationError) {
+      setZipcodeError(zipcodeValidationError);
+      setMessage('');
+      return;
+    }
+
     setSaving(true);
     setMessage('');
+    setZipcodeError('');
 
     try {
       await updateUser({
         name: userData.name,
         bio: userData.bio,
         bggUsername: userData.bggUsername,
-        location: userData.location,
+        zipcode: userData.zipcode.trim() || '', // Save as zipcode, trim whitespace
       });
       await refreshUser();
       setMessage('Profile updated successfully!');
@@ -188,8 +216,13 @@ const ProfileScreen = () => {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoidingView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+    >
+      <ScrollView style={styles.container}>
+        <View style={styles.header}>
         <Text style={styles.title}>Profile</Text>
         <Text style={styles.subtitle}>Manage your account settings</Text>
       </View>
@@ -247,14 +280,17 @@ const ProfileScreen = () => {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Location</Text>
+          <Text style={styles.label}>Zipcode</Text>
           <Input
-            value={userData.location}
-            onChangeText={(text) => handleChange('location', text)}
-            placeholder="City, State"
-            autoCapitalize="words"
+            value={userData.zipcode}
+            onChangeText={(text) => handleChange('zipcode', text)}
+            placeholder="12345 or 12345-6789"
+            keyboardType="default"
             style={styles.input}
           />
+          {zipcodeError ? (
+            <Text style={[styles.helpText, styles.errorText]}>{zipcodeError}</Text>
+          ) : null}
         </View>
 
         <View style={styles.formGroup}>
@@ -367,10 +403,14 @@ const ProfileScreen = () => {
         />
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
