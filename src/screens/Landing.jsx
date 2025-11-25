@@ -1,28 +1,65 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Image, Dimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from '../components/common/Button';
 import { bggLogoColor } from '../components/BGGLogoAssets';
 
 const Landing = () => {
   const navigation = useNavigation();
+  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+  const isMobile = screenWidth < 600;
+
+  // Calculate logo size to fill available space with reasonable padding
+  const availableHeight = screenHeight;
+  const padding = isMobile ? 40 : 60;
+  const otherElementsHeight = isMobile ? 350 : 450; // Approximate height of other elements
+  const maxLogoSize = Math.min(
+    availableHeight - otherElementsHeight - padding,
+    isMobile ? screenWidth * 0.7 : Math.min(screenWidth * 0.5, 400)
+  );
+  const logoSize = Math.max(maxLogoSize, isMobile ? 150 : 200);
+
+  const dynamicStyles = {
+    logoContainer: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: isMobile ? 150 : 200,
+      paddingVertical: isMobile ? 20 : 40,
+    },
+    meepleUpLogo: {
+      width: logoSize,
+      height: logoSize,
+      alignSelf: 'center',
+    },
+    title: {
+      fontSize: isMobile ? 36 : 56,
+      fontWeight: 'bold',
+      color: '#d45d5d',
+      marginBottom: 16,
+      textAlign: 'center',
+      paddingHorizontal: isMobile ? 20 : 0,
+    },
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <Image 
-          source={require('../../assets/images/app-icon.png')} 
-          style={styles.meepleUpLogo}
-          resizeMode="contain"
-        />
-        <Text style={styles.title}>MeepleUp</Text>
+        <View style={dynamicStyles.logoContainer}>
+          <Image 
+            source={require('../../assets/images/app-icon.png')} 
+            style={[styles.meepleUpLogo, dynamicStyles.meepleUpLogo]}
+            resizeMode="contain"
+          />
+        </View>
+        <Text style={[styles.title, dynamicStyles.title]}>MeepleUp</Text>
         <Image 
           source={bggLogoColor} 
           style={styles.bggLogo}
           resizeMode="contain"
         />
         <Text style={styles.subtitle}>
-          It's tabletop o'clock.
+        Is it tabletop o'clock yet?
         </Text>
         
         <View style={styles.actions}>
@@ -52,18 +89,16 @@ const styles = StyleSheet.create({
   },
   content: {
     width: '100%',
-    maxWidth: 400,
-    padding: 20,
+    maxWidth: 500,
+    padding: 40,
     alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
   },
   meepleUpLogo: {
-    width: 120,
-    height: 120,
     alignSelf: 'center',
-    marginBottom: 16,
   },
   title: {
-    fontSize: 48,
     fontWeight: 'bold',
     color: '#d45d5d',
     marginBottom: 16,

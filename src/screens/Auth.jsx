@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, KeyboardAvoidingView, Platform, Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
@@ -11,6 +11,8 @@ const Auth = () => {
   const route = useRoute();
   const { login, signup } = useAuth();
   const mode = route.params?.mode || 'login'; // 'login' or 'register'
+  const { width: screenWidth } = Dimensions.get('window');
+  const isMobile = screenWidth < 600;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -97,7 +99,10 @@ const Auth = () => {
             style={styles.backButton}
           />
 
-          <Text style={styles.title}>MeepleUp</Text>
+          <Text style={[styles.title, {
+            fontSize: isMobile ? 32 : 40,
+            paddingHorizontal: isMobile ? 20 : 0,
+          }]}>MeepleUp</Text>
           <Image 
             source={bggLogoColor} 
             style={styles.bggLogo}
@@ -105,7 +110,7 @@ const Auth = () => {
           />
           <Text style={styles.subtitle}>
             {mode === 'register'
-              ? 'Join MeepleUp to connect with board game enthusiasts'
+              ? 'Game night made easy.'
               : 'Welcome back! Sign in to continue'}
           </Text>
 
@@ -226,7 +231,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   title: {
-    fontSize: 32,
     fontWeight: 'bold',
     color: '#d45d5d',
     marginBottom: 16,

@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
+import NotificationSettings from '../components/NotificationSettings';
+import { pickAndUploadImage, deleteImageFromFirebase } from '../utils/imageUpload';
 
 const ProfileScreen = () => {
   const {
     user,
     updateUser,
+    updateUserPhoto,
     changePassword,
     resendVerificationEmail,
     refreshUser,
@@ -43,6 +46,7 @@ const ProfileScreen = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -245,6 +249,45 @@ const ProfileScreen = () => {
     }
   };
 
+  const handlePhotoUpload = async () => {
+    if (!user?.uid) {
+      Alert.alert('Error', 'User not found. Please try logging in again.');
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      const photoURL = await pickAndUploadImage(user.uid);
+      
+      // If user cancelled, photoURL will be null - just stop loading
+      if (photoURL === null) {
+        setUploadingPhoto(false);
+        return;
+      }
+      
+      if (photoURL) {
+        // Delete old photo if it exists (don't wait for this to complete)
+        if (user.photoURL) {
+          deleteImageFromFirebase(user.photoURL).catch(err => 
+            console.warn('Error deleting old photo:', err)
+          );
+        }
+        
+        // Update user profile with new photo URL
+        await updateUserPhoto(photoURL);
+        await refreshUser();
+        setMessage('Profile picture updated successfully!');
+      }
+    } catch (error) {
+      console.error('Photo upload error:', error);
+      const errorMessage = error.message || 'Failed to upload photo. Please try again.';
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+
   return (
     <KeyboardAvoidingView
       style={styles.keyboardAvoidingView}
@@ -258,6 +301,34 @@ const ProfileScreen = () => {
       </View>
 
       <View style={styles.form}>
+        {/* Profile Picture Section */}
+        <View style={styles.profilePictureSection}>
+          <View style={styles.profilePictureContainer}>
+            {user?.photoURL ? (
+              <Image source={{ uri: user.photoURL }} style={styles.profilePicture} />
+            ) : (
+              <View style={[styles.profilePicture, styles.profilePicturePlaceholder]}>
+                <Text style={styles.profilePicturePlaceholderText}>
+                  {user?.name?.charAt(0)?.toUpperCase() || '?'}
+                </Text>
+              </View>
+            )}
+            {uploadingPhoto && (
+              <View style={styles.profilePictureOverlay}>
+                <ActivityIndicator size="large" color="#fff" />
+              </View>
+            )}
+          </View>
+          <View style={styles.profilePictureActions}>
+            <Button
+              label={uploadingPhoto ? 'Uploading...' : 'Change Photo'}
+              onPress={handlePhotoUpload}
+              disabled={uploadingPhoto}
+              variant="outline"
+            />
+          </View>
+        </View>
+
         {!isEmailVerified && (
           <View style={[styles.message, styles.warningMessage]}>
             <Text style={styles.messageText}>
@@ -362,6 +433,10 @@ const ProfileScreen = () => {
           disabled={saving}
           style={styles.saveButton}
         />
+      </View>
+
+      <View style={styles.form}>
+        <NotificationSettings />
       </View>
 
       <View style={styles.form}>
@@ -660,6 +735,48 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginBottom: 12,
     textAlign: 'center',
+  },
+  profilePictureSection: {
+    alignItems: 'center',
+    marginBottom: 32,
+    paddingBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  profilePictureContainer: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  profilePicture: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#e0e0e0',
+  },
+  profilePicturePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#d45d5d',
+  },
+  profilePicturePlaceholderText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  profilePictureOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profilePictureActions: {
+    width: '100%',
+    maxWidth: 300,
   },
 });
 

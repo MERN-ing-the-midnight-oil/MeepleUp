@@ -24,7 +24,7 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
 
   const navItems = [
     { name: 'MeepleUps', route: 'Onboarding' },
-    { name: 'My Games', route: 'Collection' },
+    { name: 'Your Games', route: 'Collection' },
     { name: 'Profile', route: 'Profile' },
   ];
 
@@ -54,16 +54,17 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
       marginRight: 4,
     },
     navLinkActive: {
-      borderBottomWidth: 2,
-      borderBottomColor: '#4a90e2',
+      borderBottomWidth: 4,
+      borderBottomColor: '#dc2626',
     },
     navLinkText: {
       fontSize: 14,
       color: '#666',
     },
     navLinkTextActive: {
-      color: '#4a90e2',
-      fontWeight: '600',
+      color: '#dc2626',
+      fontWeight: 'bold',
+      fontSize: 18,
     },
   });
 

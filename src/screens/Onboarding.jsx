@@ -310,7 +310,6 @@ const Onboarding = () => {
           {/* User's MeepleUps */}
           {sortedEvents.length > 0 && (
             <View style={styles.eventsSection}>
-              <Text style={styles.eventsSectionTitle}>My MeepleUps</Text>
               {sortedEvents.map((event) => {
                 const userIdentifier = user?.uid || user?.id;
                 const isOrganizer = event.organizerId === userIdentifier;
@@ -329,9 +328,12 @@ const Onboarding = () => {
                         eventId: event.id,
                       })}
                     >
-                      <Text style={styles.eventCardTitle}>
-                        {event.name || 'Untitled MeepleUp'}
-                      </Text>
+                      <View style={styles.eventCardTitleContainer}>
+                        <Text style={styles.eventCardTitle}>
+                          {event.name || 'Untitled MeepleUp'}
+                        </Text>
+                        <Text style={styles.eventCardArrow}>→</Text>
+                      </View>
                     </Pressable>
                     {!isOrganizer && (
                       <Pressable
@@ -358,7 +360,7 @@ const Onboarding = () => {
               ]}
               onPress={() => handleModeChange('join')}
             >
-              <Text style={styles.optionTitle}>Join with Code</Text>
+              <Text style={styles.optionTitle}>Join</Text>
               <Text style={styles.optionText}>
                 Join an existing MeepleUp with a code someone gave you.
               </Text>
@@ -371,7 +373,7 @@ const Onboarding = () => {
               ]}
               onPress={() => handleModeChange('discover')}
             >
-              <Text style={styles.optionTitle}>Discover MeepleUps</Text>
+              <Text style={styles.optionTitle}>Discover</Text>
               <Text style={styles.optionText}>
                 Find public game nights happening near you.
               </Text>
@@ -385,7 +387,7 @@ const Onboarding = () => {
               onPress={() => handleModeChange('create')}
             >
               <Text style={styles.optionTitle}>
-                <Text style={styles.plusSymbol}>+ </Text>Host a MeepleUp
+                <Text style={styles.plusSymbol}>+ </Text>Host
               </Text>
               <Text style={styles.optionText}>
                 Host your own game night and share a join code with friends.
@@ -900,23 +902,48 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#e0e0e0',
+    borderColor: '#d45d5d',
     marginBottom: 12,
     minHeight: 60,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   eventCardContent: {
     padding: 16,
     justifyContent: 'center',
+    backgroundColor: '#fff',
   },
   eventCardPressed: {
-    opacity: 0.7,
-    borderColor: '#d45d5d',
+    opacity: 0.9,
+    backgroundColor: '#fff5f5',
+    borderColor: '#b84d4d',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  eventCardTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   eventCardTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333',
+    flex: 1,
+  },
+  eventCardArrow: {
+    fontSize: 24,
+    color: '#d45d5d',
+    fontWeight: 'bold',
+    marginLeft: 12,
   },
   leaveButton: {
     padding: 12,

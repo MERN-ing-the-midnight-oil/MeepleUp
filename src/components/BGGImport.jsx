@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, Linking, Pressable, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { fetchBGGCollection, getGameDetails } from '../utils/api';
+import { bggLogoColor } from './BGGLogoAssets';
 import Input from './common/Input';
 import Button from './common/Button';
 import LoadingSpinner from './common/LoadingSpinner';
@@ -187,10 +188,15 @@ const BGGImport = ({ onImportComplete }) => {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>Import from BoardGameGeek</Text>
+        <View style={styles.logoContainer}>
+          <Image
+            source={bggLogoColor}
+            style={styles.bggLogo}
+            resizeMode="contain"
+          />
+        </View>
         <Text style={styles.subtitle}>
-          Import your BGG collection to quickly populate your MeepleUp collection.
-          Make sure your BGG collection is set to public.
+          Enter your BoardGame Geek username to download an existing games collection.
         </Text>
 
         <View style={styles.form}>
@@ -212,6 +218,18 @@ const BGGImport = ({ onImportComplete }) => {
             disabled={loading || importing || !bggUsername.trim()}
             style={styles.button}
           />
+        </View>
+
+        <View style={styles.discoverabilityNotice}>
+          <Text style={styles.discoverabilityText}>
+            Your "Discoverability" must be toggled to "Include me in the Gamer Database" at{' '}
+            <Text
+              style={styles.discoverabilityLink}
+              onPress={() => Linking.openURL('https://boardgamegeek.com/settings/privacy')}
+            >
+              https://boardgamegeek.com/settings/privacy
+            </Text>
+          </Text>
         </View>
 
         {error ? (
@@ -307,17 +325,39 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+  logoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  bggLogo: {
+    width: 200,
+    height: undefined,
+    aspectRatio: 736 / 216, // bggLogoColor aspect ratio
   },
   subtitle: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 24,
+    marginBottom: 16,
     lineHeight: 20,
+  },
+  discoverabilityNotice: {
+    backgroundColor: '#fff3cd',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#ffc107',
+  },
+  discoverabilityText: {
+    fontSize: 13,
+    color: '#856404',
+    lineHeight: 18,
+  },
+  discoverabilityLink: {
+    color: '#0066cc',
+    textDecorationLine: 'underline',
+    fontWeight: '500',
   },
   form: {
     marginBottom: 20,

@@ -14,6 +14,12 @@ const parseProfile = (profile) => {
       bggUsername: '',
       location: '',
       zipcode: '',
+      notificationPreferences: {
+        meepleupChanges: true,
+        newPublicMeepleups: true,
+        gameMarking: true,
+        nearbyMeepleupDistance: 25, // Default 25 miles
+      },
     };
   }
 
@@ -23,6 +29,12 @@ const parseProfile = (profile) => {
     bggUsername: profile.bggUsername || '',
     location: profile.location || '',
     zipcode: profile.zipcode || profile.location || '', // Support both for backward compatibility
+    notificationPreferences: profile.notificationPreferences || {
+      meepleupChanges: true,
+      newPublicMeepleups: true,
+      gameMarking: true,
+      nearbyMeepleupDistance: 25,
+    },
   };
 };
 
@@ -44,6 +56,7 @@ const mapUser = (firebaseUser, storedProfile = {}) => {
     location: profile.location,
     zipcode: profile.zipcode,
     photoURL: firebaseUser.photoURL || null,
+    notificationPreferences: profile.notificationPreferences,
     metadata: {
       creationTime: firebaseUser.metadata?.creationTime,
       lastSignInTime: firebaseUser.metadata?.lastSignInTime,
@@ -76,8 +89,41 @@ export const AuthProvider = ({ children }) => {
       let cachedProfile = profileCacheRef.current[cacheKey];
 
       if (!cachedProfile) {
-        const stored = await storage.getItem(PROFILE_STORAGE_KEY(cacheKey));
-        cachedProfile = stored ? JSON.parse(stored) : {};
+        // Try to load from Firestore first
+        let firestoreProfile = null;
+        if (db) {
+          try {
+            const userDoc = await db.collection('users').doc(cacheKey).get();
+            if (userDoc.exists) {
+              const userData = userDoc.data();
+              firestoreProfile = {
+                name: userData.name || '',
+                bio: userData.bio || '',
+                bggUsername: userData.bggUsername || '',
+                location: userData.location || '',
+                zipcode: userData.zipcode || userData.location || '',
+                notificationPreferences: userData.preferences?.notifications || userData.notificationPreferences || {
+                  meepleupChanges: true,
+                  newPublicMeepleups: true,
+                  gameMarking: true,
+                  nearbyMeepleupDistance: 25,
+                },
+              };
+            }
+          } catch (firestoreError) {
+            console.error('Error loading from Firestore:', firestoreError);
+          }
+        }
+
+        // Fall back to local storage if Firestore doesn't have it
+        if (!firestoreProfile) {
+          const stored = await storage.getItem(PROFILE_STORAGE_KEY(cacheKey));
+          cachedProfile = stored ? JSON.parse(stored) : {};
+        } else {
+          cachedProfile = firestoreProfile;
+          // Save to local storage as backup
+          await storage.setItem(PROFILE_STORAGE_KEY(cacheKey), JSON.stringify(cachedProfile));
+        }
         profileCacheRef.current[cacheKey] = cachedProfile;
       }
 
@@ -187,7 +233,39 @@ export const AuthProvider = ({ children }) => {
       bggUsername: '',
       location: '',
       zipcode: '',
+      notificationPreferences: {
+        meepleupChanges: true,
+        newPublicMeepleups: true,
+        gameMarking: true,
+        nearbyMeepleupDistance: 25,
+      },
     });
+
+    // Save to Firestore on signup
+    if (db) {
+      try {
+        const userRef = db.collection('users').doc(credential.user.uid);
+        await userRef.set({
+          id: credential.user.uid,
+          email: credential.user.email,
+          name: name || '',
+          bio: '',
+          bggUsername: '',
+          zipcode: '',
+          avatarUrl: credential.user.photoURL || '',
+          createdAt: firebase.firestore.Timestamp.now(),
+          updatedAt: firebase.firestore.Timestamp.now(),
+          notificationPreferences: {
+            meepleupChanges: true,
+            newPublicMeepleups: true,
+            gameMarking: true,
+            nearbyMeepleupDistance: 25,
+          },
+        });
+      } catch (error) {
+        console.error('Error creating Firestore user:', error);
+      }
+    }
 
     setUser(mapUser(credential.user, storedProfile));
     return credential.user;
@@ -195,8 +273,41 @@ export const AuthProvider = ({ children }) => {
 
   const login = async ({ email, password }) => {
     const credential = await auth.signInWithEmailAndPassword(email.trim(), password);
-    const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
-    const profile = stored ? JSON.parse(stored) : {};
+    
+    // Try to load from Firestore first
+    let profile = null;
+    if (db) {
+      try {
+        const userDoc = await db.collection('users').doc(credential.user.uid).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          profile = {
+            name: userData.name || '',
+            bio: userData.bio || '',
+            bggUsername: userData.bggUsername || '',
+            location: userData.location || '',
+            zipcode: userData.zipcode || userData.location || '',
+            notificationPreferences: userData.notificationPreferences || {
+              meepleupChanges: true,
+              newPublicMeepleups: true,
+              gameMarking: true,
+              nearbyMeepleupDistance: 25,
+            },
+          };
+          // Save to local storage as backup
+          await storage.setItem(PROFILE_STORAGE_KEY(credential.user.uid), JSON.stringify(profile));
+        }
+      } catch (firestoreError) {
+        console.error('Error loading from Firestore on login:', firestoreError);
+      }
+    }
+
+    // Fall back to local storage if Firestore doesn't have it
+    if (!profile) {
+      const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
+      profile = stored ? JSON.parse(stored) : {};
+    }
+    
     setUser(mapUser(credential.user, profile));
     return credential.user;
   };
@@ -262,8 +373,44 @@ export const AuthProvider = ({ children }) => {
       ...updates,
     };
 
+    // Update Firebase Auth profile if name or photoURL changed
+    const authUpdates = {};
     if (typeof updates.name === 'string' && updates.name.trim() !== auth.currentUser.displayName) {
-      await auth.currentUser.updateProfile({ displayName: updates.name.trim() });
+      authUpdates.displayName = updates.name.trim();
+    }
+    if (typeof updates.photoURL === 'string' && updates.photoURL !== auth.currentUser.photoURL) {
+      authUpdates.photoURL = updates.photoURL;
+    }
+    
+    if (Object.keys(authUpdates).length > 0) {
+      await auth.currentUser.updateProfile(authUpdates);
+    }
+
+    // Save to Firestore
+    if (db) {
+      try {
+        const userRef = db.collection('users').doc(auth.currentUser.uid);
+        const userData = {
+          id: auth.currentUser.uid,
+          email: auth.currentUser.email,
+          name: nextProfile.name || auth.currentUser.displayName || '',
+          bio: nextProfile.bio || '',
+          bggUsername: nextProfile.bggUsername || '',
+          zipcode: nextProfile.zipcode || '',
+          avatarUrl: nextProfile.photoURL || auth.currentUser.photoURL || '',
+          updatedAt: firebase.firestore.Timestamp.now(),
+        };
+
+        // Handle notification preferences separately
+        if (nextProfile.notificationPreferences) {
+          userData.notificationPreferences = nextProfile.notificationPreferences;
+        }
+
+        await userRef.set(userData, { merge: true });
+      } catch (firestoreError) {
+        console.error('Error updating Firestore:', firestoreError);
+        // Continue anyway, we still saved to local storage
+      }
     }
 
     const savedProfile = await saveProfile(auth.currentUser.uid, nextProfile);
@@ -271,6 +418,32 @@ export const AuthProvider = ({ children }) => {
     const updatedUser = mapUser(auth.currentUser, savedProfile);
     setUser(updatedUser);
     return updatedUser;
+  };
+
+  const updateNotificationPreferences = async (preferences = {}) => {
+    if (!auth.currentUser) {
+      throw new Error('No authenticated user');
+    }
+
+    const currentProfileRaw = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
+    const currentProfile = currentProfileRaw ? JSON.parse(currentProfileRaw) : {};
+    const currentPreferences = currentProfile.notificationPreferences || {
+      meepleupChanges: true,
+      newPublicMeepleups: true,
+      gameMarking: true,
+      nearbyMeepleupDistance: 25,
+    };
+
+    const updatedPreferences = {
+      ...currentPreferences,
+      ...preferences,
+    };
+
+    return updateUser({ notificationPreferences: updatedPreferences });
+  };
+
+  const updateUserPhoto = async (photoURL) => {
+    return updateUser({ photoURL });
   };
 
   const deleteAccount = async () => {
@@ -561,6 +734,8 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     refreshUser,
     updateUser,
+    updateUserPhoto,
+    updateNotificationPreferences,
     deleteAccount,
   }), [user, loading]);
 

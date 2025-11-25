@@ -38,9 +38,10 @@
 }
 
 .nav-link-active {
-  color: #4a90e2;
-  font-weight: 600;
-  border-bottom: 2px solid #4a90e2;
+  color: #dc2626;
+  font-weight: bold;
+  font-size: 18px;
+  border-bottom: 4px solid #dc2626;
 }
 
 @media (max-width: 768px) {

@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { wordlist } from '../utils/wordlist';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import { notifyNearbyUsersOfNewPublicMeepleUp, notifyMeepleUpMembers } from '../utils/notifications';
 
 const EventsContext = createContext();
 
@@ -158,6 +159,19 @@ const addOrUpdateMember = (event, userId, role = MEMBER_ROLES.MEMBER) => {
 const removeMember = (event, userId) =>
   event.members.filter((member) => member.userId !== userId);
 
+// Helper function to extract zipcode from location string
+const extractZipcodeFromLocation = (location) => {
+  if (!location) return '';
+  
+  // Try to find 5-digit zipcode pattern
+  const zipcodeMatch = location.match(/\b\d{5}(-\d{4})?\b/);
+  if (zipcodeMatch) {
+    return zipcodeMatch[0].split('-')[0]; // Return just the 5-digit part
+  }
+  
+  return '';
+};
+
 export const useEvents = () => {
   const context = useContext(EventsContext);
   if (!context) {
@@ -284,6 +298,27 @@ export const EventsProvider = ({ children }) => {
               joinedAt: firebase.firestore.Timestamp.now(),
               rsvpStatus: null,
             });
+          }
+
+          // Notify nearby users if this is a public MeepleUp
+          if (baseEvent.visibility === 'public' || firestoreData.privacy === 'public') {
+            // Extract zipcode from location if available
+            // Location format: generalLocation might contain zipcode or address
+            const locationZipcode = extractZipcodeFromLocation(baseEvent.generalLocation || '');
+            const organizerZipcode = user?.zipcode || locationZipcode || '';
+            
+            if (organizerZipcode) {
+              // Fire and forget - don't wait for notification completion
+              notifyNearbyUsersOfNewPublicMeepleUp(
+                baseEvent.id,
+                baseEvent.name,
+                organizerZipcode,
+                user?.name || user?.email || 'Someone',
+                organizerId
+              ).catch(error => {
+                console.error('Error sending notifications for new public MeepleUp:', error);
+              });
+            }
           }
         } catch (error) {
           console.error('[createEvent] ❌ Error saving event to Firestore:', error);
@@ -856,6 +891,140 @@ export const EventsProvider = ({ children }) => {
     );
   }, []);
 
+  const updateMemberRSVP = useCallback(
+    async (eventId, userId, rsvpStatus) => {
+      if (!eventId || !userId || !rsvpStatus) {
+        throw new Error('Event ID, user ID, and RSVP status are required.');
+      }
+
+      // Validate RSVP status
+      const validStatuses = ['going', 'maybe', 'not-going'];
+      if (!validStatuses.includes(rsvpStatus)) {
+        throw new Error(`Invalid RSVP status. Must be one of: ${validStatuses.join(', ')}`);
+      }
+
+      // Update in Firestore if available
+      if (db && eventId) {
+        try {
+          const membersRef = db.collection('gamingGroups').doc(eventId)
+            .collection('members').doc(userId);
+          
+          await membersRef.set({
+            rsvpStatus,
+            rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
+          }, { merge: true });
+        } catch (error) {
+          console.error('Error updating RSVP in Firestore:', error);
+          throw error;
+        }
+      }
+
+      // Update local state
+      setEvents((prev) =>
+        prev.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          return {
+            ...event,
+            members: event.members.map((member) =>
+              member.userId === userId
+                ? {
+                    ...member,
+                    rsvpStatus,
+                    rsvpUpdatedAt: new Date().toISOString(),
+                  }
+                : member,
+            ),
+            lastUpdatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
+  const updateEventSchedule = useCallback(
+    async (eventId, userId, scheduleUpdates) => {
+      if (!eventId || !userId) {
+        throw new Error('Event ID and user ID are required.');
+      }
+
+      // Verify user is the organizer
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('Event not found.');
+      }
+
+      if (event.organizerId !== userId) {
+        throw new Error('Only the organizer can update the schedule.');
+      }
+
+      const updates = {};
+      if (scheduleUpdates.scheduledFor !== undefined) {
+        updates.scheduledFor = scheduleUpdates.scheduledFor;
+      }
+      if (scheduleUpdates.generalLocation !== undefined) {
+        updates.generalLocation = scheduleUpdates.generalLocation;
+      }
+      if (scheduleUpdates.exactLocation !== undefined) {
+        updates.exactLocation = scheduleUpdates.exactLocation;
+      }
+
+      // Update in Firestore if available
+      if (db && eventId) {
+        try {
+          const groupRef = db.collection('gamingGroups').doc(eventId);
+          const firestoreUpdates = {
+            updatedAt: firebase.firestore.Timestamp.now(),
+          };
+
+          if (scheduleUpdates.scheduledFor !== undefined) {
+            firestoreUpdates.scheduledFor = scheduleUpdates.scheduledFor;
+            firestoreUpdates.nextEventDate = scheduleUpdates.scheduledFor
+              ? firebase.firestore.Timestamp.fromDate(new Date(scheduleUpdates.scheduledFor))
+              : null;
+          }
+
+          if (scheduleUpdates.generalLocation !== undefined || scheduleUpdates.exactLocation !== undefined) {
+            const currentData = (await groupRef.get()).data();
+            const currentLocation = currentData?.location || {};
+            firestoreUpdates.location = {
+              name: scheduleUpdates.generalLocation !== undefined
+                ? scheduleUpdates.generalLocation
+                : currentLocation.name || '',
+              address: scheduleUpdates.exactLocation !== undefined
+                ? scheduleUpdates.exactLocation
+                : currentLocation.address || '',
+            };
+          }
+
+          await groupRef.update(firestoreUpdates);
+        } catch (error) {
+          console.error('Error updating schedule in Firestore:', error);
+          throw error;
+        }
+      }
+
+      // Update local state
+      setEvents((prev) =>
+        prev.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          return {
+            ...event,
+            ...updates,
+            lastUpdatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    [events],
+  );
+
   const value = useMemo(
     () => ({
       events,
@@ -875,6 +1044,8 @@ export const EventsProvider = ({ children }) => {
       getMembershipStatus,
       submitContactRequest,
       updateContactRequest,
+      updateMemberRSVP,
+      updateEventSchedule,
       loading,
       membershipStatus: MEMBERSHIP_STATUS,
       contactStatus: CONTACT_STATUS,
@@ -898,6 +1069,8 @@ export const EventsProvider = ({ children }) => {
       getMembershipStatus,
       submitContactRequest,
       updateContactRequest,
+      updateMemberRSVP,
+      updateEventSchedule,
     ],
   );
 

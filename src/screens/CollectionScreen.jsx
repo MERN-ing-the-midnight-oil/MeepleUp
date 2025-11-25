@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDimensions } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
@@ -13,12 +13,18 @@ import { getStarRating } from '../utils/gameBadges';
 // BGGImport will need to be converted separately if needed
 
 const CollectionScreen = () => {
+  const { width } = useWindowDimensions();
   const { user } = useAuth();
   const { getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'view', 'add', 'import'
   const [sortBy, setSortBy] = useState('rating'); // 'rating', 'category', 'title'
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
+  
+  // Responsive icon size - larger on bigger screens
+  const iconSize = width > 768 ? 72 : 64;
+  // First two icons are 30% larger, then 20% larger again (1.3 * 1.2 = 1.56)
+  const largeIconSize = width > 768 ? Math.round(72 * 1.56) : Math.round(64 * 1.56);
   
   const userIdentifier = user?.uid || user?.id;
   const rawCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
@@ -162,18 +168,20 @@ const CollectionScreen = () => {
       <View style={styles.content}>
         {showMenu && (
           <View style={styles.menuContainer}>
-            <Text style={styles.menuTitle}>What would you like to do?</Text>
-            
             <Pressable
               style={styles.menuOption}
               onPress={handleOpenCamera}
             >
-              <View style={styles.menuOptionContent}>
-                <Text style={styles.menuOptionIcon}>📷</Text>
+              <View style={styles.menuOptionContentMinimalPadding}>
+                <Image 
+                  source={require('../../assets/images/lexisterium.png')}
+                  style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
+                  resizeMode="contain"
+                />
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Inventory your home game collection using Shelf Elf AI</Text>
+                  <Text style={styles.menuOptionTitle}>Inventory using Lexisterium AI</Text>
                   <Text style={styles.menuOptionDescription}>
-                    Simply take side-view photos of your stacks of game boxes for instant inventory creation
+                    Snap side-view photos of stacks of game boxes for instant title and game information retrieval
                   </Text>
                 </View>
                 <Text style={styles.menuOptionArrow}>→</Text>
@@ -184,10 +192,14 @@ const CollectionScreen = () => {
               style={styles.menuOption}
               onPress={() => setActiveView('view')}
             >
-              <View style={styles.menuOptionContent}>
-                <Text style={styles.menuOptionIcon}>📚</Text>
+              <View style={styles.menuOptionContentMinimalPadding}>
+                <Image 
+                  source={require('../../assets/images/lexigames.png')}
+                  style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
+                  resizeMode="contain"
+                />
                 <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>View my inventoried games</Text>
+                  <Text style={styles.menuOptionTitle}>View your games inventory</Text>
                   <Text style={styles.menuOptionDescription}>
                     Browse your {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''}
                   </Text>
@@ -201,12 +213,13 @@ const CollectionScreen = () => {
               onPress={() => setActiveView('import')}
             >
               <View style={styles.menuOptionContent}>
-                <Text style={styles.menuOptionIcon}>🌐</Text>
+                <Image 
+                  source={require('../../assets/images/lexiBGG.png')}
+                  style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
+                  resizeMode="contain"
+                />
                 <View style={styles.menuOptionText}>
                   <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
-                  <Text style={styles.menuOptionDescription}>
-                    Your "Discoverability" must be toggled to "Include me in the Gamer Database" at https://boardgamegeek.com/settings/privacy
-                  </Text>
                 </View>
                 <Text style={styles.menuOptionArrow}>→</Text>
               </View>
@@ -346,13 +359,6 @@ const styles = StyleSheet.create({
   menuContainer: {
     paddingVertical: 20,
   },
-  menuTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
   menuOption: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -368,10 +374,16 @@ const styles = StyleSheet.create({
   menuOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
+    padding: 14,
+  },
+  menuOptionContentMinimalPadding: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 4,
   },
   menuOptionIcon: {
-    fontSize: 32,
+    width: 32,
+    height: 32,
     marginRight: 16,
   },
   menuOptionText: {

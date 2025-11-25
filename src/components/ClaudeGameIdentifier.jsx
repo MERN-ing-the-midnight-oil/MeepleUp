@@ -209,6 +209,96 @@ const ClaudeGameIdentifier = ({
   useEffect(() => {
     gameCandidatesRef.current = gameCandidates;
   }, [gameCandidates]);
+
+  // Track which candidates have had their BGG fetch triggered
+  const processedCandidatesRef = useRef(new Set());
+
+  // Process new candidates for BGG lookup in useEffect (after render completes)
+  useEffect(() => {
+    console.log('[ClaudeGameIdentifier] useEffect RUNNING, gameCandidates:', gameCandidates.length);
+    
+    // Find candidates that need BGG lookup and haven't been processed yet
+    const candidatesToProcess = gameCandidates.filter(
+      (candidate) => 
+        candidate.status === 'pending' && 
+        candidate.bggStatus === 'idle' &&
+        !processedCandidatesRef.current.has(candidate.id) &&
+        candidate.claudeConfidence !== 'low' // Skip low confidence
+    );
+
+    if (candidatesToProcess.length === 0) {
+      console.log('[ClaudeGameIdentifier] useEffect: No candidates to process');
+      return;
+    }
+
+    console.log('[ClaudeGameIdentifier] useEffect: Processing', candidatesToProcess.length, 'candidates');
+
+    // Process candidates sequentially using promises instead of setTimeout
+    // This avoids React Native timer issues
+    // Store the session key at the start to check if it changes
+    const currentSessionKey = activeSessionRef.current;
+    
+    (async () => {
+      for (let index = 0; index < candidatesToProcess.length; index++) {
+        const candidate = candidatesToProcess[index];
+        
+        // Mark as processed immediately to avoid duplicate processing
+        processedCandidatesRef.current.add(candidate.id);
+        
+        const delayMs = index * 500; // 0ms, 500ms, 1000ms, etc.
+        const candidateId = candidate.id;
+        const title = candidate.claudeTitle;
+
+        console.log('[ClaudeGameIdentifier] useEffect: Processing candidate', title, 'delay:', delayMs, 'session:', currentSessionKey);
+
+        // Wait for the delay (if any)
+        if (delayMs > 0) {
+          console.log('[ClaudeGameIdentifier] Waiting', delayMs, 'ms before processing', title);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+
+        // Check session is still active
+        if (currentSessionKey !== activeSessionRef.current) {
+          console.log('[ClaudeGameIdentifier] Session changed, skipping BGG fetch for', title);
+          continue;
+        }
+
+        // Check candidate still exists and hasn't been processed
+        const currentCandidate = gameCandidatesRef.current.find(c => c.id === candidateId);
+        if (!currentCandidate || currentCandidate.bggStatus !== 'idle') {
+          console.log('[ClaudeGameIdentifier] Candidate already processed or removed, skipping', title);
+          continue;
+        }
+
+        console.log('[ClaudeGameIdentifier] 🔥🔥🔥 FETCHING BGG METADATA for', title);
+
+        try {
+          // Use ref to get the latest version of fetchBGGMetadata
+          if (fetchBGGMetadataRef.current) {
+            await fetchBGGMetadataRef.current(currentSessionKey, candidateId, title);
+          } else {
+            console.error('[ClaudeGameIdentifier] fetchBGGMetadataRef.current is null!');
+          }
+        } catch (error) {
+          console.error('[ClaudeGameIdentifier] Error fetching BGG metadata for', title, ':', error);
+        }
+      }
+    })();
+
+    // Cleanup function to clear timers if component unmounts or dependencies change
+    return () => {
+      console.log('[ClaudeGameIdentifier] useEffect CLEANUP running');
+      // Don't clear timers here - let them complete
+      // They'll be cleared by clearPendingFetchTimers if needed
+    };
+  }, [gameCandidates]); // Only re-run when gameCandidates changes, not when fetchBGGMetadata changes
+
+  // Reset processed candidates when a new scan starts
+  useEffect(() => {
+    if (gameCandidates.length === 0) {
+      processedCandidatesRef.current.clear();
+    }
+  }, [gameCandidates.length]);
   const [isCorrectionModalVisible, setIsCorrectionModalVisible] = useState(false);
   const [correctionQuery, setCorrectionQuery] = useState('');
   const [correctionSuggestions, setCorrectionSuggestions] = useState([]);
@@ -221,6 +311,8 @@ const ClaudeGameIdentifier = ({
   // Queue for sequential BGG fetches to prevent concurrent Firestore queries
   const bggFetchQueueRef = useRef([]);
   const isProcessingBggQueueRef = useRef(false);
+  const processBggQueueRef = useRef(null); // Keep a ref for the latest processBggQueue function
+  const fetchBGGMetadataRef = useRef(null); // Keep a ref for the latest fetchBGGMetadata function
   // Multiple search results modal (when more than 1 match found)
   const [multipleResultsCandidate, setMultipleResultsCandidate] = useState(null);
   const [isMultipleResultsModalVisible, setIsMultipleResultsModalVisible] = useState(false);
@@ -248,7 +340,12 @@ const ClaudeGameIdentifier = ({
   }, [showCameraModal]);
 
   const clearPendingFetchTimers = useCallback(() => {
-    pendingFetchTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+    if (__DEV__) {
+      console.log('[ClaudeGameIdentifier] clearPendingFetchTimers called, clearing', pendingFetchTimersRef.current.length, 'timers');
+    }
+    pendingFetchTimersRef.current.forEach((timerId) => {
+      clearTimeout(timerId);
+    });
     pendingFetchTimersRef.current = [];
   }, []);
 
@@ -830,13 +927,39 @@ const ClaudeGameIdentifier = ({
     [updateCandidate]
   );
 
+  // Keep ref in sync with fetchBGGMetadata (same pattern as processBggQueueRef)
+  fetchBGGMetadataRef.current = fetchBGGMetadata;
+
   const processBggQueue = useCallback(async () => {
+    if (__DEV__) {
+      console.log('[ClaudeGameIdentifier] processBggQueue called', {
+        isProcessing: isProcessingBggQueueRef.current,
+        queueLength: bggFetchQueueRef.current.length,
+        activeSession: activeSessionRef.current,
+      });
+    }
+    
     if (isProcessingBggQueueRef.current || bggFetchQueueRef.current.length === 0) {
+      if (__DEV__) {
+        console.log('[ClaudeGameIdentifier] processBggQueue early return', {
+          isProcessing: isProcessingBggQueueRef.current,
+          queueLength: bggFetchQueueRef.current.length,
+        });
+      }
       return;
     }
 
     isProcessingBggQueueRef.current = true;
     const item = bggFetchQueueRef.current.shift();
+    
+    if (__DEV__) {
+      console.log('[ClaudeGameIdentifier] Processing BGG queue item', {
+        candidateId: item?.candidateId,
+        title: item?.title,
+        sessionKey: item?.sessionKey,
+        activeSession: activeSessionRef.current,
+      });
+    }
     
     if (item && item.sessionKey === activeSessionRef.current) {
       try {
@@ -844,34 +967,121 @@ const ClaudeGameIdentifier = ({
       } catch (error) {
         console.error('[ClaudeGameIdentifier] Error processing BGG queue item:', error);
       }
+    } else if (__DEV__) {
+      console.warn('[ClaudeGameIdentifier] Skipping queue item - session mismatch or missing item', {
+        item,
+        activeSession: activeSessionRef.current,
+      });
     }
 
     isProcessingBggQueueRef.current = false;
     
     // Process next item in queue after a short delay
+    // Use ref to ensure we call the latest version
     if (bggFetchQueueRef.current.length > 0) {
-      setTimeout(() => processBggQueue(), 300);
+      if (__DEV__) {
+        console.log('[ClaudeGameIdentifier] Scheduling next queue item, remaining:', bggFetchQueueRef.current.length);
+      }
+      setTimeout(() => {
+        if (processBggQueueRef.current) {
+          processBggQueueRef.current();
+        }
+      }, 300);
     }
   }, [fetchBGGMetadata]);
 
+  // Set ref immediately (not in useEffect) so it's available right away
+  processBggQueueRef.current = processBggQueue;
+
   const scheduleBGGFetch = useCallback(
     (sessionKey, candidateId, title, delayMs = 0) => {
+      if (__DEV__) {
+        console.log('[ClaudeGameIdentifier] scheduleBGGFetch called', {
+          candidateId,
+          title,
+          delayMs,
+          sessionKey,
+        });
+      }
+      
       // Add to queue instead of scheduling directly to prevent concurrent Firestore queries
       const queueItem = { sessionKey, candidateId, title };
       
       if (delayMs > 0) {
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Scheduling BGG fetch with delay', delayMs, 'ms for', title);
+          console.log('[ClaudeGameIdentifier] processBggQueueRef.current:', !!processBggQueueRef.current, 'processBggQueue:', !!processBggQueue);
+        }
+        // Capture the function directly in the closure to ensure it's available
+        // Also use the ref as backup
+        const processFn = processBggQueueRef.current || processBggQueue;
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Creating timer with processFn available:', !!processFn);
+        }
+        
+        if (!processFn) {
+          console.error('[ClaudeGameIdentifier] CRITICAL: No processBggQueue function available! Cannot create timer.');
+          return;
+        }
+        
         const timerId = setTimeout(() => {
-          pendingFetchTimersRef.current = pendingFetchTimersRef.current.filter((id) => id !== timerId);
-          bggFetchQueueRef.current.push(queueItem);
-          processBggQueue();
+          try {
+            if (__DEV__) {
+              console.log('[ClaudeGameIdentifier] ⏰⏰⏰ BGG fetch timer FIRED for', title, 'at', Date.now());
+            }
+            
+            // Verify session is still active
+            if (sessionKey !== activeSessionRef.current) {
+              if (__DEV__) {
+                console.warn('[ClaudeGameIdentifier] Session mismatch, skipping queue item', {
+                  scheduledSession: sessionKey,
+                  activeSession: activeSessionRef.current,
+                });
+              }
+              return;
+            }
+            
+            pendingFetchTimersRef.current = pendingFetchTimersRef.current.filter((id) => id !== timerId);
+            bggFetchQueueRef.current.push(queueItem);
+            if (__DEV__) {
+              console.log('[ClaudeGameIdentifier] Queue item added, queue length:', bggFetchQueueRef.current.length);
+              console.log('[ClaudeGameIdentifier] About to call processBggQueue, ref available:', !!processBggQueueRef.current, 'captured fn available:', !!processFn);
+            }
+            
+            // Try ref first, then captured function
+            const fnToCall = processBggQueueRef.current || processFn;
+            if (fnToCall) {
+              fnToCall();
+            } else {
+              console.error('[ClaudeGameIdentifier] ERROR: No processBggQueue function available!');
+            }
+          } catch (timerError) {
+            console.error('[ClaudeGameIdentifier] Error in timer callback:', timerError);
+          }
         }, delayMs);
+        
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Timer created successfully, ID:', timerId, 'Total pending timers:', pendingFetchTimersRef.current.length);
+        }
+        
         pendingFetchTimersRef.current.push(timerId);
+        
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Timer added to pending list, total:', pendingFetchTimersRef.current.length);
+        }
       } else {
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Adding to queue immediately (no delay) for', title);
+        }
         bggFetchQueueRef.current.push(queueItem);
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Queue item added, queue length:', bggFetchQueueRef.current.length, 'calling processBggQueue directly');
+        }
+        // Call directly when no delay
         processBggQueue();
       }
     },
-    [processBggQueue]
+    [processBggQueue] // Include in dependencies so closure is fresh
   );
 
   const beginIdentificationWorkflow = useCallback(
@@ -992,11 +1202,8 @@ const ClaudeGameIdentifier = ({
               }
               return [...prev, candidate];
             });
-
-            // Stagger searches more aggressively to prevent concurrent Firestore queries
-            // Start with 500ms delay, then add 800ms for each subsequent game
-            const delayMs = 500 + (index * 800);
-            scheduleBGGFetch(sessionKey, candidateId, game.title, delayMs);
+            
+            // Don't trigger BGG fetch here - let useEffect handle it after state is updated
           } catch (candidateError) {
             console.error('[ClaudeGameIdentifier] Error creating candidate:', candidateError, game);
             // Continue with next game instead of crashing
@@ -1030,6 +1237,9 @@ const ClaudeGameIdentifier = ({
       return;
     }
 
+    if (__DEV__) {
+      console.log('[ClaudeGameIdentifier] Clearing pending fetch timers before capture:', pendingFetchTimersRef.current.length);
+    }
     clearPendingFetchTimers();
 
     try {

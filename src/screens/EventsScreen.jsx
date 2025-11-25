@@ -306,11 +306,12 @@ const EventsScreen = () => {
     );
   };
 
+
   return (
     <>
       <ScrollView style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.title}>My MeepleUps</Text>
+          <Text style={styles.title}>Your MeepleUps</Text>
           <Text style={styles.subtitle}>Manage your game night MeepleUps</Text>
         </View>
 
