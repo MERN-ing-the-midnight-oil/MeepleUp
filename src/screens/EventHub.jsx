@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { Platform } from 'react-native';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { Platform, KeyboardAvoidingView } from 'react-native';
 import {
   View,
   Text,
@@ -541,32 +541,21 @@ const EventHub = () => {
 
     const fetchPosts = async () => {
       try {
-        // Try query with pinned ordering first
-        let postsRef = db.collection('gamingGroups').doc(event.id)
+        // Fetch all posts and filter/sort in memory to avoid index requirements
+        // This is more efficient for small collections and doesn't require composite indexes
+        const postsRef = db.collection('gamingGroups').doc(event.id)
           .collection('posts')
-          .where('deleted', '==', false)
-          .orderBy('pinned', 'desc')
-          .orderBy('createdAt', 'desc')
-          .limit(50);
+          .limit(100); // Get more than we need, then filter
 
-        let snapshot;
-        try {
-          snapshot = await postsRef.get();
-        } catch (indexError) {
-          // If index doesn't exist, try simpler query
-          console.log('Index not available, using simpler query');
-          postsRef = db.collection('gamingGroups').doc(event.id)
-            .collection('posts')
-            .where('deleted', '==', false)
-            .orderBy('createdAt', 'desc')
-            .limit(50);
-          snapshot = await postsRef.get();
-        }
+        const snapshot = await postsRef.get();
 
         const posts = [];
         
         for (const doc of snapshot.docs) {
           const data = doc.data();
+          // Filter out deleted posts
+          if (data.deleted === true) continue;
+          
           posts.push({
             id: doc.id,
             userId: data.userId,
@@ -577,14 +566,15 @@ const EventHub = () => {
           });
         }
         
-        // Sort manually: pinned first, then by date
+        // Sort manually: pinned first, then by date (newest first)
         posts.sort((a, b) => {
           if (a.pinned && !b.pinned) return -1;
           if (!a.pinned && b.pinned) return 1;
           return new Date(b.createdAt) - new Date(a.createdAt);
         });
         
-        setDiscussionMessages(posts);
+        // Limit to 50 most recent after sorting
+        setDiscussionMessages(posts.slice(0, 50));
       } catch (error) {
         console.error('Error fetching discussion posts:', error);
         // If query fails, just show empty state
@@ -595,55 +585,60 @@ const EventHub = () => {
     fetchPosts();
   }, [event?.id, isMember]);
 
-  // Discussion Tab Component
-  const DiscussionTab = () => {
-    const handlePostMessage = async () => {
-      if (!newMessage.trim() || !userId || !event?.id || !db) {
-        return;
-      }
+  // Handler for posting messages - memoized to prevent recreation
+  const handlePostMessage = useCallback(async () => {
+    if (!newMessage.trim() || !userId || !event?.id || !db) {
+      return;
+    }
 
-      try {
-        const postsRef = db.collection('gamingGroups').doc(event.id)
-          .collection('posts');
-        
-        const postData = {
-          userId,
-          userName: user?.name || user?.email || 'Unknown',
-          content: newMessage.trim(),
-          likeCount: 0,
-          commentCount: 0,
-          createdAt: firebase.firestore.Timestamp.now(),
-          updatedAt: firebase.firestore.Timestamp.now(),
-          edited: false,
-          deleted: false,
-          pinned: false,
-        };
+    try {
+      const postsRef = db.collection('gamingGroups').doc(event.id)
+        .collection('posts');
+      
+      const postData = {
+        userId,
+        userName: user?.name || user?.email || 'Unknown',
+        content: newMessage.trim(),
+        likeCount: 0,
+        commentCount: 0,
+        createdAt: firebase.firestore.Timestamp.now(),
+        updatedAt: firebase.firestore.Timestamp.now(),
+        edited: false,
+        deleted: false,
+        pinned: false,
+      };
 
-        const docRef = await postsRef.add(postData);
-        
-        // Add to local state
-        setDiscussionMessages(prev => [{
-          id: docRef.id,
-          userId,
-          userName: user?.name || user?.email || 'Unknown',
-          content: newMessage.trim(),
-          createdAt: new Date().toISOString(),
-          pinned: false,
-        }, ...prev]);
-        
-        setNewMessage('');
-      } catch (error) {
-        console.error('Error posting message:', error);
-        Alert.alert('Error', 'Failed to post message. Please try again.');
-      }
-    };
+      const docRef = await postsRef.add(postData);
+      
+      // Add to local state
+      setDiscussionMessages(prev => [{
+        id: docRef.id,
+        userId,
+        userName: user?.name || user?.email || 'Unknown',
+        content: newMessage.trim(),
+        createdAt: new Date().toISOString(),
+        pinned: false,
+      }, ...prev]);
+      
+      setNewMessage('');
+    } catch (error) {
+      console.error('Error posting message:', error);
+      Alert.alert('Error', 'Failed to post message. Please try again.');
+    }
+  }, [newMessage, userId, event?.id, db, user?.name, user?.email]);
 
+  // Discussion Tab Component - memoized to prevent re-creation on every render
+  const DiscussionTab = useMemo(() => {
     // Separate pinned and regular messages
     const pinnedMessages = discussionMessages.filter(m => m.pinned);
     const regularMessages = discussionMessages.filter(m => !m.pinned);
 
     return (
-      <ScrollView style={styles.tabContent}>
+      <ScrollView 
+        style={styles.tabContent}
+        contentContainerStyle={styles.discussionScrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Pinned Notes */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -713,7 +708,14 @@ const EventHub = () => {
         </View>
       </ScrollView>
     );
-  };
+  }, [
+    discussionMessages,
+    pinnedNotes,
+    isOrganizer,
+    isMember,
+    newMessage,
+    handlePostMessage,
+  ]);
 
   // Members Tab Component
   const MembersTab = () => (
@@ -784,18 +786,18 @@ const EventHub = () => {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{event.name || 'MeepleUp Hub'}</Text>
-        <Text style={styles.subtitle}>
-          {isMember
-            ? 'Your MeepleUp space with members-only details.'
-            : 'Organizers share full details once they grant you membership.'}
-        </Text>
-      </View>
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoidingView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
+    >
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>{event.name || 'MeepleUp Hub'}</Text>
+        </View>
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
+        {/* Tabs */}
+        <View style={styles.tabs}>
         <TouchableOpacity
           style={[styles.tab, activeTab === TABS.SCHEDULE && styles.tabActive]}
           onPress={() => setActiveTab(TABS.SCHEDULE)}
@@ -824,7 +826,7 @@ const EventHub = () => {
 
       {/* Tab Content */}
       {activeTab === TABS.SCHEDULE && <ScheduleTab />}
-      {activeTab === TABS.DISCUSSION && <DiscussionTab />}
+      {activeTab === TABS.DISCUSSION && DiscussionTab}
       {activeTab === TABS.MEMBERS && <MembersTab />}
 
       {/* Admin-Only Sections */}
@@ -861,44 +863,6 @@ const EventHub = () => {
               Archiving will hide this MeepleUp from all members. You can restore it later from your archived MeepleUps.
             </Text>
           </View>
-        </View>
-      )}
-
-      {/* Leave Event (Members only) */}
-      {isMember && !isOrganizer && (
-        <View style={styles.section}>
-          <Button
-            label="Leave MeepleUp"
-            onPress={() => {
-              Alert.alert(
-                'Leave MeepleUp?',
-                `Are you sure you want to leave "${event.name}"? You'll need a join code to rejoin.`,
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Leave MeepleUp',
-                    style: 'destructive',
-                    onPress: async () => {
-                      try {
-                        await leaveEvent(event.id, userId);
-                        Alert.alert('Left MeepleUp', 'You have left the MeepleUp.', [
-                          {
-                            text: 'OK',
-                            onPress: () => navigation.goBack(),
-                          },
-                        ]);
-                      } catch (error) {
-                        Alert.alert('Error', 'Failed to leave MeepleUp. Please try again.');
-                        console.error(error);
-                      }
-                    },
-                  },
-                ],
-              );
-            }}
-            variant="outline"
-            style={styles.dangerAction}
-          />
         </View>
       )}
 
@@ -1000,10 +964,11 @@ const EventHub = () => {
             />
           </View>
         </View>
-      </Modal>
-    </View>
-  );
-};
+        </Modal>
+      </View>
+    </KeyboardAvoidingView>
+    );
+  };
 
 const styles = StyleSheet.create({
   container: {
@@ -1011,22 +976,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   header: {
-    padding: 20,
-    paddingTop: 40,
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 4,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    alignItems: 'center',
   },
   title: {
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#d45d5d',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 24,
+    textAlign: 'center',
   },
   tabs: {
     flexDirection: 'row',
@@ -1052,6 +1014,9 @@ const styles = StyleSheet.create({
   tabTextActive: {
     color: '#d45d5d',
     fontWeight: '600',
+  },
+  discussionScrollContent: {
+    paddingBottom: 100,
   },
   tabContent: {
     flex: 1,

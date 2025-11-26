@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform } from 'react-native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
 import { validateJoinCode } from '../utils/api';
@@ -294,7 +296,7 @@ const Onboarding = () => {
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.content}>
@@ -360,7 +362,10 @@ const Onboarding = () => {
               ]}
               onPress={() => handleModeChange('join')}
             >
-              <Text style={styles.optionTitle}>Join</Text>
+              <View style={styles.optionTitleContainer}>
+                <FontAwesome5 name="handshake" size={20} color="#d45d5d" />
+                <Text style={styles.optionTitle}>Join</Text>
+              </View>
               <Text style={styles.optionText}>
                 Join an existing MeepleUp with a code someone gave you.
               </Text>
@@ -373,7 +378,10 @@ const Onboarding = () => {
               ]}
               onPress={() => handleModeChange('discover')}
             >
-              <Text style={styles.optionTitle}>Discover</Text>
+              <View style={styles.optionTitleContainer}>
+                <FontAwesome5 name="search" size={20} color="#d45d5d" solid />
+                <Text style={styles.optionTitle}>Discover</Text>
+              </View>
               <Text style={styles.optionText}>
                 Find public game nights happening near you.
               </Text>
@@ -386,9 +394,10 @@ const Onboarding = () => {
               ]}
               onPress={() => handleModeChange('create')}
             >
-              <Text style={styles.optionTitle}>
-                <Text style={styles.plusSymbol}>+ </Text>Host
-              </Text>
+              <View style={styles.optionTitleContainer}>
+                <Text style={styles.plusSymbol}>+</Text>
+                <Text style={styles.optionTitle}>Host</Text>
+              </View>
               <Text style={styles.optionText}>
                 Host your own game night and share a join code with friends.
               </Text>
@@ -405,7 +414,7 @@ const Onboarding = () => {
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.content}>
@@ -466,7 +475,7 @@ const Onboarding = () => {
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.content}>
@@ -766,11 +775,16 @@ const styles = StyleSheet.create({
   optionCardPressed: {
     opacity: 0.7,
   },
+  optionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   optionTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 8,
+    marginLeft: 8,
   },
   plusSymbol: {
     fontSize: 28,
@@ -934,9 +948,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   eventCardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#d45d5d',
+    backgroundColor: '#f3f3f3',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 12,
     flex: 1,
   },
   eventCardArrow: {

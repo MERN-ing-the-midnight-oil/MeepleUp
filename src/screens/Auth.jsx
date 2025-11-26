@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, KeyboardAvoidingView, Platform, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
+import KeyboardAwareScrollView from '../components/common/KeyboardAwareScrollView';
 import { bggLogoColor } from '../components/BGGLogoAssets';
 
 const Auth = () => {
@@ -81,17 +82,14 @@ const Auth = () => {
   const lastInputRef = useRef(null);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardAvoidingView}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-    >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <ScrollView 
-          contentContainerStyle={styles.container}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.content}>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAwareScrollView
+        style={styles.keyboardAvoidingView}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.content}>
           <Button
             label="← Back"
             onPress={() => navigation.goBack()}
@@ -102,7 +100,7 @@ const Auth = () => {
           <Text style={[styles.title, {
             fontSize: isMobile ? 32 : 40,
             paddingHorizontal: isMobile ? 20 : 0,
-          }]}>MeepleUp</Text>
+          }]}>MeepleUp.com</Text>
           <Image 
             source={bggLogoColor} 
             style={styles.bggLogo}
@@ -204,9 +202,8 @@ const Auth = () => {
             </Pressable>
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </TouchableWithoutFeedback>
-    </KeyboardAvoidingView>
   );
 };
 
@@ -217,11 +214,11 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: 100,
   },
   content: {
-    flex: 1,
     padding: 20,
-    justifyContent: 'center',
+    paddingVertical: 40,
     maxWidth: 400,
     width: '100%',
     alignSelf: 'center',

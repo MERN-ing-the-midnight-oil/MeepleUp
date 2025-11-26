@@ -22,7 +22,7 @@ const Modal = ({ isOpen, onClose, children, title }) => {
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
         <Pressable style={styles.overlay} onPress={onClose}>
           <Pressable style={styles.content} onPress={(e) => e.stopPropagation()}>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import GearIcon from './GearIcon';
 import './Navigation.css';
 
 const WebNavigation = () => {
@@ -23,7 +24,7 @@ const WebNavigation = () => {
   const navItems = [
     { name: 'MeepleUps', path: '/events' },
     { name: 'Your Games', path: '/collection' },
-    { name: 'Profile', path: '/profile' },
+    { name: 'Profile', path: '/profile', showGear: true },
   ];
 
   return (
@@ -36,7 +37,20 @@ const WebNavigation = () => {
               onClick={() => handleNavigate(item.path)}
               className={`nav-link ${isActive(item.path) ? 'nav-link-active' : ''}`}
             >
-              {item.name}
+              <span className="nav-link-content">
+                {item.name}
+                {item.showGear && (
+                  <>
+                    {' / '}
+                    <span className="gear-icon-wrapper">
+                      <GearIcon
+                        size={isActive(item.path) ? 18 : 14}
+                        color={isActive(item.path) ? '#dc2626' : '#666'}
+                      />
+                    </span>
+                  </>
+                )}
+              </span>
             </button>
           ))}
         </div>

@@ -292,9 +292,13 @@ const ProfileScreen = () => {
     <KeyboardAvoidingView
       style={styles.keyboardAvoidingView}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
     >
-      <ScrollView style={styles.container}>
+      <ScrollView 
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
         <Text style={styles.title}>Profile</Text>
         <Text style={styles.subtitle}>Manage your account settings</Text>
@@ -594,6 +598,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  scrollContent: {
+    paddingBottom: 100,
   },
   header: {
     padding: 20,

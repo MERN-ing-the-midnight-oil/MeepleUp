@@ -8,8 +8,11 @@ const NotificationSettings = () => {
   const { user, updateNotificationPreferences } = useAuth();
   const [preferences, setPreferences] = useState({
     meepleupChanges: true,
+    meepleupChangesEmail: false,
     newPublicMeepleups: true,
+    newPublicMeepleupsEmail: false,
     gameMarking: true,
+    gameMarkingEmail: false,
     nearbyMeepleupDistance: 25,
   });
   const [saving, setSaving] = useState(false);
@@ -20,8 +23,11 @@ const NotificationSettings = () => {
     if (user?.notificationPreferences) {
       setPreferences({
         meepleupChanges: user.notificationPreferences.meepleupChanges !== false,
+        meepleupChangesEmail: user.notificationPreferences.meepleupChangesEmail === true,
         newPublicMeepleups: user.notificationPreferences.newPublicMeepleups !== false,
+        newPublicMeepleupsEmail: user.notificationPreferences.newPublicMeepleupsEmail === true,
         gameMarking: user.notificationPreferences.gameMarking !== false,
+        gameMarkingEmail: user.notificationPreferences.gameMarkingEmail === true,
         nearbyMeepleupDistance: user.notificationPreferences.nearbyMeepleupDistance || 25,
       });
     }
@@ -107,8 +113,11 @@ const NotificationSettings = () => {
 
       await updateNotificationPreferences({
         meepleupChanges: preferences.meepleupChanges,
+        meepleupChangesEmail: preferences.meepleupChangesEmail,
         newPublicMeepleups: preferences.newPublicMeepleups,
+        newPublicMeepleupsEmail: preferences.newPublicMeepleupsEmail,
         gameMarking: preferences.gameMarking,
+        gameMarkingEmail: preferences.gameMarkingEmail,
         nearbyMeepleupDistance: distance,
       });
       setMessage('Notification preferences saved successfully!');
@@ -142,6 +151,19 @@ const NotificationSettings = () => {
           thumbColor="#fff"
         />
       </View>
+      {preferences.meepleupChanges && (
+        <View style={styles.emailSettingItem}>
+          <View style={styles.settingContent}>
+            <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
+          </View>
+          <Switch
+            value={preferences.meepleupChangesEmail}
+            onValueChange={(value) => handlePreferenceChange('meepleupChangesEmail', value)}
+            trackColor={{ false: '#ddd', true: '#d45d5d' }}
+            thumbColor="#fff"
+          />
+        </View>
+      )}
 
       {/* New Public MeepleUp's Near You */}
       <View style={styles.settingItem}>
@@ -158,6 +180,19 @@ const NotificationSettings = () => {
           thumbColor="#fff"
         />
       </View>
+      {preferences.newPublicMeepleups && (
+        <View style={styles.emailSettingItem}>
+          <View style={styles.settingContent}>
+            <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
+          </View>
+          <Switch
+            value={preferences.newPublicMeepleupsEmail}
+            onValueChange={(value) => handlePreferenceChange('newPublicMeepleupsEmail', value)}
+            trackColor={{ false: '#ddd', true: '#d45d5d' }}
+            thumbColor="#fff"
+          />
+        </View>
+      )}
 
       {/* Distance Setting (only show when newPublicMeepleups is enabled) */}
       {preferences.newPublicMeepleups && (
@@ -200,6 +235,19 @@ const NotificationSettings = () => {
           thumbColor="#fff"
         />
       </View>
+      {preferences.gameMarking && (
+        <View style={styles.emailSettingItem}>
+          <View style={styles.settingContent}>
+            <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
+          </View>
+          <Switch
+            value={preferences.gameMarkingEmail}
+            onValueChange={(value) => handlePreferenceChange('gameMarkingEmail', value)}
+            trackColor={{ false: '#ddd', true: '#d45d5d' }}
+            thumbColor="#fff"
+          />
+        </View>
+      )}
 
       {message ? (
         <View style={[styles.message, message.includes('successfully') ? styles.successMessage : styles.errorMessage]}>
@@ -314,6 +362,21 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: 8,
+  },
+  emailSettingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 0,
+    paddingLeft: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  emailSettingLabel: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#666',
   },
 });
 

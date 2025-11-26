@@ -1,73 +1,134 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { View, Text, Image, StyleSheet, Pressable } from 'react-native';
 import { getGameById } from '../services/gameDatabase';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import CategoryBadge from './CategoryBadge';
+import { getGameDetails } from '../utils/api';
 
 /**
  * Game Card Component with BGG Thumbnails
  * Displays game cards in a tall format (2 per row) with BGG thumbnail images
+ * @param {Object} props
+ * @param {Object} props.game - The game object
+ * @param {Function} props.onDelete - Delete handler
+ * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
  */
-const GameCard = ({ game, onDelete }) => {
-  const [bggData, setBggData] = useState(null);
+const GameCard = ({ game, onDelete, preloadedBggData = null }) => {
+  console.log('[GameCard] Rendering for game:', game.title || game.id, 'bggId:', game.bggId, 'preloadedData:', preloadedBggData ? 'yes' : 'no');
+  
+  const [bggData, setBggData] = useState(preloadedBggData);
   const [badges, setBadges] = useState([]);
   const [starRating, setStarRating] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
-
+  const isMountedRef = useRef(true);
+  
+  // Initialize badges and rating from preloaded data - only run once
+  const initializedRef = useRef(false);
   useEffect(() => {
-    const loadBGGData = async () => {
-      // If game has bggId, try to load full BGG data for badges and thumbnails
-      if (game.bggId) {
+    console.log('[GameCard] Init effect for game:', game.title || game.id, 'preloadedBggData:', !!preloadedBggData, 'badges.length:', badges.length, 'initialized:', initializedRef.current);
+    
+    // Only initialize once
+    if (initializedRef.current) {
+      console.log('[GameCard] Already initialized, skipping for game:', game.title || game.id);
+      return;
+    }
+    
+    if (preloadedBggData && !badges.length) {
+      console.log('[GameCard] Initializing from preloaded data for game:', game.title || game.id);
+      initializedRef.current = true;
+      
+      // Use requestAnimationFrame to batch state updates and prevent re-render storms
+      requestAnimationFrame(() => {
+        if (!isMountedRef.current) {
+          console.log('[GameCard] Component unmounted before state update');
+          return;
+        }
+        
         try {
-          // Use getGameDetails to get full data including thumbnails from BGG API
-          const { getGameDetails } = await import('../utils/api');
-          const fullGameData = await getGameDetails(game.bggId);
+          console.log('[GameCard] Calling getGameBadges for game:', game.title || game.id);
+          const gameBadges = getGameBadges(preloadedBggData);
+          console.log('[GameCard] getGameBadges returned', gameBadges.length, 'badges for game:', game.title || game.id);
           
-          if (fullGameData) {
-            setBggData(fullGameData);
-            const gameBadges = getGameBadges(fullGameData);
+          // Batch all state updates together
+          if (isMountedRef.current) {
             setBadges(gameBadges);
             
-            // Get star rating
-            if (fullGameData.average) {
-              const stars = getStarRating(fullGameData.average);
+            if (preloadedBggData.average) {
+              console.log('[GameCard] Getting star rating for game:', game.title || game.id, 'average:', preloadedBggData.average);
+              const stars = getStarRating(preloadedBggData.average);
+              console.log('[GameCard] Star rating calculated:', stars, 'for game:', game.title || game.id);
               setStarRating(stars);
             }
             
-            // Update thumbnail if we got one from BGG API and game doesn't have one
-            if (fullGameData.thumbnail && !game.bggThumbnail && !game.thumbnail) {
-              setThumbnailUrl(fullGameData.thumbnail);
+            if (preloadedBggData.thumbnail && !game.bggThumbnail && !game.thumbnail) {
+              console.log('[GameCard] Setting thumbnail for game:', game.title || game.id);
+              setThumbnailUrl(preloadedBggData.thumbnail);
             }
           }
+          console.log('[GameCard] Initialization complete for game:', game.title || game.id);
         } catch (error) {
-          console.error('Error loading BGG data for game:', error);
-          // Fallback to getGameById if getGameDetails fails
-          try {
-            const fallbackData = await getGameById(game.bggId);
-            if (fallbackData) {
-              setBggData(fallbackData);
-              const gameBadges = getGameBadges(fallbackData);
-              setBadges(gameBadges);
-              if (fallbackData.average) {
-                const stars = getStarRating(fallbackData.average);
-                setStarRating(stars);
-              }
-            }
-          } catch (fallbackError) {
-            console.error('Error loading BGG data (fallback):', fallbackError);
-          }
+          console.error('[GameCard] Error initializing from preloaded data for game:', game.title || game.id, 'error:', error, 'stack:', error.stack);
+          initializedRef.current = false; // Allow retry on error
         }
+      });
+    } else {
+      console.log('[GameCard] Skipping init - preloadedBggData:', !!preloadedBggData, 'badges.length:', badges.length);
+    }
+  }, [preloadedBggData]); // Only depend on preloadedBggData, not all game properties
+
+  useEffect(() => {
+    console.log('[GameCard] useEffect triggered for game:', game.title || game.id, 'hasPreloadedData:', !!preloadedBggData);
+    isMountedRef.current = true;
+    
+    // If we have preloaded data, skip the API call
+    if (preloadedBggData) {
+      console.log('[GameCard] Using preloaded BGG data, skipping API call for game:', game.title || game.id);
+      return () => {
+        console.log('[GameCard] Cleanup: Component unmounting for game:', game.title || game.id);
+        isMountedRef.current = false;
+      };
+    }
+    
+    const loadBGGData = async () => {
+      // Skip loading if we don't have preloaded data
+      // CollectionScreen already tried to load it, so don't retry here to avoid crashes
+      if (!preloadedBggData) {
+        console.log('[GameCard] Skipping BGG data load - no preloaded data available for game:', game.title || game.id);
+        return;
       }
+      
+      console.log('[GameCard] No bggId or already has preloaded data for game:', game.title || game.id);
     };
 
-    loadBGGData();
-  }, [game.bggId]);
+    loadBGGData().catch((error) => {
+      console.error('[GameCard] Unhandled error in loadBGGData for game:', game.title || game.id, 'error:', error);
+    });
 
-  const thumbnail = game.bggThumbnail || game.thumbnail || thumbnailUrl || null;
-  const title = game.title || 'Unknown Game';
-  const year = game.yearPublished || bggData?.yearPublished || null;
-  const rating = starRating || (bggData?.average ? getStarRating(bggData.average) : 0);
+    return () => {
+      console.log('[GameCard] Cleanup: Component unmounting for game:', game.title || game.id);
+      isMountedRef.current = false;
+    };
+  }, [game.bggId, game.title, game.id, preloadedBggData]);
+
+  // Memoize computed values to prevent unnecessary recalculations
+  const thumbnail = useMemo(() => game.bggThumbnail || game.thumbnail || thumbnailUrl || null, [game.bggThumbnail, game.thumbnail, thumbnailUrl]);
+  const title = useMemo(() => game.title || 'Unknown Game', [game.title]);
+  const year = useMemo(() => game.yearPublished || bggData?.yearPublished || null, [game.yearPublished, bggData?.yearPublished]);
+  
+  // Safely calculate rating - memoized
+  const rating = useMemo(() => {
+    if (starRating) return starRating;
+    if (bggData?.average) {
+      try {
+        return getStarRating(bggData.average);
+      } catch (error) {
+        console.error('[GameCard] Error calculating rating for game:', game.title || game.id, 'error:', error);
+        return 0;
+      }
+    }
+    return 0;
+  }, [starRating, bggData?.average, game.title, game.id]);
 
   const handleDelete = () => {
     if (onDelete) {
@@ -76,11 +137,14 @@ const GameCard = ({ game, onDelete }) => {
   };
 
   const toggleExpand = () => {
+    console.log('[GameCard] Toggle expand for game:', game.title || game.id, 'current:', isExpanded);
     setIsExpanded(!isExpanded);
   };
 
-  return (
-    <View style={styles.card}>
+  try {
+    console.log('[GameCard] About to render JSX for game:', game.title || game.id, 'bggData:', !!bggData, 'badges.length:', badges.length);
+    return (
+      <View style={styles.card}>
       {/* Expand/Collapse Button */}
       <Pressable
         style={styles.expandButton}
@@ -108,7 +172,17 @@ const GameCard = ({ game, onDelete }) => {
       {/* Thumbnail Image */}
       <View style={styles.thumbnailContainer}>
         {thumbnail ? (
-          <Image source={{ uri: thumbnail }} style={styles.thumbnail} resizeMode="cover" />
+          <Image 
+            source={{ uri: thumbnail }} 
+            style={styles.thumbnail} 
+            resizeMode="cover"
+            onError={(error) => {
+              console.error('[GameCard] Image load error for game:', game.title || game.id, 'thumbnail:', thumbnail, 'error:', error);
+            }}
+            onLoad={() => {
+              console.log('[GameCard] Image loaded successfully for game:', game.title || game.id);
+            }}
+          />
         ) : (
           <View style={styles.thumbnailPlaceholder}>
             <Text style={styles.thumbnailPlaceholderText}>{title.charAt(0).toUpperCase()}</Text>
@@ -205,13 +279,18 @@ const GameCard = ({ game, onDelete }) => {
             )}
 
             {/* Category Badges */}
-            {badges.length > 0 && (
+            {badges && Array.isArray(badges) && badges.length > 0 && (
               <View style={styles.expandedBadgesContainer}>
                 <Text style={[styles.expandedMetaLabel, { marginBottom: 8 }]}>Categories:</Text>
                 <View style={styles.expandedBadges}>
-                  {badges.map((badge, index) => (
-                    <CategoryBadge key={`${badge.category}-${index}`} badge={badge} size={16} />
-                  ))}
+                  {badges.map((badge, index) => {
+                    try {
+                      return <CategoryBadge key={`${badge?.category || 'badge'}-${index}`} badge={badge} size={16} />;
+                    } catch (error) {
+                      console.error('[GameCard] Error rendering badge:', error);
+                      return null;
+                    }
+                  })}
                 </View>
               </View>
             )}
@@ -229,7 +308,15 @@ const GameCard = ({ game, onDelete }) => {
         )}
       </View>
     </View>
-  );
+    );
+  } catch (error) {
+    console.error('[GameCard] Error rendering game card for:', game.title || game.id, 'error:', error);
+    return (
+      <View style={styles.card}>
+        <Text style={styles.title}>Error loading game</Text>
+      </View>
+    );
+  }
 };
 
 const styles = StyleSheet.create({
@@ -391,4 +478,27 @@ const styles = StyleSheet.create({
   },
 });
 
-export default GameCard;
+// Memoize GameCard to prevent unnecessary re-renders
+// Return true if props are equal (skip re-render), false if different (re-render)
+export default React.memo(GameCard, (prevProps, nextProps) => {
+  // Compare key properties that matter for rendering
+  const gameChanged = 
+    prevProps.game.id !== nextProps.game.id ||
+    prevProps.game.title !== nextProps.game.title ||
+    prevProps.game.bggId !== nextProps.game.bggId;
+  
+  const bggDataChanged = prevProps.preloadedBggData !== nextProps.preloadedBggData;
+  const deleteHandlerChanged = prevProps.onDelete !== nextProps.onDelete;
+  
+  const shouldUpdate = gameChanged || bggDataChanged || deleteHandlerChanged;
+  
+  if (shouldUpdate) {
+    console.log('[GameCard] Memo: Props changed, allowing re-render', {
+      gameChanged,
+      bggDataChanged,
+      deleteHandlerChanged
+    });
+  }
+  
+  return !shouldUpdate; // Return true to skip re-render, false to allow
+});

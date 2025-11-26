@@ -52,7 +52,7 @@ const Landing = () => {
             resizeMode="contain"
           />
         </View>
-        <Text style={[styles.title, dynamicStyles.title]}>MeepleUp</Text>
+        <Text style={[styles.title, dynamicStyles.title]}>MeepleUp.com</Text>
         <Image 
           source={bggLogoColor} 
           style={styles.bggLogo}

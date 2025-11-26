@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import Input from './common/Input';
 import Button from './common/Button';
 
@@ -38,61 +38,78 @@ const ContactOrganizerForm = ({
   };
 
   return (
-    <View>
-      <Text style={styles.lead}>
-        Introduce yourself and how you&apos;d like the organizer to follow up. They&apos;ll send the
-        private invite link once you&apos;ve met or chatted.
-      </Text>
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoidingView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.lead}>
+          Introduce yourself and how you&apos;d like the organizer to follow up. They&apos;ll send the
+          private invite link once you&apos;ve met or chatted.
+        </Text>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <Input
-        placeholder="Your name"
-        value={name}
-        onChangeText={setName}
-        style={styles.input}
-        autoCapitalize="words"
-        disabled={loading}
-      />
-      <Input
-        placeholder="Email or phone number"
-        value={email}
-        onChangeText={setEmail}
-        style={styles.input}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        disabled={loading}
-      />
-      <Input
-        placeholder="Say hello and share anything helpful"
-        value={message}
-        onChangeText={setMessage}
-        style={[styles.input, styles.messageInput]}
-        multiline
-        numberOfLines={4}
-        disabled={loading}
-      />
-
-      <View style={styles.actions}>
-        <Button
-          label="Cancel"
-          onPress={onCancel}
-          variant="outline"
-          style={styles.button}
+        <Input
+          placeholder="Your name"
+          value={name}
+          onChangeText={setName}
+          style={styles.input}
+          autoCapitalize="words"
           disabled={loading}
         />
-        <Button
-          label={loading ? 'Sending...' : 'Send request'}
-          onPress={handleSubmit}
-          style={styles.button}
-          disabled={isDisabled}
+        <Input
+          placeholder="Email or phone number"
+          value={email}
+          onChangeText={setEmail}
+          style={styles.input}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          disabled={loading}
         />
-      </View>
-    </View>
+        <Input
+          placeholder="Say hello and share anything helpful"
+          value={message}
+          onChangeText={setMessage}
+          style={[styles.input, styles.messageInput]}
+          multiline
+          numberOfLines={4}
+          disabled={loading}
+        />
+
+        <View style={styles.actions}>
+          <Button
+            label="Cancel"
+            onPress={onCancel}
+            variant="outline"
+            style={styles.button}
+            disabled={loading}
+          />
+          <Button
+            label={loading ? 'Sending...' : 'Send request'}
+            onPress={handleSubmit}
+            style={styles.button}
+            disabled={isDisabled}
+          />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  keyboardAvoidingView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
   lead: {
     fontSize: 14,
     color: '#4a4a4a',
@@ -122,6 +139,8 @@ const styles = StyleSheet.create({
 });
 
 export default ContactOrganizerForm;
+
+
 
 
 

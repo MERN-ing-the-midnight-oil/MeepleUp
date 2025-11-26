@@ -16,8 +16,11 @@ const parseProfile = (profile) => {
       zipcode: '',
       notificationPreferences: {
         meepleupChanges: true,
+        meepleupChangesEmail: false,
         newPublicMeepleups: true,
+        newPublicMeepleupsEmail: false,
         gameMarking: true,
+        gameMarkingEmail: false,
         nearbyMeepleupDistance: 25, // Default 25 miles
       },
     };
@@ -31,8 +34,11 @@ const parseProfile = (profile) => {
     zipcode: profile.zipcode || profile.location || '', // Support both for backward compatibility
     notificationPreferences: profile.notificationPreferences || {
       meepleupChanges: true,
+      meepleupChangesEmail: false,
       newPublicMeepleups: true,
+      newPublicMeepleupsEmail: false,
       gameMarking: true,
+      gameMarkingEmail: false,
       nearbyMeepleupDistance: 25,
     },
   };
@@ -104,8 +110,11 @@ export const AuthProvider = ({ children }) => {
                 zipcode: userData.zipcode || userData.location || '',
                 notificationPreferences: userData.preferences?.notifications || userData.notificationPreferences || {
                   meepleupChanges: true,
+                  meepleupChangesEmail: false,
                   newPublicMeepleups: true,
+                  newPublicMeepleupsEmail: false,
                   gameMarking: true,
+                  gameMarkingEmail: false,
                   nearbyMeepleupDistance: 25,
                 },
               };
@@ -235,8 +244,11 @@ export const AuthProvider = ({ children }) => {
       zipcode: '',
       notificationPreferences: {
         meepleupChanges: true,
+        meepleupChangesEmail: false,
         newPublicMeepleups: true,
+        newPublicMeepleupsEmail: false,
         gameMarking: true,
+        gameMarkingEmail: false,
         nearbyMeepleupDistance: 25,
       },
     });
@@ -289,8 +301,11 @@ export const AuthProvider = ({ children }) => {
             zipcode: userData.zipcode || userData.location || '',
             notificationPreferences: userData.notificationPreferences || {
               meepleupChanges: true,
+              meepleupChangesEmail: false,
               newPublicMeepleups: true,
+              newPublicMeepleupsEmail: false,
               gameMarking: true,
+              gameMarkingEmail: false,
               nearbyMeepleupDistance: 25,
             },
           };
@@ -429,8 +444,11 @@ export const AuthProvider = ({ children }) => {
     const currentProfile = currentProfileRaw ? JSON.parse(currentProfileRaw) : {};
     const currentPreferences = currentProfile.notificationPreferences || {
       meepleupChanges: true,
+      meepleupChangesEmail: false,
       newPublicMeepleups: true,
+      newPublicMeepleupsEmail: false,
       gameMarking: true,
+      gameMarkingEmail: false,
       nearbyMeepleupDistance: 25,
     };
 

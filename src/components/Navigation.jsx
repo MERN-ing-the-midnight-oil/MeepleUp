@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import GearIcon from './GearIcon';
 
 // React Native Navigation Component
 const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
@@ -25,7 +26,7 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
   const navItems = [
     { name: 'MeepleUps', route: 'Onboarding' },
     { name: 'Your Games', route: 'Collection' },
-    { name: 'Profile', route: 'Profile' },
+    { name: 'Profile', route: 'Profile', showGear: true },
   ];
 
   const styles = StyleSheet.create({
@@ -66,6 +67,10 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
       fontWeight: 'bold',
       fontSize: 18,
     },
+    navLinkContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
   });
 
   return (
@@ -81,14 +86,32 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
                 isActive(item.route) && styles.navLinkActive,
               ]}
             >
-              <Text
-                style={[
-                  styles.navLinkText,
-                  isActive(item.route) && styles.navLinkTextActive,
-                ]}
-              >
-                {item.name}
-              </Text>
+              <View style={styles.navLinkContent}>
+                <Text
+                  style={[
+                    styles.navLinkText,
+                    isActive(item.route) && styles.navLinkTextActive,
+                  ]}
+                >
+                  {item.name}
+                </Text>
+                {item.showGear && (
+                  <>
+                    <Text
+                      style={[
+                        styles.navLinkText,
+                        isActive(item.route) && styles.navLinkTextActive,
+                      ]}
+                    >
+                      {' / '}
+                    </Text>
+                    <GearIcon
+                      size={isActive(item.route) ? 18 : 14}
+                      color={isActive(item.route) ? '#dc2626' : '#666'}
+                    />
+                  </>
+                )}
+              </View>
             </Pressable>
           ))}
         </View>

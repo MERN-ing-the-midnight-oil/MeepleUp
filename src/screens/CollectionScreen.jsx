@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDimensions } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDimensions, ScrollView } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
@@ -13,10 +13,12 @@ import { getStarRating } from '../utils/gameBadges';
 // BGGImport will need to be converted separately if needed
 
 const CollectionScreen = () => {
+  console.log('[CollectionScreen] Component rendering');
+  
   const { width } = useWindowDimensions();
   const { user } = useAuth();
   const { getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
-  const [activeView, setActiveView] = useState('menu'); // 'menu', 'view', 'add', 'import'
+  const [activeView, setActiveView] = useState('menu'); // 'menu', 'import'
   const [sortBy, setSortBy] = useState('rating'); // 'rating', 'category', 'title'
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
@@ -27,103 +29,139 @@ const CollectionScreen = () => {
   const largeIconSize = width > 768 ? Math.round(72 * 1.56) : Math.round(64 * 1.56);
   
   const userIdentifier = user?.uid || user?.id;
+  console.log('[CollectionScreen] User identifier:', userIdentifier ? 'found' : 'missing');
+  
   const rawCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
+  console.log('[CollectionScreen] Raw collection length:', rawCollection.length);
+  
   const [sortedCollection, setSortedCollection] = useState([]);
-
-  // Reset to menu when collection becomes empty while on view screen
+  
+  // Component mount/unmount logging
   useEffect(() => {
-    if (rawCollection.length === 0 && activeView === 'view') {
-      setActiveView('menu');
-    }
-  }, [rawCollection.length, activeView]);
+    console.log('[CollectionScreen] Component mounted');
+    return () => {
+      console.log('[CollectionScreen] Component unmounting');
+    };
+  }, []);
 
   // Load BGG data and sort collection
   useEffect(() => {
+    console.log('[CollectionScreen] loadAndSort effect triggered, rawCollection.length:', rawCollection.length, 'sortBy:', sortBy);
+    
     const loadAndSort = async () => {
-      const enrichedGames = await Promise.all(
-        rawCollection.map(async (game) => {
-          if (game.bggId) {
-            try {
-              const bggData = await getGameById(game.bggId);
-              if (bggData) {
-                const rating = bggData.average ? getStarRating(bggData.average) : 0;
-                // Get primary category from badges (first one found)
-                const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
-                                      bggData.familyGamesRank ? 'Family' :
-                                      bggData.partyGamesRank ? 'Party' :
-                                      bggData.wargamesRank ? 'War' :
-                                      bggData.thematicRank ? 'Thematic' :
-                                      bggData.abstractsRank ? 'Abstract' :
-                                      bggData.childrensGamesRank ? 'Children' :
-                                      bggData.cgsRank ? 'CCG' : 'Other';
-                return {
-                  ...game,
-                  _bggData: bggData,
-                  _rating: rating,
-                  _primaryCategory: primaryCategory,
-                };
+      try {
+        console.log('[CollectionScreen] Starting loadAndSort, processing', rawCollection.length, 'games');
+        
+        const enrichedGames = await Promise.all(
+          rawCollection.map(async (game, index) => {
+            console.log(`[CollectionScreen] Processing game ${index + 1}/${rawCollection.length}:`, game.title || game.id);
+            
+            if (game.bggId) {
+              try {
+                console.log(`[CollectionScreen] Fetching BGG data for game ${index + 1}, bggId:`, game.bggId);
+                const bggData = await getGameById(game.bggId);
+                if (bggData) {
+                  const rating = bggData.average ? getStarRating(bggData.average) : 0;
+                  // Get primary category from badges (first one found)
+                  const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
+                                        bggData.familyGamesRank ? 'Family' :
+                                        bggData.partyGamesRank ? 'Party' :
+                                        bggData.wargamesRank ? 'War' :
+                                        bggData.thematicRank ? 'Thematic' :
+                                        bggData.abstractsRank ? 'Abstract' :
+                                        bggData.childrensGamesRank ? 'Children' :
+                                        bggData.cgsRank ? 'CCG' : 'Other';
+                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) enriched, rating:`, rating, 'category:', primaryCategory, 'bggId:', game.bggId);
+                  return {
+                    ...game,
+                    _bggData: bggData,
+                    _rating: rating,
+                    _primaryCategory: primaryCategory,
+                  };
+                } else {
+                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - getGameById returned null for bggId:`, game.bggId);
+                }
+              } catch (error) {
+                console.error(`[CollectionScreen] Error loading BGG data for game ${index + 1} (${game.title || game.id}):`, error);
               }
-            } catch (error) {
-              console.error('Error loading BGG data for sorting:', error);
+            } else {
+              console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - no bggId`);
             }
-          }
-          return {
-            ...game,
-            _rating: 0,
-            _primaryCategory: 'Other',
-          };
-        })
-      );
+            return {
+              ...game,
+              _rating: 0,
+              _primaryCategory: 'Other',
+            };
+          })
+        );
 
-      // Sort games
-      const sorted = [...enrichedGames].sort((a, b) => {
-        if (sortBy === 'rating') {
-          return (b._rating || 0) - (a._rating || 0); // Highest first
-        } else if (sortBy === 'category') {
-          const catA = a._primaryCategory || 'Other';
-          const catB = b._primaryCategory || 'Other';
-          if (catA !== catB) {
-            return catA.localeCompare(catB);
-          }
-          // Within same category, sort by rating
-          return (b._rating || 0) - (a._rating || 0);
-        } else if (sortBy === 'title') {
-          return (a.title || '').localeCompare(b.title || '');
-        }
-        return 0;
-      });
+        console.log('[CollectionScreen] All games enriched, sorting by:', sortBy);
+        enrichedGames.forEach((game, idx) => {
+          console.log(`[CollectionScreen] Enriched game ${idx + 1}:`, game.title || game.id, 'has_bggData:', !!game._bggData);
+        });
 
-      setSortedCollection(sorted);
+        // Sort games
+        const sorted = [...enrichedGames].sort((a, b) => {
+          if (sortBy === 'rating') {
+            return (b._rating || 0) - (a._rating || 0); // Highest first
+          } else if (sortBy === 'category') {
+            const catA = a._primaryCategory || 'Other';
+            const catB = b._primaryCategory || 'Other';
+            if (catA !== catB) {
+              return catA.localeCompare(catB);
+            }
+            // Within same category, sort by rating
+            return (b._rating || 0) - (a._rating || 0);
+          } else if (sortBy === 'title') {
+            return (a.title || '').localeCompare(b.title || '');
+          }
+          return 0;
+        });
+
+        console.log('[CollectionScreen] Sorting complete, setting sortedCollection, length:', sorted.length);
+        setSortedCollection(sorted);
+        console.log('[CollectionScreen] sortedCollection state updated');
+      } catch (error) {
+        console.error('[CollectionScreen] Error in loadAndSort:', error);
+      }
     };
 
     loadAndSort();
   }, [rawCollection, sortBy]);
 
   const handleAddToCollection = (gameData) => {
+    console.log('[CollectionScreen] handleAddToCollection called for:', gameData.title || gameData.id);
     if (userIdentifier) {
       addGameToCollection(userIdentifier, gameData);
       // Don't show alert for each game - too many alerts
       // The user will see the games in their collection
+    } else {
+      console.warn('[CollectionScreen] handleAddToCollection: No userIdentifier');
     }
   };
 
   const handleRemoveFromCollection = (gameId) => {
+    console.log('[CollectionScreen] handleRemoveFromCollection called for:', gameId);
     if (userIdentifier) {
       removeGameFromCollection(userIdentifier, gameId);
+    } else {
+      console.warn('[CollectionScreen] handleRemoveFromCollection: No userIdentifier');
     }
   };
 
   const handleDoneIdentifying = () => {
-    // After identifying games, close results modal and show the collection view
+    console.log('[CollectionScreen] handleDoneIdentifying called');
+    // After identifying games, close results modal
     setShowResultsModal(false);
-    setActiveView('view');
   };
 
   const handleOpenCamera = () => {
+    console.log('[CollectionScreen] handleOpenCamera called');
     setShowCameraModal(true);
   };
 
   const handleCameraModalClose = () => {
+    console.log('[CollectionScreen] handleCameraModalClose called');
     setShowCameraModal(false);
     // Open results modal after camera closes (photo was captured)
     setTimeout(() => {
@@ -132,10 +170,12 @@ const CollectionScreen = () => {
   };
 
   const handleResultsModalClose = () => {
+    console.log('[CollectionScreen] handleResultsModalClose called');
     setShowResultsModal(false);
   };
 
   const handleDeleteGame = useCallback((gameId) => {
+    console.log('[CollectionScreen] handleDeleteGame called for:', gameId);
     Alert.alert(
       'Delete Game?',
       'Are you sure you want to remove this game from your collection?',
@@ -155,198 +195,293 @@ const CollectionScreen = () => {
   }, [userIdentifier, removeGameFromCollection]);
 
   const renderGameCard = useCallback(({ item }) => {
-    return (
-      <GameCard game={item} onDelete={handleDeleteGame} />
-    );
+    console.log('[CollectionScreen] renderGameCard called for:', item.title || item.id, 'has_bggData:', !!item._bggData);
+    try {
+      // Pass the already-loaded BGG data to avoid redundant API calls
+      // Use item directly - React.memo in GameCard will handle prop comparison
+      return (
+        <GameCard 
+          game={item} 
+          onDelete={handleDeleteGame}
+          preloadedBggData={item._bggData}
+        />
+      );
+    } catch (error) {
+      console.error('[CollectionScreen] Error rendering GameCard for:', item.title || item.id, 'error:', error, 'stack:', error.stack);
+      return null;
+    }
   }, [handleDeleteGame]);
 
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
 
+  const renderHeader = () => {
+    console.log('[CollectionScreen] renderHeader called, showMenu:', showMenu);
+    if (!showMenu) {
+      console.log('[CollectionScreen] renderHeader: showMenu is false, returning null');
+      return null;
+    }
+    
+    console.log('[CollectionScreen] renderHeader: rendering header content');
+    return (
+      <>
+        <View style={styles.bggLogoTopContainer}>
+          <PoweredByBGG size="extraLarge" containerWidth={320} />
+        </View>
+        <View style={styles.menuContainer}>
+          <Pressable
+            style={styles.menuOption}
+            onPress={handleOpenCamera}
+          >
+            <View style={styles.menuOptionContentMinimalPadding}>
+              <Image 
+                source={require('../../assets/images/lexisterium.png')}
+                style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
+                resizeMode="contain"
+              />
+              <View style={styles.menuOptionText}>
+                <Text style={styles.menuOptionTitle}>Inventory using Lexisterium AI</Text>
+                <Text style={styles.menuOptionDescription}>
+                  Snap side-view photos of stacks of game boxes for instant title and game information retrieval
+                </Text>
+              </View>
+              <Text style={styles.menuOptionArrow}>→</Text>
+            </View>
+          </Pressable>
+
+          <Pressable
+            style={styles.menuOption}
+            onPress={() => setActiveView('import')}
+          >
+            <View style={styles.menuOptionContent}>
+              <Image 
+                source={require('../../assets/images/lexiBGG.png')}
+                style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
+                resizeMode="contain"
+              />
+              <View style={styles.menuOptionText}>
+                <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
+              </View>
+              <Text style={styles.menuOptionArrow}>→</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        {sortedCollection.length > 0 && (
+          <View style={styles.inventoryHeader}>
+            <Text style={styles.inventoryTitle}>Your Games Inventory</Text>
+            <View style={styles.sortRow}>
+              <Text style={styles.sortLabel}>Sort by:</Text>
+              <View style={styles.sortButtons}>
+                <Pressable
+                  style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
+                  onPress={() => setSortBy('rating')}
+                >
+                  <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
+                    ⭐ Rating
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.sortButton, sortBy === 'category' && styles.sortButtonActive]}
+                  onPress={() => setSortBy('category')}
+                >
+                  <Text style={[styles.sortButtonText, sortBy === 'category' && styles.sortButtonTextActive]}>
+                    🏷️ Category
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
+                  onPress={() => setSortBy('title')}
+                >
+                  <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
+                    A-Z
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {sortedCollection.length === 0 && (
+          <View style={styles.emptyCollection}>
+            <Text style={styles.emptyTitle}>No games yet</Text>
+            <Text style={styles.emptyText}>
+              Add games to your collection by using AI inventory or importing from BoardGameGeek.
+            </Text>
+          </View>
+        )}
+      </>
+    );
+  };
+
+  console.log('[CollectionScreen] Render state:', {
+    showMenu,
+    activeView,
+    sortedCollectionLength: sortedCollection.length,
+    rawCollectionLength: rawCollection.length,
+    userIdentifier: userIdentifier ? 'present' : 'missing'
+  });
+
   return (
     <View style={styles.container}>
-      <View style={styles.content}>
-        {showMenu && (
-          <View style={styles.menuContainer}>
-            <Pressable
-              style={styles.menuOption}
-              onPress={handleOpenCamera}
+      {showMenu && sortedCollection.length > 0 ? (
+        (() => {
+          console.log('[CollectionScreen] Rendering FlatList with', sortedCollection.length, 'items');
+          return (
+            <FlatList
+              data={sortedCollection}
+              keyExtractor={(item) => {
+                const key = item.id;
+                if (!key) {
+                  console.warn('[CollectionScreen] GameCard missing id:', item);
+                }
+                return key || `game-${Math.random()}`;
+              }}
+              renderItem={(props) => {
+                console.log('[CollectionScreen] FlatList renderItem called for index:', props.index);
+                try {
+                  return renderGameCard(props);
+                } catch (error) {
+                  console.error('[CollectionScreen] Error in renderItem:', error);
+                  return null;
+                }
+              }}
+              numColumns={2}
+              columnWrapperStyle={styles.row}
+              contentContainerStyle={styles.listContainer}
+              ListHeaderComponent={() => {
+                console.log('[CollectionScreen] Rendering ListHeaderComponent');
+                return renderHeader();
+              }}
+              ListHeaderComponentStyle={styles.headerContainer}
+              scrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              updateCellsBatchingPeriod={50}
+              initialNumToRender={5}
+              windowSize={10}
+              onLayout={() => {
+                console.log('[CollectionScreen] FlatList onLayout called');
+              }}
+              onContentSizeChange={(width, height) => {
+                console.log('[CollectionScreen] FlatList content size changed:', width, 'x', height);
+              }}
+            />
+          );
+        })()
+      ) : (
+        (() => {
+          console.log('[CollectionScreen] Rendering ScrollView (no games or not menu)');
+          return (
+            <ScrollView 
+              style={styles.scrollView}
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={true}
+              onLayout={() => {
+                console.log('[CollectionScreen] ScrollView onLayout called');
+              }}
+              onContentSizeChange={(width, height) => {
+                console.log('[CollectionScreen] ScrollView content size changed:', width, 'x', height);
+              }}
             >
-              <View style={styles.menuOptionContentMinimalPadding}>
-                <Image 
-                  source={require('../../assets/images/lexisterium.png')}
-                  style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
-                  resizeMode="contain"
-                />
-                <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Inventory using Lexisterium AI</Text>
-                  <Text style={styles.menuOptionDescription}>
-                    Snap side-view photos of stacks of game boxes for instant title and game information retrieval
-                  </Text>
-                </View>
-                <Text style={styles.menuOptionArrow}>→</Text>
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={styles.menuOption}
-              onPress={() => setActiveView('view')}
-            >
-              <View style={styles.menuOptionContentMinimalPadding}>
-                <Image 
-                  source={require('../../assets/images/lexigames.png')}
-                  style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
-                  resizeMode="contain"
-                />
-                <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>View your games inventory</Text>
-                  <Text style={styles.menuOptionDescription}>
-                    Browse your {rawCollection.length} game{rawCollection.length !== 1 ? 's' : ''}
-                  </Text>
-                </View>
-                <Text style={styles.menuOptionArrow}>→</Text>
-              </View>
-            </Pressable>
-
-            <Pressable
-              style={styles.menuOption}
-              onPress={() => setActiveView('import')}
-            >
-              <View style={styles.menuOptionContent}>
-                <Image 
-                  source={require('../../assets/images/lexiBGG.png')}
-                  style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
-                  resizeMode="contain"
-                />
-                <View style={styles.menuOptionText}>
-                  <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
-                </View>
-                <Text style={styles.menuOptionArrow}>→</Text>
-              </View>
-            </Pressable>
-          </View>
-        )}
-
-        {activeView === 'view' && (
-          <View style={styles.viewContent}>
-            {/* AI Inventory Button and Sort Options */}
-            {sortedCollection.length > 0 && (
-              <View style={styles.sortContainer}>
+              {showMenu && (
+                <>
+                  <View style={styles.bggLogoTopContainer}>
+                    <PoweredByBGG size="extraLarge" containerWidth={320} />
+                  </View>
+                  <View style={styles.menuContainer}>
                 <Pressable
-                  style={styles.aiInventoryButton}
+                  style={styles.menuOption}
                   onPress={handleOpenCamera}
                 >
-                  <Text style={styles.aiInventoryButtonText}>Inventory my collection using AI</Text>
-                </Pressable>
-                <View style={styles.sortRow}>
-                  <Text style={styles.sortLabel}>Sort by:</Text>
-                  <View style={styles.sortButtons}>
-                    <Pressable
-                      style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
-                      onPress={() => setSortBy('rating')}
-                    >
-                      <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
-                        ⭐ Rating
+                  <View style={styles.menuOptionContentMinimalPadding}>
+                    <Image 
+                      source={require('../../assets/images/lexisterium.png')}
+                      style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
+                      resizeMode="contain"
+                    />
+                    <View style={styles.menuOptionText}>
+                      <Text style={styles.menuOptionTitle}>Inventory using Lexisterium AI</Text>
+                      <Text style={styles.menuOptionDescription}>
+                        Snap side-view photos of stacks of game boxes for instant title and game information retrieval
                       </Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.sortButton, sortBy === 'category' && styles.sortButtonActive]}
-                      onPress={() => setSortBy('category')}
-                    >
-                      <Text style={[styles.sortButtonText, sortBy === 'category' && styles.sortButtonTextActive]}>
-                        🏷️ Category
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
-                      onPress={() => setSortBy('title')}
-                    >
-                      <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
-                        A-Z
-                      </Text>
-                    </Pressable>
+                    </View>
+                    <Text style={styles.menuOptionArrow}>→</Text>
                   </View>
-                </View>
+                </Pressable>
+
+                <Pressable
+                  style={styles.menuOption}
+                  onPress={() => setActiveView('import')}
+                >
+                  <View style={styles.menuOptionContent}>
+                    <Image 
+                      source={require('../../assets/images/lexiBGG.png')}
+                      style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
+                      resizeMode="contain"
+                    />
+                    <View style={styles.menuOptionText}>
+                      <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
+                    </View>
+                    <Text style={styles.menuOptionArrow}>→</Text>
+                  </View>
+                </Pressable>
               </View>
-            )}
-            
-            {sortedCollection.length === 0 ? (
-              <View style={styles.emptyCollection}>
-                <Text style={styles.emptyTitle}>No games yet</Text>
-                <Text style={styles.emptyText}>
-                  Add games to your collection by using AI inventory or importing from BoardGameGeek.
-                </Text>
-                <View style={styles.emptyActions}>
-                  <Button
-                    label="Inventory your collection using AI"
-                    onPress={handleOpenCamera}
-                    style={styles.emptyButton}
-                  />
-                  <Button
-                    label="Import from BGG"
-                    onPress={() => setActiveView('import')}
-                    variant="outline"
-                    style={styles.emptyButton}
-                  />
+
+              {sortedCollection.length === 0 && (
+                <View style={styles.emptyCollection}>
+                  <Text style={styles.emptyTitle}>No games yet</Text>
+                  <Text style={styles.emptyText}>
+                    Add games to your collection by using AI inventory or importing from BoardGameGeek.
+                  </Text>
                 </View>
-                <View style={styles.emptyBggLogoContainer}>
-                  <PoweredByBGG size="small" />
-                </View>
+              )}
+            </>
+          )}
+
+          {activeView === 'import' && (
+            <View style={styles.viewContent}>
+              <View style={styles.viewHeader}>
+                <Pressable
+                  style={styles.backButton}
+                  onPress={() => {
+                    console.log('[CollectionScreen] Back button pressed, switching to menu');
+                    setActiveView('menu');
+                  }}
+                >
+                  <Text style={styles.backButtonText}>← Back</Text>
+                </Pressable>
+                <Text style={styles.viewTitle}>Import from BGG</Text>
               </View>
-            ) : (
-              <>
-                <FlatList
-                  data={sortedCollection}
-                  keyExtractor={(item) => item.id}
-                  renderItem={renderGameCard}
-                  numColumns={2}
-                  columnWrapperStyle={styles.row}
-                  contentContainerStyle={styles.listContainer}
-                  scrollEnabled={true}
-                  showsVerticalScrollIndicator={false}
+              <View style={styles.tabContent}>
+                <BGGImport
+                  onImportComplete={(count) => {
+                    console.log('[CollectionScreen] BGGImport onImportComplete, count:', count);
+                    // Games will automatically appear in the inventory section
+                    if (count > 0) {
+                      setActiveView('menu');
+                    }
+                  }}
                 />
-                <View style={styles.bggLogoContainer}>
-                  <PoweredByBGG size="small" />
-                </View>
-              </>
-            )}
-          </View>
-        )}
-
-        {/* Camera and Results Modals */}
-        <ClaudeGameIdentifier 
-          onAddToCollection={handleAddToCollection}
-          onRemoveFromCollection={handleRemoveFromCollection}
-          onDone={handleDoneIdentifying}
-          showCameraModal={showCameraModal}
-          showResultsModal={showResultsModal}
-          onCameraModalClose={handleCameraModalClose}
-          onResultsModalClose={handleResultsModalClose}
-        />
-
-        {activeView === 'import' && (
-          <View style={styles.viewContent}>
-            <View style={styles.viewHeader}>
-              <Pressable
-                style={styles.backButton}
-                onPress={() => setActiveView('menu')}
-              >
-                <Text style={styles.backButtonText}>← Back</Text>
-              </Pressable>
-              <Text style={styles.viewTitle}>Import from BGG</Text>
+              </View>
             </View>
-            <View style={styles.tabContent}>
-              <BGGImport
-                onImportComplete={(count) => {
-                  if (count > 0) {
-                    setActiveView('view');
-                  }
-                }}
-              />
-            </View>
-          </View>
-        )}
-      </View>
+          )}
+            </ScrollView>
+          );
+        })()
+      )}
+
+      {/* Camera and Results Modals */}
+      <ClaudeGameIdentifier 
+        onAddToCollection={handleAddToCollection}
+        onRemoveFromCollection={handleRemoveFromCollection}
+        onDone={handleDoneIdentifying}
+        showCameraModal={showCameraModal}
+        showResultsModal={showResultsModal}
+        onCameraModalClose={handleCameraModalClose}
+        onResultsModalClose={handleResultsModalClose}
+      />
     </View>
   );
 };
@@ -355,6 +490,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  bggLogoTopContainer: {
+    paddingVertical: 8,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    marginBottom: 8,
   },
   menuContainer: {
     paddingVertical: 20,
@@ -485,8 +629,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   content: {
-    flex: 1,
     padding: 20,
+  },
+  headerContainer: {
+    padding: 20,
+    paddingBottom: 0,
   },
   tabContent: {
     minHeight: 400,
@@ -515,22 +662,9 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     paddingHorizontal: 20,
   },
-  emptyActions: {
-    width: '100%',
-  },
-  emptyButton: {
-    marginBottom: 12,
-  },
-  emptyBggLogoContainer: {
-    marginTop: 24,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    width: '100%',
-  },
   listContainer: {
     paddingBottom: 10,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
   },
   row: {
     justifyContent: 'space-between',
@@ -573,13 +707,22 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 4,
   },
-  bggLogoContainer: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    alignItems: 'center',
+  inventorySection: {
+    marginTop: 24,
+    paddingTop: 24,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
-    backgroundColor: '#f9f9f9',
+  },
+  inventoryHeader: {
+    marginBottom: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  inventoryTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
   },
 });
 
