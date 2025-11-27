@@ -450,7 +450,7 @@ const ClaudeGameIdentifier = ({
             console.log('[ClaudeGameIdentifier] Creating search promise for:', query);
           }
           
-          // First try backend search (Firestore/Local DB) without BGG fallback
+          // First try Firestore search without BGG fallback
           const backendSearchPromise = query ? searchGamesByName(query, false) : Promise.resolve([]);
           
           // Add a timeout wrapper to prevent hanging

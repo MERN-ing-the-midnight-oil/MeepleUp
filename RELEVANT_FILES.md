@@ -30,9 +30,8 @@
 **`src/utils/api.js`** - Higher-level game search that tries multiple sources:
 - `searchGamesByName(query, fallbackToBGG)` - Tries:
   1. Firebase Firestore (primary)
-  2. Local database (fallback)
-  3. BGG API (if fallbackToBGG = true)
-- `getGameDetails(gameId)` - Gets game details from Firestore/Local/BGG
+  2. BGG API (if fallbackToBGG = true)
+- `getGameDetails(gameId)` - Gets game details from Firestore/BGG
 
 **Lines 350-446** - The `searchGamesByName` function that `fetchBGGMetadata` calls
 
@@ -87,7 +86,7 @@
    │
    └─> fetchBGGMetadata()
        └─> Calls api.js searchGamesByName()
-           └─> Tries Firestore → Local DB → BGG API
+           └─> Tries Firestore → BGG API
                └─> Calls bggApi.js searchBGGAPI()
                └─> Calls bggApi.js fetchBGGGameDetails()
            

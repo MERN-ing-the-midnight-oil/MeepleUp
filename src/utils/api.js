@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
-import * as bggLocalDB from './bggLocalDB';
 
 // ============================================================================
 // ARCHIVED: Barcode Scanning Feature
@@ -342,9 +341,9 @@ export const searchGameByBarcode = async (barcode) => {
 
 /**
  * Search for games by name
- * Priority: Firebase Firestore -> Local DB -> BGG API (if fallbackToBGG is true)
+ * Priority: Firebase Firestore -> BGG API (if fallbackToBGG is true)
  * @param {string} query - Game name to search for
- * @param {boolean} fallbackToBGG - If true, fall back to BGG API when backend returns no results
+ * @param {boolean} fallbackToBGG - If true, fall back to BGG API when Firestore returns no results
  * @returns {Promise<Array>} Array of matching games
  */
 export const searchGamesByName = async (query, fallbackToBGG = false) => {
@@ -385,38 +384,22 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
         }
         return formatted;
       } else {
-        // Firestore returned empty array - return it explicitly
+        // Firestore returned empty array - try BGG API if fallback is enabled
         if (__DEV__) {
-          console.log('[Firestore] No results found, returning empty array');
+          console.log('[Firestore] No results found');
         }
-        return [];
       }
     } catch (firestoreError) {
       if (__DEV__) {
-        console.log('[Firestore] Not available or error, trying local DB:', firestoreError.message);
+        console.log('[Firestore] Not available or error, trying BGG API:', firestoreError.message);
       }
-      // Don't throw - fall through to local DB
+      // Don't throw - fall through to BGG API if fallback is enabled
     }
 
-    // Fallback: Try local database (if still bundled)
-    try {
-      const localResults = await bggLocalDB.searchGamesByName(query, 10);
-      if (localResults && localResults.length > 0) {
-        if (__DEV__) {
-          console.log(`[Local DB] Found ${localResults.length} games`);
-        }
-        return bggLocalDB.parseBGGSearchResponse(localResults);
-      }
-    } catch (localError) {
-      if (__DEV__) {
-        console.log('[Local DB] Not available:', localError.message);
-      }
-    }
-
-    // No results found in backend - try BGG API if fallback is enabled
+    // No results found in Firestore - try BGG API if fallback is enabled
     if (fallbackToBGG) {
       if (__DEV__) {
-        console.log('[Game Search] No results in backend, trying BGG API...');
+        console.log('[Game Search] No results in Firestore, trying BGG API...');
       }
       try {
         const { searchBGGAPI } = await import('../services/bggApi');
@@ -447,7 +430,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
 
 /**
  * Get detailed game information by BGG ID
- * Priority: Firebase Firestore -> Local DB -> BGG API
+ * Priority: Firebase Firestore -> BGG API
  * BGG API is used to fetch thumbnails/images when not available in Firestore
  */
 export const getGameDetails = async (gameId) => {
@@ -489,31 +472,15 @@ export const getGameDetails = async (gameId) => {
       }
     } catch (firestoreError) {
       if (__DEV__) {
-        console.log('[Firestore] Not available, trying local DB');
+        console.log('[Firestore] Not available, will try BGG API');
       }
     }
 
-    // Fallback: Local database
-    if (!gameData) {
-      try {
-        const localGame = await bggLocalDB.getGameById(gameId);
-        if (localGame) {
-          if (__DEV__) {
-            console.log(`[Local DB] Found game: ${localGame.name}`);
-          }
-          gameData = bggLocalDB.parseBGGGameDetails(localGame);
-          hasThumbnail = !!(gameData?.thumbnail || gameData?.image);
-        }
-      } catch (localError) {
-        // Local DB not available
-      }
-    }
-
-    // If we have game data but no thumbnail, fetch from BGG API
+    // If we have game data but no thumbnail/image, fetch from BGG API and cache it
     if (gameData && !hasThumbnail) {
       try {
         if (__DEV__) {
-          console.log('[BGG API] Fetching thumbnail for game:', gameId);
+          console.log('[BGG API] Fetching thumbnail/image for game:', gameId);
         }
         const { fetchBGGGameDetails } = await import('../services/bggApi');
         const bggData = await fetchBGGGameDetails(gameId);
@@ -530,6 +497,21 @@ export const getGameDetails = async (gameId) => {
           if (!gameData.minAge && bggData.minAge) gameData.minAge = bggData.minAge;
           if (!gameData.description && bggData.description) gameData.description = bggData.description;
           
+          // Cache BGG data to Firestore for future use (non-blocking)
+          try {
+            const { updateGameWithBGGData } = await import('../services/gameDatabase');
+            updateGameWithBGGData(gameId, bggData).catch(err => {
+              if (__DEV__) {
+                console.warn('[Game Details] Failed to cache BGG data:', err);
+              }
+            });
+          } catch (cacheError) {
+            // Non-critical - just log it
+            if (__DEV__) {
+              console.warn('[Game Details] Error caching BGG data:', cacheError);
+            }
+          }
+          
           if (__DEV__) {
             console.log('[BGG API] Successfully fetched thumbnail:', gameData.thumbnail ? 'yes' : 'no');
           }
@@ -541,7 +523,7 @@ export const getGameDetails = async (gameId) => {
       }
     }
 
-    // If no game data found at all, try BGG API as last resort
+    // If no game data found at all, try BGG API as last resort and cache it
     if (!gameData) {
       try {
         if (__DEV__) {
@@ -567,6 +549,21 @@ export const getGameDetails = async (gameId) => {
             minAge: bggData.minAge || null,
             description: bggData.description || null,
           };
+          
+          // Cache BGG data to Firestore for future use (non-blocking)
+          try {
+            const { updateGameWithBGGData } = await import('../services/gameDatabase');
+            updateGameWithBGGData(gameId, bggData).catch(err => {
+              if (__DEV__) {
+                console.warn('[Game Details] Failed to cache BGG data:', err);
+              }
+            });
+          } catch (cacheError) {
+            // Non-critical - just log it
+            if (__DEV__) {
+              console.warn('[Game Details] Error caching BGG data:', cacheError);
+            }
+          }
         }
       } catch (bggError) {
         if (__DEV__) {

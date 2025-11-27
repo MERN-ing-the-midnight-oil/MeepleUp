@@ -439,11 +439,22 @@ const EventHub = () => {
   const currentUserRSVP = memberRSVPs[userId] || null;
 
   // Schedule Tab Component
-  const ScheduleTab = () => (
-    <ScrollView style={styles.tabContent}>
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Event Details</Text>
+  const ScheduleTab = () => {
+    if (!event) {
+      return (
+        <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
+          <View style={styles.section}>
+            <Text>Loading event...</Text>
+          </View>
+        </ScrollView>
+      );
+    }
+    
+    return (
+      <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Event Details</Text>
           {event.scheduledFor && (
             <Button
               label="Export to Calendar"
@@ -484,6 +495,44 @@ const EventHub = () => {
           />
         )}
       </View>
+
+      {/* Invite Guests Section - Combined with Event Details */}
+      {isOrganizer && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Invite Guests</Text>
+          <View style={styles.inviteBlock}>
+            <Text style={styles.inviteLabel}>Current join code</Text>
+            <Text style={styles.inviteCode}>{event.joinCode}</Text>
+            <Button
+              label="Share invite code"
+              onPress={handleShareInvite}
+              style={styles.primaryAction}
+            />
+            <Button
+              label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
+              onPress={handleRegenerateJoinCode}
+              style={styles.primaryAction}
+              disabled={regenerateBusy}
+              variant="outline"
+            />
+          </View>
+        </View>
+      )}
+
+      {/* Archive Section - Combined with Event Details */}
+      {isOrganizer && (
+        <View style={styles.section}>
+          <Button
+            label="Archive MeepleUp"
+            onPress={handleArchiveEvent}
+            variant="outline"
+            style={styles.dangerAction}
+          />
+          <Text style={styles.sectionHint}>
+            Archiving will hide this MeepleUp from all members. You can restore it later from your archived MeepleUps.
+          </Text>
+        </View>
+      )}
 
       {isMember && (
         <View style={styles.section}>
@@ -532,8 +581,9 @@ const EventHub = () => {
           </View>
         </View>
       )}
-    </ScrollView>
-  );
+      </ScrollView>
+    );
+  };
 
   // Fetch discussion posts from Firestore
   useEffect(() => {
@@ -719,7 +769,7 @@ const EventHub = () => {
 
   // Members Tab Component
   const MembersTab = () => (
-    <ScrollView style={styles.tabContent}>
+    <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Members ({members.length})</Text>
         {members.length === 0 ? (
@@ -829,43 +879,6 @@ const EventHub = () => {
       {activeTab === TABS.DISCUSSION && DiscussionTab}
       {activeTab === TABS.MEMBERS && <MembersTab />}
 
-      {/* Admin-Only Sections */}
-      {isOrganizer && (
-        <View style={styles.adminSection}>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Invite Guests</Text>
-            <View style={styles.inviteBlock}>
-              <Text style={styles.inviteLabel}>Current join code</Text>
-              <Text style={styles.inviteCode}>{event.joinCode}</Text>
-              <Button
-                label="Share invite code"
-                onPress={handleShareInvite}
-                style={styles.primaryAction}
-              />
-              <Button
-                label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
-                onPress={handleRegenerateJoinCode}
-                style={styles.primaryAction}
-                disabled={regenerateBusy}
-                variant="outline"
-              />
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Button
-              label="Archive MeepleUp"
-              onPress={handleArchiveEvent}
-              variant="outline"
-              style={styles.dangerAction}
-            />
-            <Text style={styles.sectionHint}>
-              Archiving will hide this MeepleUp from all members. You can restore it later from your archived MeepleUps.
-            </Text>
-          </View>
-        </View>
-      )}
-
       {/* Edit Schedule Modal */}
       <Modal
         isOpen={showEditSchedule}
@@ -873,32 +886,38 @@ const EventHub = () => {
         title="Edit Schedule"
       >
         <View style={styles.modalContent}>
-          <Text style={styles.fieldLabel}>Date & Time</Text>
-          <Input
-            value={scheduleForm.scheduledFor}
-            onChangeText={(text) => setScheduleForm({ ...scheduleForm, scheduledFor: text })}
-            placeholder="e.g., 2024-12-25T18:00:00"
-            style={styles.modalInput}
-          />
-          <Text style={styles.fieldHint}>
-            Format: YYYY-MM-DDTHH:mm:ss (e.g., 2024-12-25T18:00:00)
-          </Text>
+          <View style={styles.modalFieldContainer}>
+            <Text style={styles.fieldLabel}>Date & Time</Text>
+            <Input
+              value={scheduleForm.scheduledFor}
+              onChangeText={(text) => setScheduleForm({ ...scheduleForm, scheduledFor: text })}
+              placeholder="e.g., 2024-12-25T18:00:00"
+              style={styles.modalInput}
+            />
+            <Text style={styles.fieldHint}>
+              Format: YYYY-MM-DDTHH:mm:ss (e.g., 2024-12-25T18:00:00)
+            </Text>
+          </View>
 
-          <Text style={styles.fieldLabel}>General Location</Text>
-          <Input
-            value={scheduleForm.generalLocation}
-            onChangeText={(text) => setScheduleForm({ ...scheduleForm, generalLocation: text })}
-            placeholder="e.g., Seattle, WA"
-            style={styles.modalInput}
-          />
+          <View style={styles.modalFieldContainer}>
+            <Text style={styles.fieldLabel}>General Location</Text>
+            <Input
+              value={scheduleForm.generalLocation}
+              onChangeText={(text) => setScheduleForm({ ...scheduleForm, generalLocation: text })}
+              placeholder="e.g., Seattle, WA"
+              style={styles.modalInput}
+            />
+          </View>
 
-          <Text style={styles.fieldLabel}>Exact Location</Text>
-          <Input
-            value={scheduleForm.exactLocation}
-            onChangeText={(text) => setScheduleForm({ ...scheduleForm, exactLocation: text })}
-            placeholder="e.g., 123 Main St, Seattle, WA"
-            style={styles.modalInput}
-          />
+          <View style={styles.modalFieldContainer}>
+            <Text style={styles.fieldLabel}>Exact Location</Text>
+            <Input
+              value={scheduleForm.exactLocation}
+              onChangeText={(text) => setScheduleForm({ ...scheduleForm, exactLocation: text })}
+              placeholder="e.g., 123 Main St, Seattle, WA"
+              style={styles.modalInput}
+            />
+          </View>
 
           <View style={styles.modalActions}>
             <Button
@@ -923,14 +942,16 @@ const EventHub = () => {
         title="Edit Pinned Notes"
       >
         <View style={styles.modalContent}>
-          <Input
-            value={pinnedNotes}
-            onChangeText={setPinnedNotes}
-            placeholder="Add notes about parking, what to bring, house rules, etc."
-            multiline
-            numberOfLines={6}
-            style={styles.modalInput}
-          />
+          <View style={styles.modalFieldContainer}>
+            <Input
+              value={pinnedNotes}
+              onChangeText={setPinnedNotes}
+              placeholder="Add notes about parking, what to bring, house rules, etc."
+              multiline
+              numberOfLines={6}
+              style={styles.modalInput}
+            />
+          </View>
           <View style={styles.modalActions}>
             <Button
               label="Save"
@@ -971,9 +992,13 @@ const EventHub = () => {
   };
 
 const styles = StyleSheet.create({
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    flexDirection: 'column',
   },
   header: {
     paddingHorizontal: 20,
@@ -983,6 +1008,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     alignItems: 'center',
+    flexShrink: 0,
   },
   title: {
     fontSize: 18,
@@ -995,6 +1021,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    flexShrink: 0,
   },
   tab: {
     flex: 1,
@@ -1021,6 +1048,9 @@ const styles = StyleSheet.create({
   tabContent: {
     flex: 1,
   },
+  tabContentContainer: {
+    paddingBottom: 20,
+  },
   section: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -1028,7 +1058,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     margin: 20,
-    marginBottom: 0,
+    marginBottom: 20,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1193,7 +1223,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   adminSection: {
-    padding: 20,
+    paddingTop: 20,
+    paddingHorizontal: 0,
+    paddingBottom: 0,
   },
   inviteBlock: {
     borderRadius: 12,
@@ -1236,21 +1268,24 @@ const styles = StyleSheet.create({
   modalContent: {
     padding: 20,
   },
+  modalFieldContainer: {
+    marginBottom: 24,
+  },
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
     marginBottom: 8,
-    marginTop: 12,
+    marginTop: 0,
   },
   fieldHint: {
     fontSize: 12,
     color: '#666',
-    marginTop: -8,
-    marginBottom: 12,
+    marginTop: 4,
+    marginBottom: 0,
   },
   modalInput: {
-    marginBottom: 16,
+    marginBottom: 0,
   },
   modalActions: {
     marginTop: 8,

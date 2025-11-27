@@ -4,6 +4,7 @@
  */
 
 import { db, auth } from '../config/firebase';
+import firebase from 'firebase/compat/app';
 
 const GAMES_COLLECTION = 'games';
 const GAMES_INDEX_COLLECTION = 'games_index'; // For faster searches
@@ -582,6 +583,108 @@ export async function getGameById(gameId) {
   } catch (error) {
     console.error('[Game Database] Firestore getById error:', error);
     return null;
+  }
+}
+
+/**
+ * Update game document in Firestore with BGG API data
+ * This caches BGG data (thumbnails, images, descriptions, etc.) to reduce API calls
+ * @param {string} gameId - BGG game ID
+ * @param {Object} bggData - Game data from BGG API
+ * @returns {Promise<boolean>} True if update was successful
+ */
+export async function updateGameWithBGGData(gameId, bggData) {
+  if (!gameId || !bggData) {
+    return false;
+  }
+
+  try {
+    const gamesRef = db.collection(GAMES_COLLECTION);
+    const docRef = gamesRef.doc(gameId.toString());
+    
+    // Check if document exists first
+    const doc = await docRef.get();
+    
+    if (!doc.exists) {
+      if (__DEV__) {
+        console.log('[Game Database] Game not in Firestore, creating new document:', gameId);
+      }
+      // Create new document with BGG data
+      await docRef.set({
+        id: gameId.toString(),
+        name: bggData.name || '',
+        nameLower: (bggData.name || '').toLowerCase(),
+        yearPublished: bggData.yearPublished || '',
+        thumbnail: bggData.thumbnail || null,
+        image: bggData.image || null,
+        description: bggData.description || null,
+        minPlayers: bggData.minPlayers || null,
+        maxPlayers: bggData.maxPlayers || null,
+        playingTime: bggData.playingTime || null,
+        minAge: bggData.minAge || null,
+        average: bggData.average || '',
+        bayesAverage: bggData.bayesAverage || '',
+        usersRated: bggData.usersRated || '',
+        rank: bggData.rank || '',
+        // Mark that this was populated from BGG API
+        bggDataCached: true,
+        bggDataCachedAt: firebase.firestore.Timestamp.now(),
+      });
+    } else {
+      // Update existing document with missing BGG data
+      const updateData = {};
+      
+      // Only update fields that are missing or null
+      const existingData = doc.data();
+      
+      if (!existingData.thumbnail && bggData.thumbnail) {
+        updateData.thumbnail = bggData.thumbnail;
+      }
+      if (!existingData.image && bggData.image) {
+        updateData.image = bggData.image;
+      }
+      if (!existingData.description && bggData.description) {
+        updateData.description = bggData.description;
+      }
+      if (!existingData.minPlayers && bggData.minPlayers) {
+        updateData.minPlayers = bggData.minPlayers;
+      }
+      if (!existingData.maxPlayers && bggData.maxPlayers) {
+        updateData.maxPlayers = bggData.maxPlayers;
+      }
+      if (!existingData.playingTime && bggData.playingTime) {
+        updateData.playingTime = bggData.playingTime;
+      }
+      if (!existingData.minAge && bggData.minAge) {
+        updateData.minAge = bggData.minAge;
+      }
+      
+      // Always update ratings/rank if available (they change over time)
+      if (bggData.average) updateData.average = bggData.average;
+      if (bggData.bayesAverage) updateData.bayesAverage = bggData.bayesAverage;
+      if (bggData.usersRated) updateData.usersRated = bggData.usersRated;
+      if (bggData.rank) updateData.rank = bggData.rank;
+      
+      // Mark that BGG data was cached
+      updateData.bggDataCached = true;
+      updateData.bggDataCachedAt = firebase.firestore.Timestamp.now();
+      
+      if (Object.keys(updateData).length > 0) {
+        if (__DEV__) {
+          console.log('[Game Database] Updating game with BGG data:', gameId, Object.keys(updateData));
+        }
+        await docRef.update(updateData);
+      } else {
+        if (__DEV__) {
+          console.log('[Game Database] Game already has all BGG data, skipping update:', gameId);
+        }
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('[Game Database] Error updating game with BGG data:', error);
+    return false;
   }
 }
 

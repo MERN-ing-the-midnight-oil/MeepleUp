@@ -8,8 +8,7 @@ The game database (170,854 games, 64MB) is now hosted in Firebase Firestore inst
 
 **Search Priority:**
 1. Firebase Firestore (primary)
-2. Local JSON (fallback, if still bundled)
-3. BGG API (final fallback)
+2. BGG API (fallback)
 
 ## Setup Steps
 
@@ -119,11 +118,10 @@ Once data is uploaded:
 4. **Test searches** to ensure everything works
 5. **Remove the large JSON file** from the app bundle (optional, but recommended)
 
-## Removing Local JSON (Optional)
+## Local Database Removed
 
-Once Firestore is populated and working:
+The local database (bggLocalDB.js) has been removed from the codebase. The app now uses:
+- **Firestore** (primary) → **BGG API** (fallback)
 
-1. Delete or move `src/assets/data/boardgames_ranks.json`
-2. Update `bggLocalDB.js` to always return empty (or remove it entirely)
-3. The app will use Firestore → BGG API fallback chain
+The JSON file `src/assets/data/boardgames_ranks.json` can be kept for the upload script, but it's no longer bundled with the app.
 

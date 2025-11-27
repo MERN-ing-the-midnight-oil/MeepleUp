@@ -1,7 +1,4 @@
 Have an "agent" in meeple up that can tell you about games in terms of other games you own, and also it can suggest games based on who is at a meetup. If you click on a game, AI will tell you about the game in terms of games that everyone has played. (e.g. this game is like "Gems" the game you played with erik last month)
 
 
-have claude API estimate size of game box?
 
-
-Abandon BGG alltogether and just get pub dates and publishers from claude. just not care about the star rating. Save game info in my backend as users create the games. 

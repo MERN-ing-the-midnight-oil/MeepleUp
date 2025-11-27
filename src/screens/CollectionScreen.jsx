@@ -5,7 +5,6 @@ import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import GameCard from '../components/GameCard';
-import PoweredByBGG from '../components/PoweredByBGG';
 import BGGImport from '../components/BGGImport';
 import { getGameById } from '../services/gameDatabase';
 import { getStarRating } from '../utils/gameBadges';
@@ -27,6 +26,8 @@ const CollectionScreen = () => {
   const iconSize = width > 768 ? 72 : 64;
   // First two icons are 30% larger, then 20% larger again (1.3 * 1.2 = 1.56)
   const largeIconSize = width > 768 ? Math.round(72 * 1.56) : Math.round(64 * 1.56);
+  // Much larger icon for gamescanner button (2.5x base, then 40% bigger = 3.5x)
+  const gamescannerIconSize = width > 768 ? Math.round(72 * 3.5) : Math.round(64 * 3.5);
   
   const userIdentifier = user?.uid || user?.id;
   console.log('[CollectionScreen] User identifier:', userIdentifier ? 'found' : 'missing');
@@ -215,6 +216,23 @@ const CollectionScreen = () => {
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
 
+  // AI Camera Scanner Button - vertical layout with large gamescanner icon
+  const renderInventoryButton = () => (
+    <Pressable
+      style={styles.menuOption}
+      onPress={handleOpenCamera}
+    >
+      <View style={styles.gamescannerButtonContent}>
+        <Image 
+          source={require('../../assets/images/gamescanner.png')}
+          style={[styles.gamescannerIcon, { width: gamescannerIconSize, height: gamescannerIconSize }]}
+          resizeMode="contain"
+        />
+        <Text style={styles.gamescannerButtonTitle}>Import game titles with AI camera scanner</Text>
+      </View>
+    </Pressable>
+  );
+
   const renderHeader = () => {
     console.log('[CollectionScreen] renderHeader called, showMenu:', showMenu);
     if (!showMenu) {
@@ -225,29 +243,8 @@ const CollectionScreen = () => {
     console.log('[CollectionScreen] renderHeader: rendering header content');
     return (
       <>
-        <View style={styles.bggLogoTopContainer}>
-          <PoweredByBGG size="extraLarge" containerWidth={320} />
-        </View>
         <View style={styles.menuContainer}>
-          <Pressable
-            style={styles.menuOption}
-            onPress={handleOpenCamera}
-          >
-            <View style={styles.menuOptionContentMinimalPadding}>
-              <Image 
-                source={require('../../assets/images/lexisterium.png')}
-                style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
-                resizeMode="contain"
-              />
-              <View style={styles.menuOptionText}>
-                <Text style={styles.menuOptionTitle}>Inventory using Lexisterium AI</Text>
-                <Text style={styles.menuOptionDescription}>
-                  Snap side-view photos of stacks of game boxes for instant title and game information retrieval
-                </Text>
-              </View>
-              <Text style={styles.menuOptionArrow}>→</Text>
-            </View>
-          </Pressable>
+          {renderInventoryButton()}
 
           <Pressable
             style={styles.menuOption}
@@ -387,29 +384,8 @@ const CollectionScreen = () => {
             >
               {showMenu && (
                 <>
-                  <View style={styles.bggLogoTopContainer}>
-                    <PoweredByBGG size="extraLarge" containerWidth={320} />
-                  </View>
                   <View style={styles.menuContainer}>
-                <Pressable
-                  style={styles.menuOption}
-                  onPress={handleOpenCamera}
-                >
-                  <View style={styles.menuOptionContentMinimalPadding}>
-                    <Image 
-                      source={require('../../assets/images/lexisterium.png')}
-                      style={[styles.menuOptionIcon, { width: largeIconSize, height: largeIconSize, marginRight: 12 }]}
-                      resizeMode="contain"
-                    />
-                    <View style={styles.menuOptionText}>
-                      <Text style={styles.menuOptionTitle}>Inventory using Lexisterium AI</Text>
-                      <Text style={styles.menuOptionDescription}>
-                        Snap side-view photos of stacks of game boxes for instant title and game information retrieval
-                      </Text>
-                    </View>
-                    <Text style={styles.menuOptionArrow}>→</Text>
-                  </View>
-                </Pressable>
+                    {renderInventoryButton()}
 
                 <Pressable
                   style={styles.menuOption}
@@ -495,8 +471,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bggLogoTopContainer: {
-    paddingVertical: 8,
-    paddingHorizontal: 40,
     alignItems: 'center',
     marginBottom: 8,
   },
@@ -547,6 +521,26 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#999',
     marginLeft: 12,
+  },
+  // Gamescanner button - vertical layout
+  gamescannerButtonContent: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 0,
+    paddingBottom: 12,
+    paddingHorizontal: 0,
+    gap: 12,
+  },
+  gamescannerIcon: {
+    width: 32,
+    height: 32,
+  },
+  gamescannerButtonTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
   },
   viewHeader: {
     flexDirection: 'row',
