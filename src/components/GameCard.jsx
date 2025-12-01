@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Pressable } from 'react-native';
+import { View, Text, Image, StyleSheet, Pressable, Dimensions } from 'react-native';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import GameDetailsModal from './GameDetailsModal';
 
@@ -148,6 +148,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
           style={styles.cardPressable}
           accessibilityRole="button"
           accessibilityLabel={disableModal ? undefined : `View details for ${title}`}
+          pointerEvents={disableModal ? 'none' : 'auto'}
         >
           {/* Thumbnail Image */}
           <View style={styles.thumbnailContainer}>
@@ -220,6 +221,19 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   }
 };
 
+// Calculate card width for 3-column layout
+// Account for: container padding (12px each side = 24px), row padding (4px each side = 8px), gaps (8px between 2 gaps = 16px)
+const getCardWidth = () => {
+  const screenWidth = Dimensions.get('window').width;
+  const containerPadding = 24; // 12px each side
+  const rowPadding = 8; // 4px each side
+  const gaps = 16; // 8px between each of 3 cards = 2 gaps
+  const availableWidth = screenWidth - containerPadding - rowPadding - gaps;
+  return availableWidth / 3;
+};
+
+const cardWidth = getCardWidth();
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
@@ -233,7 +247,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
     position: 'relative',
-    width: '100%',
+    width: cardWidth,
     marginBottom: 12,
     alignSelf: 'flex-start',
     flexShrink: 0,

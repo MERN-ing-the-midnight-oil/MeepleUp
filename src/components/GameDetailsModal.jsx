@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity } from 'react-native';
+import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, Alert } from 'react-native';
 import { getGameById } from '../services/gameDatabase';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import CategoryBadge from './CategoryBadge';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
+import { db } from '../config/firebase';
+import firebase from '../config/firebase';
 
-const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, showTeachingStatus = false }) => {
+const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, showTeachingStatus = false, eventMembers = null, memberNames = {} }) => {
   const { user } = useAuth();
-  const { updateGameInCollection } = useCollections();
+  const { updateGameInCollection, addGameToCollection, collections } = useCollections();
   const [bggData, setBggData] = useState(preloadedBggData);
   const [badges, setBadges] = useState([]);
   const [starRating, setStarRating] = useState(0);
@@ -33,6 +35,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
   };
 
   const [teachingStatuses, setTeachingStatuses] = useState([]);
+  const [memberTeachingStatuses, setMemberTeachingStatuses] = useState({}); // { userId: [statuses] }
   const isMountedRef = useRef(true);
   const userId = user?.uid || user?.id;
 
@@ -41,7 +44,27 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
 
   // Update teaching statuses when game changes (modal opens with new game)
   useEffect(() => {
-    const statusKey = `${game?.id}-${JSON.stringify(game?.teachingStatus)}`;
+    if (!game || !userId) {
+      setTeachingStatuses([]);
+      return;
+    }
+
+    const gameId = game.bggId || game.id;
+    if (!gameId) {
+      setTeachingStatuses([]);
+      return;
+    }
+
+    // Check if we have the current user's teaching status in their collection
+    const userGames = collections[userId] || [];
+    const userGame = userGames.find(g => {
+      const gId = g.bggId || g.id;
+      return gId === gameId;
+    });
+
+    // Use teaching status from user's collection if available, otherwise from game object
+    const teachingStatus = userGame?.teachingStatus || game?.teachingStatus;
+    const statusKey = `${gameId}-${JSON.stringify(teachingStatus)}`;
 
     if (lastProcessedStatusRef.current === statusKey) {
       return;
@@ -49,31 +72,115 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
 
     lastProcessedStatusRef.current = statusKey;
 
-    if (game?.teachingStatus !== undefined) {
-      const migratedStatuses = migrateTeachingStatuses(game.teachingStatus);
+    if (teachingStatus !== undefined) {
+      const migratedStatuses = migrateTeachingStatuses(teachingStatus);
       setTeachingStatuses(migratedStatuses);
 
       // If migration happened (single value converted to array), update the database
       // BUT only if this is actually a change and user is defined
-      if (!Array.isArray(game.teachingStatus) && userId && game?.id) {
-        const currentIsArray = Array.isArray(game.teachingStatus);
+      if (!Array.isArray(teachingStatus) && userGame) {
+        const currentIsArray = Array.isArray(teachingStatus);
         if (!currentIsArray) {
           setTimeout(() => {
-            updateGameInCollection(userId, game.id, { teachingStatus: migratedStatuses });
+            updateGameInCollection(userId, userGame.id, { teachingStatus: migratedStatuses });
           }, 0);
         }
       }
     } else {
       setTeachingStatuses([]);
     }
-  }, [game?.id, game?.teachingStatus, userId, updateGameInCollection]);
+  }, [game?.id, game?.bggId, game?.teachingStatus, userId, collections, updateGameInCollection]);
 
   // Clear the ref when modal closes to allow re-processing when reopened
   useEffect(() => {
     if (!isOpen) {
       lastProcessedStatusRef.current = null;
+      setMemberTeachingStatuses({});
     }
   }, [isOpen]);
+
+  // Fetch teaching statuses from all event members when modal opens
+  useEffect(() => {
+    if (!isOpen || !eventMembers || !game || !collections || !db) {
+      return;
+    }
+
+    const gameId = game.bggId || game.id;
+    if (!gameId) return;
+
+    const fetchMemberStatuses = async () => {
+      const statuses = {};
+      
+      // Check collections first (faster, already loaded)
+      eventMembers.forEach(member => {
+        const memberGames = collections[member.userId] || [];
+        const memberGame = memberGames.find(g => {
+          const gId = g.bggId || g.id;
+          return gId === gameId;
+        });
+        
+        if (memberGame && memberGame.teachingStatus) {
+          const migrated = migrateTeachingStatuses(memberGame.teachingStatus);
+          if (migrated.length > 0) {
+            statuses[member.userId] = migrated;
+          }
+        }
+      });
+
+      // Also fetch from Firestore for any members not in collections
+      try {
+        const memberIds = eventMembers.map(m => m.userId).filter(Boolean);
+        const fetchPromises = memberIds.map(async (memberId) => {
+          // Skip if we already have it from collections
+          if (statuses[memberId]) return;
+          
+          try {
+            const gameDoc = await db.collection('userGames').doc(memberId)
+              .collection('games')
+              .where('bggId', '==', gameId)
+              .limit(1)
+              .get();
+            
+            if (!gameDoc.empty) {
+              const data = gameDoc.docs[0].data();
+              if (data.teachingStatus) {
+                const migrated = migrateTeachingStatuses(data.teachingStatus);
+                if (migrated.length > 0) {
+                  statuses[memberId] = migrated;
+                }
+              }
+            } else {
+              // Try matching by game.id if bggId didn't match
+              const gameDocById = await db.collection('userGames').doc(memberId)
+                .collection('games')
+                .doc(gameId)
+                .get();
+              
+              if (gameDocById.exists) {
+                const data = gameDocById.data();
+                if (data.teachingStatus) {
+                  const migrated = migrateTeachingStatuses(data.teachingStatus);
+                  if (migrated.length > 0) {
+                    statuses[memberId] = migrated;
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`Error fetching teaching status for member ${memberId}:`, error);
+          }
+        });
+        
+        await Promise.all(fetchPromises);
+      } catch (error) {
+        console.error('Error fetching member teaching statuses:', error);
+      }
+      
+      setMemberTeachingStatuses(statuses);
+    };
+
+    fetchMemberStatuses();
+  }, [isOpen, eventMembers, game, collections, db]);
 
   // Initialize badges and rating from preloaded data
   const initializedRef = useRef(false);
@@ -149,14 +256,69 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
     return 0;
   }, [starRating, bggData?.average]);
 
-  const handleTeachingStatusToggle = (status) => {
+  const handleTeachingStatusToggle = async (status) => {
     const newStatuses = teachingStatuses.includes(status)
       ? teachingStatuses.filter(s => s !== status) // Remove if already selected
       : [...teachingStatuses, status]; // Add if not selected
     setTeachingStatuses(newStatuses);
     
-    if (userId && game?.id) {
-      updateGameInCollection(userId, game.id, { teachingStatus: newStatuses });
+    if (!userId || !game) return;
+    
+    const gameId = game.bggId || game.id;
+    if (!gameId) return;
+    
+    // Check if user owns the game in their collection
+    const userGames = collections[userId] || [];
+    const userGame = userGames.find(g => {
+      const gId = g.bggId || g.id;
+      return gId === gameId;
+    });
+    
+    if (userGame) {
+      // Update existing game
+      try {
+        await updateGameInCollection(userId, userGame.id, { teachingStatus: newStatuses });
+      } catch (error) {
+        console.error('Error updating teaching status:', error);
+        Alert.alert('Error', 'Failed to update your feelings about this game. Please try again.');
+        // Revert the state change
+        setTeachingStatuses(teachingStatuses);
+      }
+    } else if (db) {
+      // Create new game entry with teaching status
+      try {
+        const gameData = {
+          title: game.title || 'Unknown Game',
+          bggId: game.bggId || null,
+          image: game.image || game.thumbnail || null,
+          thumbnail: game.thumbnail || null,
+          description: game.description || '',
+          yearPublished: game.yearPublished || null,
+          minPlayers: game.minPlayers || null,
+          maxPlayers: game.maxPlayers || null,
+          playingTime: game.playingTime || null,
+          bggRating: game.bggRating || null,
+          teachingStatus: newStatuses,
+          addedAt: firebase.firestore.Timestamp.now(),
+          updatedAt: firebase.firestore.Timestamp.now(),
+          source: 'manual',
+        };
+        
+        // Use bggId as document ID if available, otherwise use game.id or generate one
+        const docId = game.bggId || game.id || db.collection('userGames').doc(userId).collection('games').doc().id;
+        await db.collection('userGames').doc(userId)
+          .collection('games').doc(docId)
+          .set(gameData, { merge: true });
+        
+        // Update local collections state for immediate UI update
+        const newGame = { ...gameData, id: docId };
+        addGameToCollection(userId, newGame);
+      } catch (error) {
+        console.error('Error creating game entry for teaching status:', error);
+        Alert.alert('Error', 'Failed to save your feelings about this game. Please try again.');
+        // Revert the state change
+        setTeachingStatuses(teachingStatuses);
+      }
     }
   };
 
@@ -321,8 +483,39 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
               </View>
             )}
 
-            {/* Teaching Status Section - Only show if enabled and user owns the game */}
-            {showTeachingStatus && userId && game?.id && (
+            {/* Member Teaching Statuses Section - Show statuses from all members */}
+            {showTeachingStatus && eventMembers && Object.keys(memberTeachingStatuses).length > 0 && (
+              <View style={styles.modalTeachingSection}>
+                <Text style={[styles.modalMetaLabel, { marginBottom: 12 }]}>
+                  Member feelings about this game
+                </Text>
+                <View style={styles.memberStatusesContainer}>
+                  {Object.entries(memberTeachingStatuses).map(([memberId, statuses]) => {
+                    const memberName = memberNames[memberId] || memberId;
+                    const isCurrentUser = memberId === userId;
+                    return (
+                      <View key={memberId} style={styles.memberStatusItem}>
+                        <Text style={styles.memberStatusName}>
+                          {isCurrentUser ? `${memberName} (You)` : memberName}:
+                        </Text>
+                        <View style={styles.memberStatusBadges}>
+                          {statuses.map((status, idx) => (
+                            <View key={idx} style={styles.memberStatusBadge}>
+                              <Text style={styles.memberStatusBadgeText}>
+                                {getTeachingStatusLabel(status)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Teaching Status Section - Show if enabled and user is logged in */}
+            {showTeachingStatus && userId && game && (
               <View style={styles.modalTeachingSection}>
                 <Text style={[styles.modalMetaLabel, { marginBottom: 12 }]}>
                   Your feelings about this game
@@ -604,6 +797,41 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 12,
     fontStyle: 'italic',
+  },
+  memberStatusesContainer: {
+    marginBottom: 16,
+  },
+  memberStatusItem: {
+    marginBottom: 12,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  memberStatusName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  memberStatusBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  memberStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#e8f4fd',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4a90e2',
+  },
+  memberStatusBadgeText: {
+    fontSize: 12,
+    color: '#4a90e2',
+    fontWeight: '500',
   },
 });
 

@@ -12,11 +12,15 @@ import {
 } from 'react-native';
 
 const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
+  // For fullScreen modals, use "none" animation to prevent flickering on re-renders
+  // Regular modals still use "slide" for better UX
+  const animationType = fullScreen ? 'none' : 'slide';
+  
     return (
     <RNModal
       visible={isOpen}
       transparent={true}
-      animationType="slide"
+      animationType={animationType}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView

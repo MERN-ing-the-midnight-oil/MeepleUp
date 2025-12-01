@@ -1708,8 +1708,29 @@ const EventHub = () => {
     setPlanningGamesSearchQuery(text);
   }, []);
 
+  // Handler to open game details modal
+  const handleOpenGameDetails = useCallback(async (game) => {
+    setSelectedGame(game);
+    setIsGameModalOpen(true);
+    
+    // Load BGG data if available
+    if (game.bggId) {
+      try {
+        const bggData = await getGameById(game.bggId);
+        setSelectedGameBggData(bggData);
+      } catch (error) {
+        console.error('Error loading BGG data:', error);
+        setSelectedGameBggData(null);
+      }
+    } else {
+      setSelectedGameBggData(null);
+    }
+  }, []);
+
   // Games Tab Component - Rebuilt from scratch
-  const GamesTab = () => {
+  // Memoize to prevent recreation on every render (which causes modal to remount)
+  const GamesTab = React.useMemo(() => {
+    const GamesTabComponent = () => {
     // Get user's games
     const myGames = userId ? (collections[userId] || []) : [];
 
@@ -1728,17 +1749,34 @@ const EventHub = () => {
       return myGames;
     }, [myGames, planningGamesSearchQuery]);
 
-    // Get expected games (games marked as "bringing" by any user)
-    // Use stable collectionsKey instead of collections object to prevent infinite loops
-    const expectedGames = useMemo(() => {
-      if (!event?.id || !members.length || !collectionsKey) return [];
+    // Lazy update expected games - only recompute when gameInterests changes
+    const [expectedGames, setExpectedGames] = useState([]);
+    const gameInterestsKeyRef = useRef('');
+    
+    useEffect(() => {
+      // Create a stable key from gameInterests to detect actual changes
+      const gameInterestsKey = JSON.stringify(gameInterests);
       
+      // Only update if gameInterests actually changed
+      if (gameInterestsKey === gameInterestsKeyRef.current) {
+        return;
+      }
+      
+      gameInterestsKeyRef.current = gameInterestsKey;
+      
+      // Skip computation if we don't have required data
+      if (!event?.id || !members.length || !collections) {
+        setExpectedGames([]);
+        return;
+      }
+      
+      // Compute expected games lazily
       const expected = [];
       const seenGameIds = new Set();
       
       // Get all games that are marked as "bringing"
       Object.keys(gameInterests).forEach(gameId => {
-      const statuses = gameInterests[gameId] || {};
+        const statuses = gameInterests[gameId] || {};
         const bringingUserIds = Object.keys(statuses).filter(
           uid => statuses[uid] === 'bringing'
         );
@@ -1748,7 +1786,7 @@ const EventHub = () => {
           // Match by BGG ID first, then fallback to game.id
           let gameData = null;
           for (const member of members) {
-        const memberGames = collections[member.userId] || [];
+            const memberGames = collections[member.userId] || [];
             const found = memberGames.find(g => {
               const gId = g.bggId || g.id;
               return gId === gameId;
@@ -1783,9 +1821,8 @@ const EventHub = () => {
         }
       });
       
-      return expected;
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [gameInterests, collectionsKey, memberIdsKey, memberNames, userId, user, event?.id]);
+      setExpectedGames(expected);
+    }, [gameInterests, event?.id, members, collections, userId, user, memberNames]);
 
     const toggleGameSelection = (gameId) => {
       setSelectedGamesForBringing(prev => {
@@ -1830,19 +1867,24 @@ const EventHub = () => {
               // Use BGG ID as primary identifier, fallback to game.id
               const gameId = game.bggId || game.id;
               const isUserBringing = game.bringingBy?.some(b => b.userId === userId) || false;
-                  return (
+              return (
                 <View key={gameId} style={styles.expectedGameItem}>
-                  <View style={styles.expectedGameContent}>
+                  <TouchableOpacity
+                    onPress={() => handleOpenGameDetails(game)}
+                    style={styles.expectedGameContent}
+                    activeOpacity={0.7}
+                  >
                     <Text style={styles.expectedGameTitle}>{game.title || 'Unknown Game'}</Text>
                     {game.bringingBy && game.bringingBy.length > 0 && (
                       <Text style={styles.expectedGameBringingBy}>
                         Bringing: {game.bringingBy.map(b => b.userName).join(', ')}
                       </Text>
-                        )}
-                      </View>
+                    )}
+                  </TouchableOpacity>
                   {isUserBringing && (
-                      <TouchableOpacity
-                      onPress={async () => {
+                    <TouchableOpacity
+                      onPress={async (e) => {
+                        e.stopPropagation();
                         try {
                           const gameStatusRef = db.collection('gamingGroups').doc(event.id)
                             .collection('gameStatus').doc(`${gameId}_${userId}`);
@@ -1855,11 +1897,11 @@ const EventHub = () => {
                       style={styles.expectedGameDeleteButton}
                     >
                       <Text style={styles.expectedGameDeleteText}>×</Text>
-                      </TouchableOpacity>
+                    </TouchableOpacity>
                   )}
                 </View>
-                  );
-                })}
+              );
+            })}
           </View>
         )}
 
@@ -1915,12 +1957,15 @@ const EventHub = () => {
                   return (
                     <View style={styles.selectableGameCardWrapper}>
                       <Pressable
-                        onPress={() => toggleGameSelection(gameId)}
+                        onPress={() => {
+                          console.log('[EventHub] Toggling game selection for:', gameId);
+                          toggleGameSelection(gameId);
+                        }}
                         style={{ width: '100%' }}
                       >
-                  <GameCard 
-                    game={item} 
-                    preloadedBggData={item._bggData}
+                        <GameCard 
+                          game={item} 
+                          preloadedBggData={item._bggData}
                           disableModal={true}
                         />
                       </Pressable>
@@ -1956,7 +2001,9 @@ const EventHub = () => {
         </Modal>
       </ScrollView>
     );
-  };
+    };
+    return GamesTabComponent;
+  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, members, user, memberNames, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
 
   // Members Tab Component
   const MembersTab = () => (
@@ -2089,7 +2136,9 @@ const EventHub = () => {
           setSelectedGameBggData(null);
         }}
         preloadedBggData={selectedGameBggData}
-        showTeachingStatus={false}
+        showTeachingStatus={true}
+        eventMembers={isMember ? members : null}
+        memberNames={memberNames}
       />
 
       {/* Edit Schedule Modal */}
