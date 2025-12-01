@@ -16,7 +16,7 @@ const CollectionScreen = () => {
   
   const { width } = useWindowDimensions();
   const { user } = useAuth();
-  const { getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
+  const { collections, getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'import'
   const [sortBy, setSortBy] = useState('rating'); // 'rating', 'category', 'title'
   const [showCameraModal, setShowCameraModal] = useState(false);
@@ -32,7 +32,12 @@ const CollectionScreen = () => {
   const userIdentifier = user?.uid || user?.id;
   console.log('[CollectionScreen] User identifier:', userIdentifier ? 'found' : 'missing');
   
-  const rawCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
+  // Memoize rawCollection to prevent infinite loops - only recalculate when collections or userIdentifier changes
+  const rawCollection = useMemo(() => {
+    if (!userIdentifier) return [];
+    const collection = collections[userIdentifier] || [];
+    return collection;
+  }, [collections, userIdentifier]);
   console.log('[CollectionScreen] Raw collection length:', rawCollection.length);
   
   const [sortedCollection, setSortedCollection] = useState([]);
@@ -200,6 +205,7 @@ const CollectionScreen = () => {
     try {
       // Pass the already-loaded BGG data to avoid redundant API calls
       // Use item directly - React.memo in GameCard will handle prop comparison
+      // Pass the current user's ID as the game owner since this is their collection
       return (
         <GameCard 
           game={item} 
@@ -211,7 +217,7 @@ const CollectionScreen = () => {
       console.error('[CollectionScreen] Error rendering GameCard for:', item.title || item.id, 'error:', error, 'stack:', error.stack);
       return null;
     }
-  }, [handleDeleteGame]);
+  }, [handleDeleteGame, userIdentifier]);
 
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
@@ -252,12 +258,12 @@ const CollectionScreen = () => {
           >
             <View style={styles.menuOptionContent}>
               <Image 
-                source={require('../../assets/images/lexiBGG.png')}
+                source={require('../../assets/images/BGGDownload.png')}
                 style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
                 resizeMode="contain"
               />
               <View style={styles.menuOptionText}>
-                <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
+                <Text style={styles.menuOptionTitle}>Import existing BGG collection titles</Text>
               </View>
               <Text style={styles.menuOptionArrow}>→</Text>
             </View>
@@ -343,7 +349,7 @@ const CollectionScreen = () => {
                   return null;
                 }
               }}
-              numColumns={2}
+              numColumns={3}
               columnWrapperStyle={styles.row}
               contentContainerStyle={styles.listContainer}
               ListHeaderComponent={() => {
@@ -393,12 +399,12 @@ const CollectionScreen = () => {
                 >
                   <View style={styles.menuOptionContent}>
                     <Image 
-                      source={require('../../assets/images/lexiBGG.png')}
+                      source={require('../../assets/images/BGGDownload.png')}
                       style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
                       resizeMode="contain"
                     />
                     <View style={styles.menuOptionText}>
-                      <Text style={styles.menuOptionTitle}>Import game titles from your existing BoardGameGeek collection</Text>
+                      <Text style={styles.menuOptionTitle}>Import existing BGG collection titles</Text>
                     </View>
                     <Text style={styles.menuOptionArrow}>→</Text>
                   </View>
@@ -663,6 +669,7 @@ const styles = StyleSheet.create({
   row: {
     justifyContent: 'space-between',
     paddingHorizontal: 4,
+    gap: 8,
   },
   gameCard: {
     backgroundColor: '#fff',

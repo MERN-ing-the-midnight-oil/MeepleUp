@@ -207,6 +207,128 @@ export const EventsProvider = ({ children }) => {
     loadEvents();
   }, []);
 
+  // Sync events from Firestore when user is authenticated
+  useEffect(() => {
+    if (!user || !db || !initialised) {
+      return;
+    }
+
+    const syncEventsFromFirestore = async () => {
+      try {
+        const userId = user.uid || user.id;
+        if (!userId) {
+          return;
+        }
+
+        // Query Firestore for gamingGroups where user is in memberIds array
+        // This uses array-contains which doesn't require a composite index
+        const groupsRef = db.collection('gamingGroups')
+          .where('memberIds', 'array-contains', userId)
+          .where('isActive', '==', true);
+        
+        let groupsSnapshot;
+        try {
+          groupsSnapshot = await groupsRef.get();
+        } catch (indexError) {
+          // If index doesn't exist, fall back to querying all active groups and filtering
+          console.warn('Index not found, using fallback query:', indexError);
+          const allGroupsSnapshot = await db.collection('gamingGroups')
+            .where('isActive', '==', true)
+            .limit(100)
+            .get();
+          
+          // Filter in memory for groups where user is a member
+          groupsSnapshot = {
+            docs: allGroupsSnapshot.docs.filter(doc => {
+              const data = doc.data();
+              const memberIds = data.memberIds || [];
+              return memberIds.includes(userId);
+            }),
+            empty: false
+          };
+        }
+        
+        if (groupsSnapshot.empty) {
+          return;
+        }
+
+        // Fetch all group documents with their members
+        const groupPromises = groupsSnapshot.docs.map(async (groupDoc) => {
+          try {
+            const firestoreData = groupDoc.data();
+            
+            // Get members from subcollection
+            const membersSnapshot = await db.collection('gamingGroups')
+              .doc(groupDoc.id)
+              .collection('members')
+              .get();
+            
+            const members = membersSnapshot.docs.map(memberDoc => {
+              const memberData = memberDoc.data();
+              return {
+                userId: memberData.userId || memberDoc.id,
+                status: MEMBERSHIP_STATUS.MEMBER,
+                role: memberData.role || MEMBER_ROLES.MEMBER,
+                joinedAt: memberData.joinedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                rsvpStatus: memberData.rsvpStatus || null,
+                rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || null,
+              };
+            });
+
+            // Convert Firestore event format to local event format
+            return {
+              id: groupDoc.id,
+              name: firestoreData.name || '',
+              organizerId: firestoreData.organizerId || null,
+              description: firestoreData.description || '',
+              scheduledFor: firestoreData.scheduledFor || firestoreData.nextEventDate || '',
+              createdAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+              joinCode: firestoreData.joinCode || '',
+              generalLocation: firestoreData.location?.name || '',
+              exactLocation: firestoreData.location?.address || '',
+              visibility: firestoreData.privacy === 'public' ? 'public' : 'private',
+              members: members,
+              isActive: firestoreData.isActive !== false,
+              deletedAt: firestoreData.deletedAt?.toDate?.()?.toISOString() || firestoreData.deletedAt || null,
+              lastUpdatedAt: firestoreData.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+            };
+          } catch (error) {
+            console.error(`Error fetching group ${groupDoc.id}:`, error);
+            return null;
+          }
+        });
+
+        const firestoreEvents = (await Promise.all(groupPromises))
+          .filter(Boolean)
+          .map(normalizeEvent)
+          .filter(Boolean);
+
+        if (firestoreEvents.length > 0) {
+          // Merge Firestore events with local events, preferring Firestore data
+          setEvents((prevEvents) => {
+            const merged = new Map();
+            
+            // First add all local events
+            prevEvents.forEach(event => {
+              merged.set(event.id, event);
+            });
+            
+            // Then add/update with Firestore events (Firestore takes precedence)
+            firestoreEvents.forEach(event => {
+              merged.set(event.id, event);
+            });
+            
+            return Array.from(merged.values());
+          });
+        }
+      } catch (error) {
+        console.error('Error syncing events from Firestore:', error);
+      }
+    };
+
+    syncEventsFromFirestore();
+  }, [user, db, initialised]);
+
   useEffect(() => {
     if (!initialised) {
       return;

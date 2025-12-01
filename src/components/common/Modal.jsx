@@ -11,7 +11,7 @@ import {
   ScrollView,
 } from 'react-native';
 
-const Modal = ({ isOpen, onClose, children, title }) => {
+const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
     return (
     <RNModal
       visible={isOpen}
@@ -24,20 +24,27 @@ const Modal = ({ isOpen, onClose, children, title }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
-        <Pressable style={styles.overlay} onPress={onClose}>
-          <Pressable style={styles.content} onPress={(e) => e.stopPropagation()}>
+        <Pressable style={styles.overlay} onPress={fullScreen ? undefined : onClose}>
+          <Pressable 
+            style={[styles.content, fullScreen && styles.contentFullScreen]} 
+            onPress={(e) => e.stopPropagation()}
+          >
             <View style={styles.header}>
               {title && <Text style={styles.title}>{title}</Text>}
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <Text style={styles.closeText}>×</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView
-              contentContainerStyle={styles.scrollContent}
-              keyboardShouldPersistTaps="handled"
-            >
-              {children}
-            </ScrollView>
+            {fullScreen ? (
+              children
+            ) : (
+              <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {children}
+              </ScrollView>
+            )}
           </Pressable>
         </Pressable>
       </KeyboardAvoidingView>
@@ -65,6 +72,13 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '90%',
     maxHeight: '80%',
+  },
+  contentFullScreen: {
+    width: '100%',
+    height: '100%',
+    maxHeight: '100%',
+    borderRadius: 0,
+    padding: 0,
   },
   header: {
     flexDirection: 'row',

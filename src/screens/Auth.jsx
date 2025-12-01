@@ -63,7 +63,7 @@ const Auth = () => {
           [
             {
               text: 'OK',
-              onPress: () => navigation.navigate('Auth', { mode: 'login' }),
+              // Navigation will happen automatically via auth state change to VerifyEmail screen
             },
           ]
         );
