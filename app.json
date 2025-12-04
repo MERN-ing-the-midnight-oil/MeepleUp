@@ -16,7 +16,8 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.meepleup.app"
+      "bundleIdentifier": "com.rhyssmoker.meepleup",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "adaptiveIcon": {
@@ -37,8 +38,8 @@
         {
           "locationWhenInUsePermission": "Allow MeepleUp to access your location to find nearby game events."
         }
-      ]
+      ],
+      "expo-web-browser"
     ]
   }
 }
-

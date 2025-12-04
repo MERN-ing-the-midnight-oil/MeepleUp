@@ -8,179 +8,41 @@ import { useCollections } from '../context/CollectionsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 
-const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, showTeachingStatus = false, eventMembers = null, memberNames = {} }) => {
+const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null }) => {
   const { user } = useAuth();
   const { updateGameInCollection, addGameToCollection, collections } = useCollections();
   const [bggData, setBggData] = useState(preloadedBggData);
   const [badges, setBadges] = useState([]);
   const [starRating, setStarRating] = useState(0);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
-  // Initialize teaching statuses with backward compatibility migration
-  // Support both old single-value format and new array format
-  const migrateTeachingStatuses = (statusOrArray) => {
-    if (!statusOrArray) return [];
-    // If it's already an array, return it (new format)
-    if (Array.isArray(statusOrArray)) {
-      return statusOrArray.map(status => {
-        // Migrate old statuses to new ones
-        if (status === 'can-teach') return 'happy-to-teach';
-        if (status === 'still-learning') return 'havent-played-yet';
-        return status;
-      });
-    }
-    // If it's a single value (old format), convert to array
-    if (statusOrArray === 'can-teach') return ['happy-to-teach'];
-    if (statusOrArray === 'still-learning') return ['havent-played-yet'];
-    return [statusOrArray];
-  };
-
-  const [teachingStatuses, setTeachingStatuses] = useState([]);
-  const [memberTeachingStatuses, setMemberTeachingStatuses] = useState({}); // { userId: [statuses] }
+  const [isFavorite, setIsFavorite] = useState(false);
   const isMountedRef = useRef(true);
   const userId = user?.uid || user?.id;
 
-  // Track the last processed teaching status to prevent loops
-  const lastProcessedStatusRef = useRef(null);
-
-  // Update teaching statuses when game changes (modal opens with new game)
+  // Update favorite status when game changes (modal opens with new game)
   useEffect(() => {
     if (!game || !userId) {
-      setTeachingStatuses([]);
+      setIsFavorite(false);
       return;
     }
 
     const gameId = game.bggId || game.id;
     if (!gameId) {
-      setTeachingStatuses([]);
+      setIsFavorite(false);
       return;
     }
 
-    // Check if we have the current user's teaching status in their collection
+    // Check if we have the current user's favorite status in their collection
     const userGames = collections[userId] || [];
     const userGame = userGames.find(g => {
       const gId = g.bggId || g.id;
       return gId === gameId;
     });
 
-    // Use teaching status from user's collection if available, otherwise from game object
-    const teachingStatus = userGame?.teachingStatus || game?.teachingStatus;
-    const statusKey = `${gameId}-${JSON.stringify(teachingStatus)}`;
+    // Use isFavorite from user's collection if available, otherwise from game object
+    setIsFavorite(userGame?.isFavorite || game?.isFavorite || false);
+  }, [game?.id, game?.bggId, game?.isFavorite, userId, collections]);
 
-    if (lastProcessedStatusRef.current === statusKey) {
-      return;
-    }
-
-    lastProcessedStatusRef.current = statusKey;
-
-    if (teachingStatus !== undefined) {
-      const migratedStatuses = migrateTeachingStatuses(teachingStatus);
-      setTeachingStatuses(migratedStatuses);
-
-      // If migration happened (single value converted to array), update the database
-      // BUT only if this is actually a change and user is defined
-      if (!Array.isArray(teachingStatus) && userGame) {
-        const currentIsArray = Array.isArray(teachingStatus);
-        if (!currentIsArray) {
-          setTimeout(() => {
-            updateGameInCollection(userId, userGame.id, { teachingStatus: migratedStatuses });
-          }, 0);
-        }
-      }
-    } else {
-      setTeachingStatuses([]);
-    }
-  }, [game?.id, game?.bggId, game?.teachingStatus, userId, collections, updateGameInCollection]);
-
-  // Clear the ref when modal closes to allow re-processing when reopened
-  useEffect(() => {
-    if (!isOpen) {
-      lastProcessedStatusRef.current = null;
-      setMemberTeachingStatuses({});
-    }
-  }, [isOpen]);
-
-  // Fetch teaching statuses from all event members when modal opens
-  useEffect(() => {
-    if (!isOpen || !eventMembers || !game || !collections || !db) {
-      return;
-    }
-
-    const gameId = game.bggId || game.id;
-    if (!gameId) return;
-
-    const fetchMemberStatuses = async () => {
-      const statuses = {};
-      
-      // Check collections first (faster, already loaded)
-      eventMembers.forEach(member => {
-        const memberGames = collections[member.userId] || [];
-        const memberGame = memberGames.find(g => {
-          const gId = g.bggId || g.id;
-          return gId === gameId;
-        });
-        
-        if (memberGame && memberGame.teachingStatus) {
-          const migrated = migrateTeachingStatuses(memberGame.teachingStatus);
-          if (migrated.length > 0) {
-            statuses[member.userId] = migrated;
-          }
-        }
-      });
-
-      // Also fetch from Firestore for any members not in collections
-      try {
-        const memberIds = eventMembers.map(m => m.userId).filter(Boolean);
-        const fetchPromises = memberIds.map(async (memberId) => {
-          // Skip if we already have it from collections
-          if (statuses[memberId]) return;
-          
-          try {
-            const gameDoc = await db.collection('userGames').doc(memberId)
-              .collection('games')
-              .where('bggId', '==', gameId)
-              .limit(1)
-              .get();
-            
-            if (!gameDoc.empty) {
-              const data = gameDoc.docs[0].data();
-              if (data.teachingStatus) {
-                const migrated = migrateTeachingStatuses(data.teachingStatus);
-                if (migrated.length > 0) {
-                  statuses[memberId] = migrated;
-                }
-              }
-            } else {
-              // Try matching by game.id if bggId didn't match
-              const gameDocById = await db.collection('userGames').doc(memberId)
-                .collection('games')
-                .doc(gameId)
-                .get();
-              
-              if (gameDocById.exists) {
-                const data = gameDocById.data();
-                if (data.teachingStatus) {
-                  const migrated = migrateTeachingStatuses(data.teachingStatus);
-                  if (migrated.length > 0) {
-                    statuses[memberId] = migrated;
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.error(`Error fetching teaching status for member ${memberId}:`, error);
-          }
-        });
-        
-        await Promise.all(fetchPromises);
-      } catch (error) {
-        console.error('Error fetching member teaching statuses:', error);
-      }
-      
-      setMemberTeachingStatuses(statuses);
-    };
-
-    fetchMemberStatuses();
-  }, [isOpen, eventMembers, game, collections, db]);
 
   // Initialize badges and rating from preloaded data
   const initializedRef = useRef(false);
@@ -256,13 +118,23 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
     return 0;
   }, [starRating, bggData?.average]);
 
-  const handleTeachingStatusToggle = async (status) => {
-    const newStatuses = teachingStatuses.includes(status)
-      ? teachingStatuses.filter(s => s !== status) // Remove if already selected
-      : [...teachingStatuses, status]; // Add if not selected
-    setTeachingStatuses(newStatuses);
-    
+  // Check if user owns this game
+  const userOwnsGame = useMemo(() => {
+    if (!game || !userId) return false;
+    const gameId = game.bggId || game.id;
+    if (!gameId) return false;
+    const userGames = collections[userId] || [];
+    return userGames.some(g => {
+      const gId = g.bggId || g.id;
+      return gId === gameId;
+    });
+  }, [game, userId, collections]);
+
+  const handleFavoriteToggle = async () => {
     if (!userId || !game) return;
+    
+    const newFavoriteStatus = !isFavorite;
+    setIsFavorite(newFavoriteStatus);
     
     const gameId = game.bggId || game.id;
     if (!gameId) return;
@@ -277,15 +149,15 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
     if (userGame) {
       // Update existing game
       try {
-        await updateGameInCollection(userId, userGame.id, { teachingStatus: newStatuses });
+        await updateGameInCollection(userId, userGame.id, { isFavorite: newFavoriteStatus });
       } catch (error) {
-        console.error('Error updating teaching status:', error);
-        Alert.alert('Error', 'Failed to update your feelings about this game. Please try again.');
+        console.error('Error updating favorite status:', error);
+        Alert.alert('Error', 'Failed to update favorite status. Please try again.');
         // Revert the state change
-        setTeachingStatuses(teachingStatuses);
+        setIsFavorite(!newFavoriteStatus);
       }
     } else if (db) {
-      // Create new game entry with teaching status
+      // Create new game entry with favorite status
       try {
         const gameData = {
           title: game.title || 'Unknown Game',
@@ -298,7 +170,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
           maxPlayers: game.maxPlayers || null,
           playingTime: game.playingTime || null,
           bggRating: game.bggRating || null,
-          teachingStatus: newStatuses,
+          isFavorite: newFavoriteStatus,
           addedAt: firebase.firestore.Timestamp.now(),
           updatedAt: firebase.firestore.Timestamp.now(),
           source: 'manual',
@@ -314,43 +186,28 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
         const newGame = { ...gameData, id: docId };
         addGameToCollection(userId, newGame);
       } catch (error) {
-        console.error('Error creating game entry for teaching status:', error);
-        Alert.alert('Error', 'Failed to save your feelings about this game. Please try again.');
+        console.error('Error creating game entry for favorite:', error);
+        Alert.alert('Error', 'Failed to save favorite status. Please try again.');
         // Revert the state change
-        setTeachingStatuses(teachingStatuses);
+        setIsFavorite(!newFavoriteStatus);
       }
-    }
-  };
-
-  const getTeachingStatusLabel = (status) => {
-    switch (status) {
-      case 'happy-to-teach':
-        return 'Happy to Teach 🎓';
-      case 'havent-played-yet':
-        return "Haven't played yet";
-      case 'want-to-learn':
-        return 'I want to learn';
-      case 'would-happily-play':
-        return 'Would happily play';
-      case 'not-excited-to-play':
-        return 'Not excited to play';
-      // Backward compatibility for old statuses
-      case 'can-teach':
-        return 'Happy to Teach 🎓'; // Migrate to happy-to-teach
-      case 'still-learning':
-        return "Haven't played yet"; // Migrate to havent-played-yet
-      default:
-        return 'Not set';
     }
   };
 
   // Guard against invalid game data
   if (!game || (typeof game !== 'object')) {
+    console.log('[GameDetailsModal] Guard clause: game is invalid', { game, isOpen });
     return null;
   }
 
   // Ensure isOpen is a boolean
   const modalVisible = Boolean(isOpen);
+  console.log('[GameDetailsModal] Rendering modal', { 
+    gameTitle: game?.title, 
+    isOpen, 
+    modalVisible,
+    hasBggData: !!preloadedBggData 
+  });
 
   return (
     <Modal
@@ -483,143 +340,30 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, show
               </View>
             )}
 
-            {/* Member Teaching Statuses Section - Show statuses from all members */}
-            {showTeachingStatus && eventMembers && Object.keys(memberTeachingStatuses).length > 0 && (
+            {/* Favorite Section - Only show if user owns the game */}
+            {userId && game && userOwnsGame && (
               <View style={styles.modalTeachingSection}>
                 <Text style={[styles.modalMetaLabel, { marginBottom: 12 }]}>
-                  Member feelings about this game
-                </Text>
-                <View style={styles.memberStatusesContainer}>
-                  {Object.entries(memberTeachingStatuses).map(([memberId, statuses]) => {
-                    const memberName = memberNames[memberId] || memberId;
-                    const isCurrentUser = memberId === userId;
-                    return (
-                      <View key={memberId} style={styles.memberStatusItem}>
-                        <Text style={styles.memberStatusName}>
-                          {isCurrentUser ? `${memberName} (You)` : memberName}:
-                        </Text>
-                        <View style={styles.memberStatusBadges}>
-                          {statuses.map((status, idx) => (
-                            <View key={idx} style={styles.memberStatusBadge}>
-                              <Text style={styles.memberStatusBadgeText}>
-                                {getTeachingStatusLabel(status)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-
-            {/* Teaching Status Section - Show if enabled and user is logged in */}
-            {showTeachingStatus && userId && game && (
-              <View style={styles.modalTeachingSection}>
-                <Text style={[styles.modalMetaLabel, { marginBottom: 12 }]}>
-                  Your feelings about this game
+                  Mark as Favorite
                 </Text>
                 <Text style={styles.modalTeachingHint}>
-                  Select all that apply. This applies to all MeepleUps you join.
+                  Mark this game as a favorite to help others discover games you love.
                 </Text>
-                
-                <View style={styles.teachingStatusOptions}>
-                  <TouchableOpacity
-                    style={[
-                      styles.teachingStatusOption,
-                      teachingStatuses.includes('happy-to-teach') && styles.teachingStatusOptionActive
-                    ]}
-                    onPress={() => handleTeachingStatusToggle('happy-to-teach')}
-                  >
-                    <Text style={[
-                      styles.teachingStatusText,
-                      teachingStatuses.includes('happy-to-teach') && styles.teachingStatusTextActive
-                    ]}>
-                      🎓 Happy to Teach
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[
-                      styles.teachingStatusOption,
-                      teachingStatuses.includes('would-happily-play') && styles.teachingStatusOptionActive
-                    ]}
-                    onPress={() => handleTeachingStatusToggle('would-happily-play')}
-                  >
-                    <Text style={[
-                      styles.teachingStatusText,
-                      teachingStatuses.includes('would-happily-play') && styles.teachingStatusTextActive
-                    ]}>
-                      Would happily play
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[
-                      styles.teachingStatusOption,
-                      teachingStatuses.includes('want-to-learn') && styles.teachingStatusOptionActive
-                    ]}
-                    onPress={() => handleTeachingStatusToggle('want-to-learn')}
-                  >
-                    <Text style={[
-                      styles.teachingStatusText,
-                      teachingStatuses.includes('want-to-learn') && styles.teachingStatusTextActive
-                    ]}>
-                      I want to learn
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[
-                      styles.teachingStatusOption,
-                      teachingStatuses.includes('havent-played-yet') && styles.teachingStatusOptionActive
-                    ]}
-                    onPress={() => handleTeachingStatusToggle('havent-played-yet')}
-                  >
-                    <Text style={[
-                      styles.teachingStatusText,
-                      teachingStatuses.includes('havent-played-yet') && styles.teachingStatusTextActive
-                    ]}>
-                      Haven't played yet
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[
-                      styles.teachingStatusOption,
-                      teachingStatuses.includes('not-excited-to-play') && styles.teachingStatusOptionActive
-                    ]}
-                    onPress={() => handleTeachingStatusToggle('not-excited-to-play')}
-                  >
-                    <Text style={[
-                      styles.teachingStatusText,
-                      teachingStatuses.includes('not-excited-to-play') && styles.teachingStatusTextActive
-                    ]}>
-                      Not excited to play
-                    </Text>
-                  </TouchableOpacity>
-                  
-                  {teachingStatuses.length > 0 && (
-                    <TouchableOpacity
-                      style={styles.teachingStatusClear}
-                      onPress={() => {
-                        setTeachingStatuses([]);
-                        if (userId && game?.id) {
-                          updateGameInCollection(userId, game.id, { teachingStatus: [] });
-                        }
-                      }}
-                    >
-                      <Text style={styles.teachingStatusClearText}>Clear all</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                
-                {teachingStatuses.length > 0 && (
-                  <Text style={styles.modalTeachingCurrent}>
-                    Selected: {teachingStatuses.map(status => getTeachingStatusLabel(status)).join(', ')}
+                <TouchableOpacity
+                  style={[
+                    styles.favoriteButton,
+                    isFavorite && styles.favoriteButtonActive
+                  ]}
+                  onPress={handleFavoriteToggle}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.favoriteButtonText,
+                    isFavorite && styles.favoriteButtonTextActive
+                  ]}>
+                    {isFavorite ? '👑 Favorite' : 'Mark as Favorite'}
                   </Text>
-                )}
+                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -832,6 +576,53 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4a90e2',
     fontWeight: '500',
+  },
+  gameRequestButton: {
+    backgroundColor: '#28a745',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  gameRequestButtonDisabled: {
+    backgroundColor: '#6c757d',
+    opacity: 0.7,
+  },
+  gameRequestButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  favoriteButton: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  favoriteButtonActive: {
+    borderColor: '#FFD700',
+    backgroundColor: '#FFF9E6',
+  },
+  favoriteButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  favoriteButtonTextActive: {
+    color: '#FF8C00',
   },
 });
 

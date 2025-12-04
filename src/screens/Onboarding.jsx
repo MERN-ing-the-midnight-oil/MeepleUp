@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +9,9 @@ import { validateJoinCode } from '../utils/api';
 import { getUserLocation } from '../utils/helpers';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
-import AdvancedDateTimePicker from '../components/common/DateTimePicker';
+import CalendarDatePicker from '../components/common/CalendarDatePicker';
+import Modal from '../components/common/Modal';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import PoweredByBGG from '../components/PoweredByBGG';
 
 const Onboarding = () => {
@@ -25,7 +27,11 @@ const Onboarding = () => {
   const [eventGeneralLocation, setEventGeneralLocation] = useState('');
   const [eventExactLocation, setEventExactLocation] = useState('');
   const [shareExactAddress, setShareExactAddress] = useState(false);
-  const [eventDateTime, setEventDateTime] = useState(null);
+  const [selectedDates, setSelectedDates] = useState([]); // Array of { date: Date, startTime: Date, endTime: Date }
+  const [usualStartTime, setUsualStartTime] = useState(new Date(new Date().setHours(18, 0, 0, 0))); // Default 6 PM
+  const [usualEndTime, setUsualEndTime] = useState(new Date(new Date().setHours(22, 0, 0, 0))); // Default 10 PM
+  const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'usualStart' | 'usualEnd' | 'start' | 'end', dateIndex: number }
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [eventDescription, setEventDescription] = useState('');
   const [rsvpRequired, setRsvpRequired] = useState(true);
   const [whoCanJoin, setWhoCanJoin] = useState('private'); // 'private' or 'public' (for v1, only 'private')
@@ -42,7 +48,9 @@ const Onboarding = () => {
       setEventGeneralLocation('');
       setEventExactLocation('');
       setShareExactAddress(false);
-      setEventDateTime(null);
+      setSelectedDates([]);
+      setUsualStartTime(new Date(new Date().setHours(18, 0, 0, 0)));
+      setUsualEndTime(new Date(new Date().setHours(22, 0, 0, 0)));
       setEventDescription('');
       setRsvpRequired(true);
       setWhoCanJoin('private');
@@ -50,13 +58,14 @@ const Onboarding = () => {
       setJoinCodeWord1('');
       setJoinCodeWord2('');
       setJoinCodeWord3('');
+      setShowCalendarModal(false);
     }
     setMode(nextMode);
   };
 
   const handleJoinCodeWordChange = (wordIndex, text) => {
-    // Keep lowercase for word phrases, just trim
-    const trimmed = text.trim().toLowerCase();
+    // Allow any case - normalization happens during comparison
+    const trimmed = text.trim();
     if (wordIndex === 1) {
       setJoinCodeWord1(trimmed);
     } else if (wordIndex === 2) {
@@ -209,31 +218,32 @@ const Onboarding = () => {
       return;
     }
 
-    if (!eventName.trim() || !eventGeneralLocation.trim() || !eventDateTime) {
-      setError('Please fill in all required MeepleUp details.');
+    if (!eventName.trim() || !eventGeneralLocation.trim() || selectedDates.length === 0) {
+      setError('Please fill in all required MeepleUp details, including at least one event date.');
       return;
     }
 
     setLoading(true);
     try {
-      // Format the date/time string - use display text if available, otherwise format it
-      const scheduledFor = eventDateTime.displayText || 
-        (eventDateTime.date ? new Date(eventDateTime.date).toLocaleString() : '');
+      // Convert dates to ISO strings for storage
+      const eventDates = selectedDates.map(d => ({
+        date: d.date.toISOString(),
+        startTime: d.startTime.toISOString(),
+        endTime: d.endTime.toISOString(),
+      }));
       
       const eventData = {
         name: eventName.trim(),
         generalLocation: eventGeneralLocation.trim(),
         exactLocation: shareExactAddress && eventExactLocation.trim() ? eventExactLocation.trim() : '',
-        scheduledFor: scheduledFor,
+        eventDates,
+        usualStartTime: usualStartTime.toISOString(),
+        usualEndTime: usualEndTime.toISOString(),
+        scheduledFor: selectedDates[0]?.date.toISOString() || '', // For backward compatibility
         description: eventDescription.trim(),
         visibility: 'private', // Invite only for v1
         organizerId: user.uid,
       };
-
-      // Add recurring info if it's a recurring event
-      if (eventDateTime.recurring && eventDateTime.recurring.enabled) {
-        eventData.recurring = eventDateTime.recurring;
-      }
 
       // Add member limit if provided
       if (memberLimit.trim()) {
@@ -249,11 +259,14 @@ const Onboarding = () => {
       setEventGeneralLocation('');
       setEventExactLocation('');
       setShareExactAddress(false);
-      setEventDateTime(null);
+      setSelectedDates([]);
+      setUsualStartTime(new Date(new Date().setHours(18, 0, 0, 0)));
+      setUsualEndTime(new Date(new Date().setHours(22, 0, 0, 0)));
       setEventDescription('');
       setRsvpRequired(true);
       setWhoCanJoin('private');
       setMemberLimit('');
+      setShowCalendarModal(false);
       setError('');
 
       Alert.alert(
@@ -572,10 +585,53 @@ const Onboarding = () => {
             {/* Date & Time */}
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>Date & Time <Text style={styles.requiredAsterisk}>*</Text></Text>
-              <AdvancedDateTimePicker
-                value={eventDateTime}
-                onChange={setEventDateTime}
-                style={styles.dateTimePicker}
+              <Text style={styles.fieldExample}>
+                Select dates from the calendar. Set default times that will apply to all selected dates.
+              </Text>
+              
+              {/* Usual Time */}
+              <View style={styles.timeRow}>
+                <View style={styles.timeInputContainer}>
+                  <Text style={styles.timeLabel}>Usual Start Time</Text>
+                  <Pressable
+                    style={styles.timeButton}
+                    onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
+                  >
+                    <Text style={styles.timeButtonText}>
+                      {usualStartTime.toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true,
+                      })}
+                    </Text>
+                  </Pressable>
+                </View>
+                
+                <View style={styles.timeInputContainer}>
+                  <Text style={styles.timeLabel}>Usual End Time</Text>
+                  <Pressable
+                    style={styles.timeButton}
+                    onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
+                  >
+                    <Text style={styles.timeButtonText}>
+                      {usualEndTime.toLocaleTimeString('en-US', {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true,
+                      })}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Calendar Button */}
+              <Button
+                label={selectedDates.length > 0 
+                  ? `View Calendar (${selectedDates.length} date${selectedDates.length !== 1 ? 's' : ''} selected)`
+                  : 'Select Dates from Calendar'}
+                onPress={() => setShowCalendarModal(true)}
+                variant="outline"
+                style={styles.calendarButton}
               />
             </View>
 
@@ -716,6 +772,202 @@ const Onboarding = () => {
           style={styles.fullButton}
         />
       </View>
+
+      {/* Calendar Modal */}
+      <Modal
+        isOpen={showCalendarModal}
+        onClose={() => setShowCalendarModal(false)}
+        title="Select Event Dates"
+        fullScreen={true}
+      >
+        <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent}>
+          <View style={styles.modalFieldContainer}>
+            <Text style={styles.fieldLabel}>Usual Time</Text>
+            <Text style={styles.fieldHint}>
+              Set the default start and end times. These will be used for all selected dates unless you edit individual dates.
+            </Text>
+            
+            <View style={styles.timeRow}>
+              <View style={styles.timeInputContainer}>
+                <Text style={styles.timeLabel}>Start Time</Text>
+                <Pressable
+                  style={styles.timeButton}
+                  onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
+                >
+                  <Text style={styles.timeButtonText}>
+                    {usualStartTime.toLocaleTimeString('en-US', {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true,
+                    })}
+                  </Text>
+                </Pressable>
+              </View>
+              
+              <View style={styles.timeInputContainer}>
+                <Text style={styles.timeLabel}>End Time</Text>
+                <Pressable
+                  style={styles.timeButton}
+                  onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
+                >
+                  <Text style={styles.timeButtonText}>
+                    {usualEndTime.toLocaleTimeString('en-US', {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true,
+                    })}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.modalFieldContainer}>
+            <Text style={styles.fieldLabel}>Select Event Dates</Text>
+            <Text style={styles.fieldHint}>
+              Scroll through the calendar to see the next 12 months. Tap dates to select or deselect them. Selected dates show their times below. Tap a date's time on the calendar to edit it individually.
+            </Text>
+            <CalendarDatePicker
+              selectedDates={selectedDates}
+              onDatesChange={setSelectedDates}
+              minDate={new Date()}
+              usualStartTime={usualStartTime}
+              usualEndTime={usualEndTime}
+              onDateTimeEdit={(dateIndex, timeType) => {
+                setShowTimePicker({ type: timeType || 'start', dateIndex });
+              }}
+            />
+          </View>
+
+          <View style={styles.modalActions}>
+            <Button
+              label="Done"
+              onPress={() => setShowCalendarModal(false)}
+              style={styles.modalButton}
+            />
+          </View>
+        </ScrollView>
+
+        {/* Time Picker Modal */}
+        {showTimePicker.type && (
+          Platform.OS === 'ios' ? (
+            <Modal
+              isOpen={true}
+              onClose={() => setShowTimePicker({ type: null, dateIndex: null })}
+              title={
+                showTimePicker.type === 'usualStart' ? 'Usual Start Time' :
+                showTimePicker.type === 'usualEnd' ? 'Usual End Time' :
+                showTimePicker.type === 'start' ? 'Start Time' :
+                'End Time'
+              }
+            >
+              <View style={styles.timePickerModalContent}>
+                <DateTimePicker
+                  value={
+                    showTimePicker.type === 'usualStart' ? usualStartTime :
+                    showTimePicker.type === 'usualEnd' ? usualEndTime :
+                    showTimePicker.dateIndex !== null && selectedDates[showTimePicker.dateIndex]
+                      ? (showTimePicker.type === 'start' 
+                          ? selectedDates[showTimePicker.dateIndex].startTime
+                          : selectedDates[showTimePicker.dateIndex].endTime)
+                      : new Date()
+                  }
+                  mode="time"
+                  display="spinner"
+                  is24Hour={false}
+                  onChange={(event, date) => {
+                    if (date) {
+                      if (showTimePicker.type === 'usualStart') {
+                        setUsualStartTime(date);
+                        // Update all dates that haven't been individually edited
+                        setSelectedDates(prev => prev.map(d => {
+                          const newDate = new Date(d.date);
+                          newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                          return { ...d, startTime: newDate };
+                        }));
+                      } else if (showTimePicker.type === 'usualEnd') {
+                        setUsualEndTime(date);
+                        setSelectedDates(prev => prev.map(d => {
+                          const newDate = new Date(d.date);
+                          newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                          return { ...d, endTime: newDate };
+                        }));
+                      } else if (showTimePicker.type === 'start' || showTimePicker.type === 'end') {
+                        const updatedDates = [...selectedDates];
+                        if (showTimePicker.dateIndex !== null && updatedDates[showTimePicker.dateIndex]) {
+                          const newTime = new Date(updatedDates[showTimePicker.dateIndex].date);
+                          newTime.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                          updatedDates[showTimePicker.dateIndex] = {
+                            ...updatedDates[showTimePicker.dateIndex],
+                            [showTimePicker.type === 'start' ? 'startTime' : 'endTime']: newTime,
+                          };
+                          setSelectedDates(updatedDates);
+                        }
+                      }
+                    }
+                  }}
+                  style={{ width: '100%', height: 200 }}
+                />
+                <View style={styles.iosPickerActions}>
+                  <Button
+                    label="Done"
+                    onPress={() => setShowTimePicker({ type: null, dateIndex: null })}
+                    style={styles.modalButton}
+                  />
+                </View>
+              </View>
+            </Modal>
+          ) : (
+            showTimePicker.type && (
+              <DateTimePicker
+                value={
+                  showTimePicker.type === 'usualStart' ? usualStartTime :
+                  showTimePicker.type === 'usualEnd' ? usualEndTime :
+                  showTimePicker.dateIndex !== null && selectedDates[showTimePicker.dateIndex]
+                    ? (showTimePicker.type === 'start' 
+                        ? selectedDates[showTimePicker.dateIndex].startTime
+                        : selectedDates[showTimePicker.dateIndex].endTime)
+                    : new Date()
+                }
+                mode="time"
+                display="default"
+                is24Hour={false}
+                onChange={(event, date) => {
+                  if (date && event.type !== 'dismissed') {
+                    if (showTimePicker.type === 'usualStart') {
+                      setUsualStartTime(date);
+                      setSelectedDates(prev => prev.map(d => {
+                        const newDate = new Date(d.date);
+                        newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                        return { ...d, startTime: newDate };
+                      }));
+                    } else if (showTimePicker.type === 'usualEnd') {
+                      setUsualEndTime(date);
+                      setSelectedDates(prev => prev.map(d => {
+                        const newDate = new Date(d.date);
+                        newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                        return { ...d, endTime: newDate };
+                      }));
+                    } else if (showTimePicker.type === 'start' || showTimePicker.type === 'end') {
+                      const updatedDates = [...selectedDates];
+                      if (showTimePicker.dateIndex !== null && updatedDates[showTimePicker.dateIndex]) {
+                        const newTime = new Date(updatedDates[showTimePicker.dateIndex].date);
+                        newTime.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                        updatedDates[showTimePicker.dateIndex] = {
+                          ...updatedDates[showTimePicker.dateIndex],
+                          [showTimePicker.type === 'start' ? 'startTime' : 'endTime']: newTime,
+                        };
+                        setSelectedDates(updatedDates);
+                      }
+                    }
+                    setShowTimePicker({ type: null, dateIndex: null });
+                  }
+                }}
+              />
+            )
+          )
+        )}
+      </Modal>
     </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -900,6 +1152,68 @@ const styles = StyleSheet.create({
   },
   dateTimePicker: {
     marginBottom: 0,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  timeInputContainer: {
+    flex: 1,
+  },
+  timeLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
+    marginBottom: 8,
+  },
+  timeButton: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  timeButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#2f2f2f',
+  },
+  calendarButton: {
+    marginTop: 8,
+  },
+  modalContent: {
+    padding: 20,
+  },
+  modalScrollContent: {
+    paddingBottom: 40,
+  },
+  modalFieldContainer: {
+    marginBottom: 24,
+  },
+  fieldHint: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  modalActions: {
+    marginTop: 8,
+  },
+  modalButton: {
+    marginBottom: 12,
+  },
+  iosPickerActions: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  timePickerModalContent: {
+    padding: 20,
+    minHeight: 280,
   },
   eventsSection: {
     width: '100%',

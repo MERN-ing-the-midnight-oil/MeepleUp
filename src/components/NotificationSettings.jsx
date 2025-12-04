@@ -223,9 +223,9 @@ const NotificationSettings = () => {
       {/* Game Marking Notification */}
       <View style={styles.settingItem}>
         <View style={styles.settingContent}>
-          <Text style={styles.settingLabel}>Game Title Marking</Text>
+          <Text style={styles.settingLabel}>Game Talk</Text>
           <Text style={styles.settingDescription}>
-            Get notified when other users mark interest on your game titles
+            Get notified when someone in your MeepleUp comments on one of your games
           </Text>
         </View>
         <Switch

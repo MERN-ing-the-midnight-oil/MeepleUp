@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import storage from '../utils/storage';
 import { useAuth } from './AuthContext';
-import { wordlist } from '../utils/wordlist';
+import { wordList1, wordList2, wordList3 } from '../utils/wordlist';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { notifyNearbyUsersOfNewPublicMeepleUp, notifyMeepleUpMembers } from '../utils/notifications';
@@ -27,12 +27,12 @@ const CONTACT_STATUS = {
 const STORAGE_KEY = 'meepleup_events';
 
 const generateJoinCode = () => {
-  const words = [];
-  for (let i = 0; i < 3; i++) {
-    const randomIndex = Math.floor(Math.random() * wordlist.length);
-    words.push(wordlist[randomIndex]);
-  }
-  return words.join(' ');
+  // Select one word from each list: word1, word2, word3
+  const word1Index = Math.floor(Math.random() * wordList1.length);
+  const word2Index = Math.floor(Math.random() * wordList2.length);
+  const word3Index = Math.floor(Math.random() * wordList3.length);
+  
+  return `${wordList1[word1Index]} ${wordList2[word2Index]} ${wordList3[word3Index]}`;
 };
 
 const normalizeMember = (member, organizerId, fallbackDate) => {
@@ -110,6 +110,9 @@ const normalizeEvent = (event) => {
     organizerId,
     description: event.description || '',
     scheduledFor: event.scheduledFor || event.nextDate || '',
+    eventDates: event.eventDates || undefined,
+    usualStartTime: event.usualStartTime || undefined,
+    usualEndTime: event.usualEndTime || undefined,
     createdAt,
     joinCode: event.joinCode || generateJoinCode(),
     generalLocation,
@@ -282,6 +285,16 @@ export const EventsProvider = ({ children }) => {
               organizerId: firestoreData.organizerId || null,
               description: firestoreData.description || '',
               scheduledFor: firestoreData.scheduledFor || firestoreData.nextEventDate || '',
+              eventDates: firestoreData.eventDates ? firestoreData.eventDates.map(ed => ({
+                date: ed.date?.toDate?.()?.toISOString() || ed.date,
+                startTime: ed.startTime?.toDate?.()?.toISOString() || ed.startTime,
+                endTime: ed.endTime?.toDate?.()?.toISOString() || ed.endTime,
+                location: ed.location || firestoreData.location?.name || '',
+                exactLocation: ed.exactLocation || firestoreData.location?.address || '',
+                note: ed.note || '',
+              })) : undefined,
+              usualStartTime: firestoreData.usualStartTime?.toDate?.()?.toISOString() || firestoreData.usualStartTime,
+              usualEndTime: firestoreData.usualEndTime?.toDate?.()?.toISOString() || firestoreData.usualEndTime,
               createdAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
               joinCode: firestoreData.joinCode || '',
               generalLocation: firestoreData.location?.name || '',
@@ -398,6 +411,19 @@ export const EventsProvider = ({ children }) => {
               address: baseEvent.exactLocation || '',
             },
             scheduledFor: baseEvent.scheduledFor || null,
+            eventDates: eventData.eventDates ? eventData.eventDates.map(ed => ({
+              date: firebase.firestore.Timestamp.fromDate(new Date(ed.date)),
+              startTime: firebase.firestore.Timestamp.fromDate(new Date(ed.startTime)),
+              endTime: firebase.firestore.Timestamp.fromDate(new Date(ed.endTime)),
+              location: ed.location || '',
+              exactLocation: ed.exactLocation || '',
+              note: ed.note || '',
+            })) : undefined,
+            usualStartTime: eventData.usualStartTime || undefined,
+            usualEndTime: eventData.usualEndTime || undefined,
+            nextEventDate: baseEvent.eventDates && baseEvent.eventDates.length > 0
+              ? firebase.firestore.Timestamp.fromDate(new Date(baseEvent.eventDates[0].date))
+              : (baseEvent.scheduledFor ? firebase.firestore.Timestamp.fromDate(new Date(baseEvent.scheduledFor)) : null),
             type: eventData.recurring?.enabled ? 'recurring' : 'single',
             frequency: eventData.recurring?.frequency || null,
             memberIds: baseEvent.members.map(m => m.userId).filter(Boolean),
@@ -1087,6 +1113,15 @@ export const EventsProvider = ({ children }) => {
       if (scheduleUpdates.scheduledFor !== undefined) {
         updates.scheduledFor = scheduleUpdates.scheduledFor;
       }
+      if (scheduleUpdates.eventDates !== undefined) {
+        updates.eventDates = scheduleUpdates.eventDates;
+      }
+      if (scheduleUpdates.usualStartTime !== undefined) {
+        updates.usualStartTime = scheduleUpdates.usualStartTime;
+      }
+      if (scheduleUpdates.usualEndTime !== undefined) {
+        updates.usualEndTime = scheduleUpdates.usualEndTime;
+      }
       if (scheduleUpdates.generalLocation !== undefined) {
         updates.generalLocation = scheduleUpdates.generalLocation;
       }
@@ -1107,6 +1142,32 @@ export const EventsProvider = ({ children }) => {
             firestoreUpdates.nextEventDate = scheduleUpdates.scheduledFor
               ? firebase.firestore.Timestamp.fromDate(new Date(scheduleUpdates.scheduledFor))
               : null;
+          }
+
+          if (scheduleUpdates.eventDates !== undefined) {
+            // Store eventDates as an array of objects with timestamps, locations, and notes
+            firestoreUpdates.eventDates = scheduleUpdates.eventDates.map(ed => ({
+              date: firebase.firestore.Timestamp.fromDate(new Date(ed.date)),
+              startTime: firebase.firestore.Timestamp.fromDate(new Date(ed.startTime)),
+              endTime: firebase.firestore.Timestamp.fromDate(new Date(ed.endTime)),
+              location: ed.location || '',
+              exactLocation: ed.exactLocation || '',
+              note: ed.note || '',
+            }));
+            // Also set nextEventDate to the first date for backward compatibility
+            if (scheduleUpdates.eventDates.length > 0) {
+              firestoreUpdates.nextEventDate = firebase.firestore.Timestamp.fromDate(
+                new Date(scheduleUpdates.eventDates[0].date)
+              );
+            }
+          }
+
+          if (scheduleUpdates.usualStartTime !== undefined) {
+            firestoreUpdates.usualStartTime = scheduleUpdates.usualStartTime;
+          }
+
+          if (scheduleUpdates.usualEndTime !== undefined) {
+            firestoreUpdates.usualEndTime = scheduleUpdates.usualEndTime;
           }
 
           if (scheduleUpdates.generalLocation !== undefined || scheduleUpdates.exactLocation !== undefined) {

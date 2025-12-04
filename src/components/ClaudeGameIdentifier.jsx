@@ -1381,33 +1381,24 @@ const ClaudeGameIdentifier = ({
       }
 
       const candidate = gameCandidates.find((item) => item.id === candidateId);
-      if (!candidate || candidate.status === 'confirmed') {
+      if (!candidate) {
         return;
       }
 
+      // Allow editing even if confirmed - user might want to correct a misidentified game
       if (__DEV__) {
         console.log('[Correction Modal] Opening modal for candidate:', candidateId);
       }
 
-      // Set up the correction modal with the current candidate's title
-      // This will search for similar games and show them in a carousel
-      // Use searchedTitle if available (from no_match), otherwise use bggData name or claudeTitle
-      const searchQuery = candidate.searchedTitle || candidate.bggData?.name || candidate.claudeTitle || '';
+      // User is editing because the current title is wrong, so don't auto-search
+      // Clear the query and let them enter the correct title
       setCorrectionCandidate(candidate);
-      setCorrectionQuery(searchQuery);
+      setCorrectionQuery('');
       setCorrectionSuggestions([]);
       setCorrectionError(null);
       setIsCorrectionModalVisible(true);
-
-      // Automatically trigger search for similar games after modal opens
-      if (searchQuery.trim()) {
-        // Use setTimeout to ensure modal is visible before searching
-        setTimeout(() => {
-          handleCorrectionSearch(searchQuery);
-        }, 300);
-      }
     },
-    [gameCandidates, handleCorrectionSearch]
+    [gameCandidates]
   );
 
   const handleConfirmCandidate = useCallback(
@@ -1685,7 +1676,7 @@ const ClaudeGameIdentifier = ({
         setGameCandidates((prev) =>
           prev.map((candidate) => {
             if (candidate.id === correctionCandidate.id) {
-              return {
+              const updatedCandidate = {
                 ...candidate,
                 claudeTitle: suggestion.name,
                 bggStatus: 'matched',
@@ -1700,6 +1691,11 @@ const ClaudeGameIdentifier = ({
                 // Preserve styling if it exists
                 // Styling removed - we use BGG thumbnails instead
               };
+              
+              // If the game was confirmed and has a collectionRecordId, we should update the collection
+              // For now, preserve the status - user can reconfirm if needed
+              // Preserve status and collectionRecordId
+              return updatedCandidate;
             }
             return candidate;
           })
@@ -2389,14 +2385,24 @@ const ClaudeGameIdentifier = ({
               <View style={[styles.statusBadge, styles.statusBadgeConfirmed]}>
                 <Text style={styles.statusBadgeText}>Confirmed</Text>
               </View>
-              <Pressable
-                style={styles.undoButton}
-                onPress={() => handleUndoConfirm(candidate.id)}
-                accessibilityRole="button"
-                accessibilityLabel={`Undo confirmation for ${title}`}
-              >
-                <Text style={styles.undoButtonText}>Undo</Text>
-              </Pressable>
+              <View style={styles.confirmedActionsRow}>
+                <Pressable
+                  style={styles.editButtonConfirmed}
+                  onPress={() => handleViewSimilarGames(candidate.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${title}`}
+                >
+                  <Text style={styles.editButtonText}>Edit</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.undoButton}
+                  onPress={() => handleUndoConfirm(candidate.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Undo confirmation for ${title}`}
+                >
+                  <Text style={styles.undoButtonText}>Undo</Text>
+                </Pressable>
+              </View>
             </View>
           ) : null}
         </View>
@@ -3199,8 +3205,25 @@ const styles = StyleSheet.create({
   confirmedStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: 12,
     gap: 8,
+  },
+  confirmedActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editButtonConfirmed: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#4a90e2',
+  },
+  editButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   undoButton: {
     paddingVertical: 6,

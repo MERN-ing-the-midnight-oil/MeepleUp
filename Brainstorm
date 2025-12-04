@@ -1,4 +1,17 @@
 Have an "agent" in meeple up that can tell you about games in terms of other games you own, and also it can suggest games based on who is at a meetup. If you click on a game, AI will tell you about the game in terms of games that everyone has played. (e.g. this game is like "Gems" the game you played with erik last month)
 
+Auto reccomend times and places for board game night
 
 
+add socials sharing in app
+add automated flyer print
+improve three word codes. 
+
+
+add Firebase Native Google Sign-In SDK when I'm done devloping with expo Go. Also add sign in with apple
+
+The OLD Limit (Promo Codes)	The CURRENT Limit (Offer Codes)
+Product Type	Paid App Downloads OR In-App Purchases (IAP)	Auto-Renewable Subscriptions
+"One-Time Use" Limit	100 codes per App Version or per IAP Product.	Up to 25,000 unique codes per batch.
+Max Quantity	Total of 1,000 codes across all IAPs every 6 months.	1,000,000 redemptions per app, per quarter.
+Expiration	Only 28 days.	Up to 6 months (for One-Time Use Codes).

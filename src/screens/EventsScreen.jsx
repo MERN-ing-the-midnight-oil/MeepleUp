@@ -101,8 +101,8 @@ const EventsScreen = () => {
   };
 
   const handleJoinCodeWordChange = (wordIndex, text) => {
-    // Keep lowercase for word phrases, just trim
-    const trimmed = text.trim().toLowerCase();
+    // Allow any case - normalization happens during comparison
+    const trimmed = text.trim();
     if (wordIndex === 1) {
       setJoinCodeWord1(trimmed);
     } else if (wordIndex === 2) {

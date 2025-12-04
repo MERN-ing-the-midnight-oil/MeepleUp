@@ -1,66 +1,49 @@
-// Word list for generating 3-word join codes
-// Curated from common English words (4-8 characters)
-export const wordlist = [
-  'about', 'above', 'abuse', 'actor', 'acute', 'admit', 'adopt', 'adult', 'after', 'again',
-  'agent', 'agree', 'ahead', 'alarm', 'album', 'alert', 'alien', 'align', 'alike', 'alive',
-  'allow', 'alone', 'along', 'alter', 'among', 'angel', 'anger', 'angle', 'angry', 'apart',
-  'apple', 'apply', 'arena', 'argue', 'arise', 'array', 'arrow', 'aside', 'asset', 'avoid',
-  'awake', 'award', 'aware', 'badly', 'baker', 'bases', 'basic', 'beach', 'began', 'begin',
-  'being', 'below', 'bench', 'billy', 'birth', 'black', 'blade', 'blame', 'blank', 'blast',
-  'blend', 'bless', 'blind', 'block', 'blood', 'bloom', 'blown', 'blues', 'board', 'boost',
-  'booth', 'bound', 'brain', 'brand', 'brass', 'brave', 'bread', 'break', 'breed', 'brick',
-  'bride', 'brief', 'bring', 'broad', 'broke', 'brook', 'brown', 'brush', 'buddy', 'build',
-  'built', 'bunch', 'burst', 'buyer', 'cable', 'calif', 'camel', 'canal', 'candy', 'canon',
-  'carry', 'catch', 'cause', 'chain', 'chair', 'chaos', 'charm', 'chart', 'chase', 'cheap',
-  'check', 'cheek', 'cheer', 'chess', 'chest', 'chief', 'child', 'china', 'chose', 'chuck',
-  'chunk', 'civic', 'civil', 'claim', 'clash', 'class', 'clean', 'clear', 'click', 'cliff',
-  'climb', 'clock', 'close', 'cloth', 'cloud', 'coach', 'coast', 'could', 'count', 'court',
-  'cover', 'crack', 'craft', 'crash', 'crazy', 'cream', 'creek', 'creep', 'crime', 'crisp',
-  'crowd', 'crown', 'crude', 'curve', 'cycle', 'daily', 'dairy', 'daisy', 'dance', 'dated',
-  'dealt', 'death', 'debut', 'delay', 'delta', 'dense', 'depth', 'doing', 'doubt', 'dozen',
-  'draft', 'drama', 'drank', 'drawn', 'dream', 'dress', 'drill', 'drink', 'drive', 'drove',
-  'drown', 'drugs', 'drunk', 'dying', 'eager', 'early', 'earth', 'eight', 'elbow', 'elder',
-  'elect', 'elite', 'empty', 'enemy', 'enjoy', 'enter', 'entry', 'equal', 'error', 'event',
-  'every', 'exact', 'exist', 'extra', 'faith', 'false', 'fault', 'fiber', 'field', 'fifth',
-  'fifty', 'fight', 'final', 'first', 'fixed', 'flash', 'fleet', 'flesh', 'float', 'flood',
-  'floor', 'flour', 'fluid', 'focus', 'force', 'forth', 'forty', 'forum', 'found', 'frame',
-  'frank', 'fraud', 'fresh', 'front', 'frost', 'fruit', 'fully', 'funny', 'giant', 'given',
-  'glass', 'globe', 'glory', 'glove', 'going', 'grace', 'grade', 'grain', 'grand', 'grant',
-  'grass', 'grave', 'great', 'green', 'gross', 'group', 'grown', 'guard', 'guess', 'guest',
-  'guide', 'guilt', 'habit', 'handy', 'happy', 'harry', 'harsh', 'haste', 'hated', 'haven',
-  'heart', 'heavy', 'hedge', 'hello', 'hence', 'henry', 'hobby', 'honey', 'honor', 'horse',
-  'hotel', 'house', 'human', 'humor', 'hurry', 'image', 'imply', 'index', 'inner', 'input',
-  'issue', 'ivory', 'japan', 'jimmy', 'joint', 'jones', 'judge', 'known', 'label', 'large',
-  'laser', 'later', 'laugh', 'layer', 'learn', 'lease', 'least', 'leave', 'legal', 'lemon',
-  'level', 'light', 'limit', 'links', 'lives', 'local', 'loose', 'lower', 'lucky', 'lunch',
-  'lying', 'magic', 'major', 'maker', 'march', 'maria', 'match', 'maybe', 'mayor', 'meant',
-  'medal', 'media', 'mercy', 'merit', 'metal', 'meter', 'metro', 'might', 'minor', 'minus',
-  'mixed', 'model', 'money', 'month', 'moral', 'motor', 'mount', 'mouse', 'mouth', 'moved',
-  'movie', 'music', 'needs', 'never', 'newly', 'night', 'ninth', 'noble', 'noise', 'north',
-  'noted', 'novel', 'nurse', 'occur', 'ocean', 'offer', 'often', 'order', 'organ', 'other',
-  'ought', 'outer', 'owner', 'paint', 'panel', 'panic', 'paper', 'party', 'patch', 'pause',
-  'peace', 'peter', 'phase', 'phone', 'photo', 'piano', 'piece', 'pilot', 'pitch', 'place',
-  'plain', 'plane', 'plant', 'plate', 'point', 'pound', 'power', 'press', 'price', 'pride',
-  'prime', 'print', 'prior', 'prize', 'proof', 'proud', 'prove', 'queen', 'quick', 'quiet',
-  'quite', 'radio', 'raise', 'range', 'rapid', 'ratio', 'reach', 'react', 'ready', 'realm',
-  'rebel', 'refer', 'relax', 'reply', 'rider', 'ridge', 'right', 'rigid', 'rival', 'river',
-  'robin', 'roger', 'roman', 'rough', 'round', 'route', 'royal', 'rural', 'scale', 'scene',
-  'scope', 'score', 'sense', 'serve', 'seven', 'shall', 'shape', 'share', 'sharp', 'sheet',
-  'shelf', 'shell', 'shift', 'shine', 'shirt', 'shock', 'shoot', 'shore', 'short', 'shown',
-  'sight', 'since', 'sixth', 'sixty', 'sized', 'skill', 'sleep', 'slide', 'small', 'smart',
-  'smell', 'smile', 'smith', 'smoke', 'snake', 'snowy', 'solid', 'solve', 'sorry', 'sound',
-  'south', 'space', 'spare', 'speak', 'speed', 'spend', 'spent', 'split', 'spoke', 'sport',
-  'staff', 'stage', 'stake', 'stand', 'start', 'state', 'steam', 'steel', 'stick', 'still',
-  'stock', 'stone', 'stood', 'store', 'storm', 'story', 'strip', 'stuck', 'study', 'stuff',
-  'style', 'sugar', 'suite', 'super', 'sweet', 'swift', 'swing', 'sword', 'table', 'taken',
-  'taste', 'taxes', 'teach', 'teams', 'teeth', 'terry', 'texas', 'thank', 'theft', 'their',
-  'theme', 'there', 'these', 'thick', 'thing', 'think', 'third', 'those', 'three', 'threw',
-  'throw', 'thumb', 'tiger', 'tight', 'times', 'tired', 'title', 'today', 'token', 'topic',
-  'total', 'touch', 'tough', 'tower', 'track', 'trade', 'trail', 'train', 'treat', 'trend',
-  'trial', 'tribe', 'trick', 'tried', 'tries', 'troop', 'truck', 'truly', 'trunk', 'trust',
-  'truth', 'twice', 'twist', 'tyler', 'uncle', 'under', 'undue', 'union', 'unity', 'until',
-  'upper', 'upset', 'urban', 'usage', 'usual', 'valid', 'value', 'video', 'virus', 'visit',
-  'vital', 'vocal', 'voice', 'waste', 'watch', 'water', 'wheel', 'where', 'which', 'while',
-  'white', 'whole', 'whose', 'woman', 'women', 'world', 'worry', 'worse', 'worst', 'worth',
-  'would', 'wound', 'write', 'wrong', 'wrote', 'young', 'youth', 'yours', 'youth'
+// Word lists for generating 3-word join codes
+// Format: word1 word2 word3
+// Curated word lists for join code generation
+
+// Word List 1: First word
+export const wordList1 = [
+  'lovely', 'ugly', 'strange', 'weird', 'odd', 'bright', 'dull', 'dim', 'clever', 'silly',
+  'wise', 'calm', 'wild', 'gentle', 'fierce', 'kind', 'cruel', 'brave', 'timid', 'bold',
+  'shy', 'proud', 'humble', 'clumsy', 'smooth', 'rough', 'sharp', 'blunt', 'clean', 'dirty',
+  'neat', 'messy', 'plain', 'fancy', 'simple', 'easy', 'safe', 'quiet', 'loud', 'silent',
+  'noisy', 'sweet', 'bitter', 'sour', 'fresh', 'stale', 'clear', 'vague', 'big', 'large',
+  'huge', 'vast', 'great', 'grand', 'small', 'little', 'tiny', 'mini', 'petite', 'slim',
+  'thin', 'skinny', 'narrow', 'thick', 'fat', 'wide', 'broad', 'tall', 'high', 'short',
+  'low', 'long', 'deep', 'old', 'aged', 'young', 'new', 'modern', 'recent', 'current'
 ];
+
+// Word List 2: Second word
+export const wordList2 = [
+  'red', 'blue', 'green', 'gold', 'golden', 'silver', 'black', 'white', 'grey', 'gray',
+  'brown', 'pink', 'purple', 'yellow', 'orange', 'beige', 'tan', 'bronze', 'copper', 'amber',
+  'jade', 'ruby', 'azure', 'ivory', 'ebony', 'french', 'roman', 'greek', 'irish', 'cuban',
+  'indian', 'chinese', 'korean', 'polar', 'lunar', 'solar', 'ocean', 'desert', 'forest', 'metal',
+  'wooden', 'stone', 'silk', 'cotton', 'wool', 'paper', 'glass', 'brick', 'clay', 'iron',
+  'steel', 'brass', 'copper', 'bronze', 'carbon', 'wax', 'ice', 'sand', 'mud', 'rock',
+  'chalk'
+];
+
+// Word List 3: Third word
+export const wordList3 = [
+  'robot', 'drone', 'mech', 'cyborg', 'alien', 'beast', 'dragon', 'wizard', 'witch', 'mage',
+  'knight', 'dwarf', 'elf', 'orc', 'troll', 'goblin', 'ghost', 'demon', 'angel', 'titan',
+  'golem', 'sprite', 'fairy', 'phoenix', 'gryphon', 'hydra', 'kraken', 'wyvern', 'wyrm', 'portal',
+  'crystal', 'orb', 'rune', 'spell', 'wand', 'staff', 'blade', 'sword', 'shield', 'helm',
+  'crown', 'throne', 'tower', 'castle', 'realm', 'world', 'planet', 'star', 'moon', 'comet',
+  'nebula', 'void', 'abyss', 'cosmos', 'galaxy', 'ship', 'craft', 'pod', 'probe', 'fleet',
+  'mecha', 'laser', 'plasma', 'ion', 'photon', 'quark', 'atom', 'matrix', 'core', 'nexus',
+  'grid', 'node', 'vault', 'forge', 'temple', 'shrine', 'altar', 'crypt', 'tomb', 'relic',
+  'artifact', 'gem', 'shard', 'prism', 'seeker', 'hunter', 'raider', 'ranger', 'rogue', 'cleric',
+  'priest', 'sage', 'oracle', 'seer', 'reaver', 'slayer', 'wraith', 'shade', 'specter', 'lich',
+  'warlock', 'sorcerer', 'mystic', 'hermit', 'pilot', 'clone', 'mutant', 'hybrid', 'android', 'avatar',
+  'djinn', 'genie', 'nymph', 'satyr', 'minotaur', 'sphinx', 'chimera', 'pegasus', 'unicorn', 'manticore',
+  'basilisk', 'cockatrice', 'harpy', 'medusa', 'siren', 'banshee', 'revenant', 'vampire', 'werewolf', 'zombie',
+  'ghoul', 'wraith', 'anomaly', 'rift', 'warp', 'gate', 'breach', 'shift', 'flux', 'pulse',
+  'wave', 'signal', 'beacon', 'cipher', 'code', 'key', 'lock', 'seal', 'glyph', 'sigil',
+  'mark', 'emblem', 'crest', 'banner', 'signet'
+];
+
+// Legacy export for backward compatibility (deprecated)
+export const wordlist = [...wordList1, ...wordList2, ...wordList3];

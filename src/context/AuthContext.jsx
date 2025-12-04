@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import storage from '../utils/storage';
 import firebase, { auth, db } from '../config/firebase';
 
@@ -325,6 +326,164 @@ export const AuthProvider = ({ children }) => {
     
     setUser(mapUser(credential.user, profile));
     return credential.user;
+  };
+
+  const signInWithGoogle = async () => {
+    try {
+      let credential;
+
+      if (Platform.OS === 'web') {
+        // Web: Use Firebase's Google Auth Provider with popup
+        const provider = new firebase.auth.GoogleAuthProvider();
+        // Request additional scopes if needed
+        provider.addScope('profile');
+        provider.addScope('email');
+        
+        credential = await auth.signInWithPopup(provider);
+      } else {
+        // Native: Use expo-auth-session for OAuth flow
+        const { makeRedirectUri, ResponseType, startAsync } = await import('expo-auth-session');
+        
+        // Google OAuth configuration
+        const redirectUri = makeRedirectUri({
+          useProxy: true,
+        });
+
+        const request = {
+          clientId: '177622732549-7b4p8i1c5gopt58uamjlbrmlo56vtppf.apps.googleusercontent.com',
+          scopes: ['openid', 'profile', 'email'],
+          responseType: ResponseType.Code,
+          redirectUri,
+        };
+
+        const discovery = {
+          authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+          tokenEndpoint: 'https://oauth2.googleapis.com/token',
+          revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
+        };
+
+        const result = await startAsync(request, discovery);
+
+        if (result.type !== 'success') {
+          throw new Error('Google sign-in was cancelled or failed');
+        }
+
+        // Exchange authorization code for tokens
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            client_id: request.clientId,
+            code: result.params.code,
+            grant_type: 'authorization_code',
+            redirect_uri: redirectUri,
+          }),
+        });
+
+        if (!tokenResponse.ok) {
+          throw new Error('Failed to exchange authorization code for tokens');
+        }
+
+        const tokens = await tokenResponse.json();
+        
+        if (!tokens.id_token) {
+          throw new Error('No ID token received from Google');
+        }
+
+        // Sign in with Firebase using the Google credential
+        const googleCredential = firebase.auth.GoogleAuthProvider.credential(tokens.id_token);
+        credential = await auth.signInWithCredential(googleCredential);
+      }
+
+      if (!credential || !credential.user) {
+        throw new Error('Failed to sign in with Google');
+      }
+
+      // Check if this is a new user or existing user
+      const isNewUser = credential.additionalUserInfo?.isNewUser || false;
+
+      // Try to load profile from Firestore
+      let profile = null;
+      if (db) {
+        try {
+          const userDoc = await db.collection('users').doc(credential.user.uid).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            profile = {
+              name: userData.name || credential.user.displayName || '',
+              bio: userData.bio || '',
+              bggUsername: userData.bggUsername || '',
+              location: userData.location || '',
+              zipcode: userData.zipcode || userData.location || '',
+              notificationPreferences: userData.notificationPreferences || {
+                meepleupChanges: true,
+                meepleupChangesEmail: false,
+                newPublicMeepleups: true,
+                newPublicMeepleupsEmail: false,
+                gameMarking: true,
+                gameMarkingEmail: false,
+                nearbyMeepleupDistance: 25,
+              },
+            };
+            // Save to local storage as backup
+            await storage.setItem(PROFILE_STORAGE_KEY(credential.user.uid), JSON.stringify(profile));
+          }
+        } catch (firestoreError) {
+          console.error('Error loading from Firestore on Google sign-in:', firestoreError);
+        }
+      }
+
+      // If new user, create profile in Firestore
+      if (isNewUser && db) {
+        try {
+          const userRef = db.collection('users').doc(credential.user.uid);
+          const defaultProfile = {
+            id: credential.user.uid,
+            email: credential.user.email,
+            name: credential.user.displayName || '',
+            bio: '',
+            bggUsername: '',
+            zipcode: '',
+            avatarUrl: credential.user.photoURL || '',
+            createdAt: firebase.firestore.Timestamp.now(),
+            updatedAt: firebase.firestore.Timestamp.now(),
+            notificationPreferences: {
+              meepleupChanges: true,
+              newPublicMeepleups: true,
+              gameMarking: true,
+              nearbyMeepleupDistance: 25,
+            },
+          };
+          await userRef.set(defaultProfile);
+          
+          // Also save to local storage
+          await saveProfile(credential.user.uid, {
+            name: credential.user.displayName || '',
+            bio: '',
+            bggUsername: '',
+            location: '',
+            zipcode: '',
+            notificationPreferences: defaultProfile.notificationPreferences,
+          });
+        } catch (error) {
+          console.error('Error creating Firestore user on Google sign-in:', error);
+        }
+      }
+
+      // Fall back to local storage if Firestore doesn't have it
+      if (!profile) {
+        const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
+        profile = stored ? JSON.parse(stored) : {};
+      }
+
+      setUser(mapUser(credential.user, profile));
+      return credential.user;
+    } catch (error) {
+      console.error('Google sign-in error:', error);
+      throw error;
+    }
   };
 
   const logout = async () => {
@@ -746,6 +905,7 @@ export const AuthProvider = ({ children }) => {
     isEmailVerified: !!user?.emailVerified,
     signup,
     login,
+    signInWithGoogle,
     logout,
     resendVerificationEmail,
     resetPassword,

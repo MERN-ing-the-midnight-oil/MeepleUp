@@ -22,12 +22,18 @@ import firebase from '../config/firebase';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
+import CalendarDatePicker from '../components/common/CalendarDatePicker';
 import GameCard from '../components/GameCard';
 import GameDetailsModal from '../components/GameDetailsModal';
 import { getGameById } from '../services/gameDatabase';
 import { generateIcalEvent, downloadIcalFile, generateGoogleCalendarUrl } from '../utils/icalExport';
 import { formatDate, formatTime } from '../utils/helpers';
+import { getStarRating } from '../utils/gameBadges';
 import { Linking } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
+
+// All game categories in order
+const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
 
 // Platform-specific navigation hooks
 let useNavigationHook;
@@ -53,10 +59,37 @@ if (Platform.OS === 'web') {
 }
 
 const TABS = {
-  SCHEDULE: 'schedule',
+  EVENT: 'event',
   GAMES: 'games',
   DISCUSSION: 'discussion',
-  MEMBERS: 'members',
+};
+
+// Helper function to safely parse date values (handles ISO strings, Firestore Timestamps, Date objects, etc.)
+const safeParseDate = (dateValue) => {
+  if (!dateValue) return null;
+  
+  // If it's already a Date object and valid
+  if (dateValue instanceof Date) {
+    return isNaN(dateValue.getTime()) ? null : dateValue;
+  }
+  
+  // If it's a Firestore Timestamp
+  if (dateValue && typeof dateValue.toDate === 'function') {
+    try {
+      const date = dateValue.toDate();
+      return isNaN(date.getTime()) ? null : date;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  // Try to parse as ISO string or other date string
+  try {
+    const date = new Date(dateValue);
+    return isNaN(date.getTime()) ? null : date;
+  } catch (e) {
+    return null;
+  }
 };
 
 const EventHub = () => {
@@ -81,14 +114,22 @@ const EventHub = () => {
   const { user } = useAuth();
   const { getUserCollection, getEventCollection, syncGamesForUsers, collections } = useCollections();
 
-  const [activeTab, setActiveTab] = useState(TABS.SCHEDULE);
+  const [activeTab, setActiveTab] = useState(TABS.EVENT);
   const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [showEditSchedule, setShowEditSchedule] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
-    scheduledFor: '',
-    generalLocation: '',
-    exactLocation: '',
+    selectedDates: [], // Array of { date: Date, startTime: Date, endTime: Date, location: string, exactLocation: string, note: string }
+    usualStartTime: new Date(new Date().setHours(18, 0, 0, 0)), // Default 6 PM
+    usualEndTime: new Date(new Date().setHours(22, 0, 0, 0)), // Default 10 PM
+    generalLocation: '', // Default location for all dates
+    exactLocation: '', // Default exact location for all dates
   });
+  const [editingDateIndex, setEditingDateIndex] = useState(null);
+  const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'start' | 'end' | 'usualStart' | 'usualEnd', dateIndex: number }
+  const [selectedDateDetail, setSelectedDateDetail] = useState(null); // { date, startTime, endTime, location, exactLocation, note, index }
+  const [highlightedDateIndex, setHighlightedDateIndex] = useState(null); // Index of date to highlight
+  const scheduleScrollRef = useRef(null);
+  const dateEntryPositions = useRef({}); // Map of index to Y position
   const [memberNames, setMemberNames] = useState({});
   const [memberRSVPs, setMemberRSVPs] = useState({});
   const [memberAvatars, setMemberAvatars] = useState({});
@@ -110,6 +151,15 @@ const EventHub = () => {
   const [planningGamesSearchQuery, setPlanningGamesSearchQuery] = useState('');
   const [gameInterests, setGameInterests] = useState({}); // { gameId: { userId: 'bringing' } }
   const [showSelectedGamesList, setShowSelectedGamesList] = useState(true);
+  const [nominatedGames, setNominatedGames] = useState([]); // Array of { gameId, gameName, gameImage, nominatedBy: userId, ratings: { userId: rating } }
+  const [userNominations, setUserNominations] = useState(new Set()); // Set of gameIds user has nominated
+  // Browse and Request state
+  const [selectedAttendeeForBrowse, setSelectedAttendeeForBrowse] = useState(null); // { userId, userName, avatarUrl }
+  const [showAttendeeCollectionModal, setShowAttendeeCollectionModal] = useState(false);
+  const [attendeeCollectionPage, setAttendeeCollectionPage] = useState(1);
+  const [attendeeCategorySortPreference, setAttendeeCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
+  const [enrichedAttendeeGames, setEnrichedAttendeeGames] = useState([]);
+  const GAMES_PER_PAGE = 30;
 
   const event = getEventById(eventId);
   const userId = user?.uid || user?.id || null;
@@ -139,8 +189,49 @@ const EventHub = () => {
   // Initialize schedule form when event loads
   useEffect(() => {
     if (event) {
+      // Parse existing scheduledFor or eventDates
+      let selectedDates = [];
+      const defaultStartTime = new Date(new Date().setHours(18, 0, 0, 0));
+      const defaultEndTime = new Date(new Date().setHours(22, 0, 0, 0));
+      
+      if (event.eventDates && Array.isArray(event.eventDates)) {
+        // New format: array of dates with times and locations
+        selectedDates = event.eventDates.map(ed => {
+          const date = safeParseDate(ed.date);
+          const startTime = safeParseDate(ed.startTime);
+          const endTime = safeParseDate(ed.endTime);
+          return {
+            date: date && !isNaN(date.getTime()) ? date : new Date(),
+            startTime: startTime && !isNaN(startTime.getTime()) ? startTime : defaultStartTime,
+            endTime: endTime && !isNaN(endTime.getTime()) ? endTime : defaultEndTime,
+            location: ed.location || ed.generalLocation || event.generalLocation || '',
+            exactLocation: ed.exactLocation || (event.exactLocation || ''),
+            note: ed.note || '',
+          };
+        });
+      } else if (event.scheduledFor) {
+        // Old format: single date string
+        try {
+          const date = safeParseDate(event.scheduledFor);
+          if (date && !isNaN(date.getTime())) {
+            selectedDates = [{
+              date: date,
+              startTime: date,
+              endTime: new Date(date.getTime() + 4 * 60 * 60 * 1000), // 4 hours later
+              location: event.generalLocation || '',
+              exactLocation: event.exactLocation || '',
+              note: '',
+            }];
+          }
+        } catch (e) {
+          console.error('Error parsing scheduledFor:', e);
+        }
+      }
+      
       setScheduleForm({
-        scheduledFor: event.scheduledFor || '',
+        selectedDates,
+        usualStartTime: event.usualStartTime ? new Date(event.usualStartTime) : defaultStartTime,
+        usualEndTime: event.usualEndTime ? new Date(event.usualEndTime) : defaultEndTime,
         generalLocation: event.generalLocation || '',
         exactLocation: event.exactLocation || '',
       });
@@ -186,6 +277,8 @@ const EventHub = () => {
         }
         
         try {
+          let avatarFound = false;
+          
           // Get from members subcollection (has denormalized userName and rsvpStatus)
           if (event.id) {
             const memberDoc = await db.collection('gamingGroups').doc(event.id)
@@ -199,22 +292,36 @@ const EventHub = () => {
               if (memberData.rsvpStatus) {
                 rsvps[member.userId] = memberData.rsvpStatus;
               }
-              if (memberData.userAvatarUrl) {
+              if (memberData.userAvatarUrl && memberData.userAvatarUrl.trim() !== '') {
                 avatars[member.userId] = memberData.userAvatarUrl;
+                avatarFound = true;
               }
-              continue;
             }
           }
           
-          // Fallback to users collection
-          const userDoc = await db.collection('users').doc(member.userId).get();
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            names[member.userId] = userData.name || userData.email || member.userId;
-            avatars[member.userId] = userData.avatarUrl || null;
-          } else {
-            names[member.userId] = member.userId;
-            avatars[member.userId] = null;
+          // Fallback to users collection if we didn't find avatar in member doc
+          if (!avatarFound || !names[member.userId]) {
+            const userDoc = await db.collection('users').doc(member.userId).get();
+            if (userDoc.exists) {
+              const userData = userDoc.data();
+              if (!names[member.userId]) {
+                names[member.userId] = userData.name || userData.email || member.userId;
+              }
+              if (!avatarFound) {
+                if (userData.avatarUrl && userData.avatarUrl.trim() !== '') {
+                  avatars[member.userId] = userData.avatarUrl;
+                } else {
+                  avatars[member.userId] = null;
+                }
+              }
+            } else {
+              if (!names[member.userId]) {
+                names[member.userId] = member.userId;
+              }
+              if (!avatarFound) {
+                avatars[member.userId] = null;
+              }
+            }
           }
         } catch (error) {
           console.error(`Error fetching data for user ${member.userId}:`, error);
@@ -228,6 +335,10 @@ const EventHub = () => {
         rsvpsCount: Object.keys(rsvps).length,
         avatarsCount: Object.keys(avatars).length,
         userIds: Object.keys(names),
+        avatars: Object.keys(avatars).reduce((acc, userId) => {
+          acc[userId] = avatars[userId] ? 'found' : 'not found';
+          return acc;
+        }, {}),
       });
       setMemberNames(names);
       setMemberRSVPs(prev => {
@@ -310,13 +421,98 @@ const EventHub = () => {
       return;
     }
 
+    if (scheduleForm.selectedDates.length === 0) {
+      Alert.alert('Error', 'Please select at least one date for the event.');
+      return;
+    }
+
     try {
-      await updateEventSchedule(event.id, userId, scheduleForm);
+      // Convert dates to ISO strings for storage
+      const eventDates = scheduleForm.selectedDates.map(d => ({
+        date: d.date.toISOString(),
+        startTime: d.startTime.toISOString(),
+        endTime: d.endTime.toISOString(),
+        location: d.location || scheduleForm.generalLocation || '',
+        exactLocation: d.exactLocation || scheduleForm.exactLocation || '',
+        note: d.note || '',
+      }));
+
+      const updateData = {
+        eventDates,
+        usualStartTime: scheduleForm.usualStartTime.toISOString(),
+        usualEndTime: scheduleForm.usualEndTime.toISOString(),
+        generalLocation: scheduleForm.generalLocation,
+        exactLocation: scheduleForm.exactLocation,
+        // Keep scheduledFor for backward compatibility (use first date)
+        scheduledFor: scheduleForm.selectedDates[0]?.date.toISOString() || '',
+      };
+
+      await updateEventSchedule(event.id, userId, updateData);
       setShowEditSchedule(false);
       Alert.alert('Success', 'Schedule updated successfully.');
     } catch (error) {
       Alert.alert('Error', error.message || 'Failed to update schedule. Please try again.');
       console.error(error);
+    }
+  };
+
+  const handleDatesChange = (dates) => {
+    // Dates are now objects with { date, startTime, endTime, location, exactLocation, note } structure
+    // Ensure new dates get default location values if not set
+    const datesWithLocations = dates.map(d => ({
+      ...d,
+      location: d.location !== undefined ? d.location : scheduleForm.generalLocation,
+      exactLocation: d.exactLocation !== undefined ? d.exactLocation : scheduleForm.exactLocation,
+      note: d.note !== undefined ? d.note : '',
+    }));
+    setScheduleForm({ ...scheduleForm, selectedDates: datesWithLocations });
+  };
+
+  const handleTimeChange = (event, date, type, dateIndex) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker({ type: null, dateIndex: null });
+      if (event.type === 'dismissed') {
+        return;
+      }
+    }
+    
+    if (!date) return;
+    
+    if (type === 'usualStart' || type === 'usualEnd') {
+      // Update usual time
+      setScheduleForm({
+        ...scheduleForm,
+        [type === 'usualStart' ? 'usualStartTime' : 'usualEndTime']: date,
+        // Update all dates that haven't been individually edited
+        selectedDates: scheduleForm.selectedDates.map((d, idx) => {
+          // Only update if this date hasn't been individually edited
+          // For now, we'll update all dates when usual time changes
+          const newDate = new Date(d.date);
+          if (type === 'usualStart') {
+            newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
+            return { ...d, startTime: newDate };
+          } else {
+            newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
+            return { ...d, endTime: newDate };
+          }
+        }),
+      });
+    } else if (type === 'start' || type === 'end') {
+      // Update individual date time
+      const updatedDates = [...scheduleForm.selectedDates];
+      if (dateIndex !== null && updatedDates[dateIndex]) {
+        const newTime = new Date(updatedDates[dateIndex].date);
+        newTime.setHours(date.getHours(), date.getMinutes(), 0, 0);
+        updatedDates[dateIndex] = {
+          ...updatedDates[dateIndex],
+          [type === 'start' ? 'startTime' : 'endTime']: newTime,
+        };
+        setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
+      }
+    }
+    
+    if (Platform.OS === 'ios') {
+      // On iOS, we keep the picker open until user clicks Done
     }
   };
 
@@ -507,11 +703,24 @@ const EventHub = () => {
     return counts;
   };
 
+  // Helper function to get members by RSVP status
+  const getMembersByRSVPStatus = (status) => {
+    return members.filter((member) => {
+      const memberStatus = memberRSVPs[member.userId] || null;
+      return memberStatus === status;
+    });
+  };
+
+  // Helper function to check if avatar URL is valid
+  const isValidAvatarUrl = (url) => {
+    return url && typeof url === 'string' && url.trim() !== '';
+  };
+
   const rsvpCounts = getRSVPCounts();
   const currentUserRSVP = memberRSVPs[userId] || null;
 
-  // Schedule Tab Component
-  const ScheduleTab = () => {
+  // Event Tab Component (combined Schedule and Members)
+  const EventTab = () => {
     if (!event) {
       return (
         <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
@@ -523,7 +732,92 @@ const EventHub = () => {
     }
     
     return (
-      <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
+      <ScrollView 
+        ref={scheduleScrollRef}
+        style={styles.tabContent} 
+        contentContainerStyle={styles.tabContentContainer}
+      >
+        {/* Members Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Members ({members.length})</Text>
+          {members.length === 0 ? (
+            <Text style={styles.sectionCopy}>
+              No members yet. Invite trusted players to join.
+            </Text>
+          ) : (
+            members.map((member) => {
+              const displayName = memberNames[member.userId] || member.userId;
+              const rsvpStatus = memberRSVPs[member.userId] || null;
+              const isCurrentUser = member.userId === userId;
+              const avatarUrl = memberAvatars[member.userId];
+              const hasValidAvatar = isValidAvatarUrl(avatarUrl);
+
+              return (
+                <View key={member.userId} style={styles.memberCard}>
+                  <View style={styles.memberAvatarContainer}>
+                    {hasValidAvatar ? (
+                      <Image 
+                        source={{ uri: avatarUrl }} 
+                        style={styles.memberAvatar}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.memberAvatarPlaceholder}>
+                        <Text style={styles.memberAvatarInitial}>
+                          {displayName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.memberInfo}>
+                    <Text style={styles.memberName}>
+                      {member.role === 'organizer' ? '👑 ' : ''}{displayName}
+                      {isCurrentUser && ' (You)'}
+                    </Text>
+                    <Text style={styles.memberRole}>
+                      {member.role === 'organizer' ? 'Organizer' : 'Member'}
+                    </Text>
+                    {rsvpStatus && (
+                      <Text style={styles.memberRSVP}>
+                        RSVP: {getRSVPStatusLabel(rsvpStatus)}
+                      </Text>
+                    )}
+                  </View>
+                  {isOrganizer && !isCurrentUser && member.role !== 'organizer' && (
+                    <TouchableOpacity
+                      style={styles.removeMemberButton}
+                      onPress={() => {
+                        Alert.alert(
+                          'Remove Member?',
+                          `Are you sure you want to remove ${displayName} from this MeepleUp?`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Remove',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await leaveEvent(event.id, member.userId);
+                                  Alert.alert('Member Removed', `${displayName} has been removed from the MeepleUp.`);
+                                } catch (error) {
+                                  Alert.alert('Error', 'Failed to remove member. Please try again.');
+                                  console.error(error);
+                                }
+                              },
+                            },
+                          ],
+                        );
+                      }}
+                    >
+                      <Text style={styles.removeMemberText}>Remove</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })
+          )}
+        </View>
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Event Details</Text>
@@ -539,22 +833,111 @@ const EventHub = () => {
         
         <View style={styles.scheduleInfo}>
           <Text style={styles.scheduleLabel}>Date & Time</Text>
-          <Text style={styles.scheduleValue}>
-            {event.scheduledFor
-              ? `${formatDate(event.scheduledFor)} at ${formatTime(event.scheduledFor)}`
-              : 'Date and time to be announced'}
-          </Text>
-        </View>
-
-        <View style={styles.scheduleInfo}>
-          <Text style={styles.scheduleLabel}>Location</Text>
-          <Text style={styles.scheduleValue}>
-            {event.generalLocation || 'Organizer will confirm'}
-          </Text>
-          {isMember && event.exactLocation && (
-            <Text style={[styles.scheduleValue, styles.highlight]}>
-              Exact location: {event.exactLocation}
-            </Text>
+          {event.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0 ? (
+            <View>
+              {event.eventDates.map((ed, index) => {
+                const date = safeParseDate(ed.date);
+                const startTime = safeParseDate(ed.startTime);
+                const endTime = safeParseDate(ed.endTime);
+                
+                if (!date || isNaN(date.getTime())) return null;
+                
+                const dateStr = formatDate(date.toISOString());
+                let timeStr = '';
+                if (startTime && !isNaN(startTime.getTime()) && endTime && !isNaN(endTime.getTime())) {
+                  timeStr = `${formatTime(startTime.toISOString())} - ${formatTime(endTime.toISOString())}`;
+                } else if (startTime && !isNaN(startTime.getTime())) {
+                  timeStr = formatTime(startTime.toISOString());
+                }
+                
+                const location = ed.location || ed.generalLocation || event.generalLocation || '';
+                const exactLocation = ed.exactLocation || (isMember ? event.exactLocation : null);
+                const note = ed.note || '';
+                
+                return (
+                  <View
+                    key={index}
+                    onLayout={(event) => {
+                      const { y } = event.nativeEvent.layout;
+                      dateEntryPositions.current[index] = y;
+                    }}
+                  >
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.dateTimeEntry,
+                        pressed && styles.dateTimeEntryPressed,
+                        highlightedDateIndex === index && styles.dateTimeEntryHighlighted,
+                      ]}
+                      onPress={() => {
+                        setSelectedDateDetail({
+                          date,
+                          startTime,
+                          endTime,
+                          location,
+                          exactLocation,
+                          note,
+                          index,
+                        });
+                        setHighlightedDateIndex(index);
+                        // Scroll to this date entry
+                        setTimeout(() => {
+                          const position = dateEntryPositions.current[index];
+                          if (position !== undefined && scheduleScrollRef.current) {
+                            scheduleScrollRef.current.scrollTo({
+                              y: Math.max(0, position - 20), // Add some padding from top
+                              animated: true,
+                            });
+                          }
+                        }, 100);
+                        // Clear highlight after 3 seconds
+                        setTimeout(() => {
+                          setHighlightedDateIndex(null);
+                        }, 3000);
+                      }}
+                    >
+                      <Text style={styles.scheduleValue}>
+                        {dateStr}{timeStr ? ` (${timeStr})` : ''}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          ) : event.scheduledFor ? (
+            <Pressable
+              style={({ pressed }) => [
+                pressed && styles.dateTimeEntryPressed,
+              ]}
+              onPress={() => {
+                const date = safeParseDate(event.scheduledFor);
+                if (date && !isNaN(date.getTime())) {
+                  const startTime = safeParseDate(event.scheduledFor);
+                  setSelectedDateDetail({
+                    date,
+                    startTime: startTime && !isNaN(startTime.getTime()) ? startTime : null,
+                    endTime: null,
+                    location: event.generalLocation || '',
+                    exactLocation: isMember ? (event.exactLocation || '') : null,
+                    note: '',
+                    index: 0,
+                  });
+                }
+              }}
+            >
+              <Text style={styles.scheduleValue}>
+                {(() => {
+                  const date = safeParseDate(event.scheduledFor);
+                  if (!date || isNaN(date.getTime())) {
+                    return 'Date and time to be announced';
+                  }
+                  const dateStr = formatDate(date.toISOString());
+                  const timeStr = formatTime(date.toISOString());
+                  return `${dateStr} (${timeStr})`;
+                })()}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.scheduleValue}>Date and time to be announced</Text>
           )}
         </View>
 
@@ -606,7 +989,7 @@ const EventHub = () => {
         </View>
       )}
 
-      {isMember && !isOrganizer && (
+      {isMember && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>RSVP</Text>
           <Text style={styles.sectionCopy}>
@@ -633,27 +1016,8 @@ const EventHub = () => {
               style={styles.rsvpButton}
             />
           </View>
-
-          <View style={styles.rsvpSummary}>
-            <Text style={styles.rsvpSummaryTitle}>RSVP Summary</Text>
-            <Text style={styles.rsvpSummaryItem}>
-              Going: {rsvpCounts.going}
-            </Text>
-            <Text style={styles.rsvpSummaryItem}>
-              Maybe: {rsvpCounts.maybe}
-            </Text>
-            <Text style={styles.rsvpSummaryItem}>
-              Can't Make It: {rsvpCounts['not-going']}
-            </Text>
-            {rsvpCounts.none > 0 && (
-              <Text style={styles.rsvpSummaryItem}>
-                Not Responded: {rsvpCounts.none}
-              </Text>
-            )}
-          </View>
         </View>
       )}
-
 
       </ScrollView>
     );
@@ -1566,6 +1930,114 @@ const EventHub = () => {
     }
   }, [event?.id]); // ONLY when event ID changes
 
+  // Sync collection for selected attendee when Browse and Request modal opens
+  useEffect(() => {
+    if (!showAttendeeCollectionModal || !selectedAttendeeForBrowse || !syncGamesForUsers) return;
+    
+    const attendeeId = selectedAttendeeForBrowse.userId;
+    if (attendeeId && attendeeId !== userId) {
+      console.log('[EventHub] Syncing collection for attendee:', attendeeId);
+      syncGamesForUsers([attendeeId]);
+    }
+  }, [showAttendeeCollectionModal, selectedAttendeeForBrowse, syncGamesForUsers, userId]);
+
+  // Enrich attendee games with category data when modal opens
+  useEffect(() => {
+    if (!showAttendeeCollectionModal || !selectedAttendeeForBrowse) {
+      setEnrichedAttendeeGames([]);
+      return;
+    }
+
+    const attendeeGames = collections[selectedAttendeeForBrowse.userId] || [];
+    if (attendeeGames.length === 0) {
+      setEnrichedAttendeeGames([]);
+      return;
+    }
+
+    const enrichGames = async () => {
+      const enriched = await Promise.all(
+        attendeeGames.map(async (game) => {
+          if (game.bggId) {
+            try {
+              const bggData = await getGameById(game.bggId);
+              if (bggData) {
+                const rating = bggData.average ? getStarRating(bggData.average) : 0;
+                const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
+                                      bggData.familyGamesRank ? 'Family' :
+                                      bggData.partyGamesRank ? 'Party' :
+                                      bggData.wargamesRank ? 'War' :
+                                      bggData.thematicRank ? 'Thematic' :
+                                      bggData.abstractsRank ? 'Abstract' :
+                                      bggData.childrensGamesRank ? 'Children' :
+                                      bggData.cgsRank ? 'CCG' : 'Other';
+                return {
+                  ...game,
+                  _bggData: bggData,
+                  _rating: rating,
+                  _primaryCategory: primaryCategory,
+                };
+              }
+            } catch (error) {
+              console.error(`[EventHub] Error loading BGG data for game:`, error);
+            }
+          }
+          return {
+            ...game,
+            _rating: 0,
+            _primaryCategory: 'Other',
+          };
+        })
+      );
+      setEnrichedAttendeeGames(enriched);
+    };
+
+    enrichGames();
+  }, [showAttendeeCollectionModal, selectedAttendeeForBrowse, collections]);
+
+  // Group enriched attendee games by category
+  const attendeeGamesByCategory = useMemo(() => {
+    const grouped = {};
+    ALL_CATEGORIES.forEach(cat => {
+      grouped[cat] = [];
+    });
+
+    enrichedAttendeeGames.forEach(game => {
+      const category = game._primaryCategory || 'Other';
+      if (grouped[category]) {
+        grouped[category].push(game);
+      } else {
+        grouped['Other'].push(game);
+      }
+    });
+
+    // Sort each category based on user preference
+    ALL_CATEGORIES.forEach(cat => {
+      const games = grouped[cat] || [];
+      const sortMode = attendeeCategorySortPreference[cat] || 'rating';
+      
+      games.sort((a, b) => {
+        if (sortMode === 'rating') {
+          return (b._rating || 0) - (a._rating || 0);
+        } else {
+          return (a.title || '').localeCompare(b.title || '');
+        }
+      });
+    });
+
+    return grouped;
+  }, [enrichedAttendeeGames, attendeeCategorySortPreference]);
+
+  // Toggle category sort preference for attendee games
+  const toggleAttendeeCategorySort = useCallback((category) => {
+    setAttendeeCategorySortPreference(prev => {
+      const current = prev[category] || 'rating';
+      return {
+        ...prev,
+        [category]: current === 'rating' ? 'title' : 'rating'
+      };
+    });
+  }, []);
+
   // RSVP key - stable string (used by Schedule tab)
   const rsvpKey = useMemo(() => {
     return Object.keys(memberRSVPs)
@@ -1710,14 +2182,34 @@ const EventHub = () => {
 
   // Handler to open game details modal
   const handleOpenGameDetails = useCallback(async (game) => {
-    setSelectedGame(game);
-    setIsGameModalOpen(true);
+    console.log('[EventHub] handleOpenGameDetails called with game:', game?.title, 'game object:', game);
+    if (!game) {
+      console.warn('[EventHub] handleOpenGameDetails called with null/undefined game');
+      return;
+    }
+    
+    // Close attendee collection modal if open (to avoid modal conflicts)
+    if (showAttendeeCollectionModal) {
+      console.log('[EventHub] Closing attendee collection modal');
+      setShowAttendeeCollectionModal(false);
+      // Small delay to ensure modal closes before opening new one
+      setTimeout(() => {
+        setSelectedGame(game);
+        setIsGameModalOpen(true);
+        console.log('[EventHub] Set selectedGame and isGameModalOpen to true');
+      }, 100);
+    } else {
+      setSelectedGame(game);
+      setIsGameModalOpen(true);
+      console.log('[EventHub] Set selectedGame and isGameModalOpen to true');
+    }
     
     // Load BGG data if available
     if (game.bggId) {
       try {
         const bggData = await getGameById(game.bggId);
         setSelectedGameBggData(bggData);
+        console.log('[EventHub] Loaded BGG data for game:', game.title);
       } catch (error) {
         console.error('Error loading BGG data:', error);
         setSelectedGameBggData(null);
@@ -1725,12 +2217,13 @@ const EventHub = () => {
     } else {
       setSelectedGameBggData(null);
     }
-  }, []);
+  }, [showAttendeeCollectionModal]);
 
   // Games Tab Component - Rebuilt from scratch
   // Memoize to prevent recreation on every render (which causes modal to remount)
   const GamesTab = React.useMemo(() => {
     const GamesTabComponent = () => {
+      // Use the shared handleOpenGameDetails from parent scope
     // Get user's games
     const myGames = userId ? (collections[userId] || []) : [];
 
@@ -1771,17 +2264,118 @@ const EventHub = () => {
       }
       
       // Compute expected games lazily
-      const expected = [];
-      const seenGameIds = new Set();
-      
-      // Get all games that are marked as "bringing"
-      Object.keys(gameInterests).forEach(gameId => {
-        const statuses = gameInterests[gameId] || {};
-        const bringingUserIds = Object.keys(statuses).filter(
-          uid => statuses[uid] === 'bringing'
-        );
+      const computeExpectedGames = async () => {
+        const expected = [];
+        const seenGameIds = new Set();
         
-        if (bringingUserIds.length > 0 && !seenGameIds.has(gameId)) {
+        // Helper to fetch game from Firestore
+        const fetchGameFromFirestore = async (gameId, userId) => {
+          if (!db || !gameId || !userId) return null;
+          
+          const gameIdStr = String(gameId);
+          
+          try {
+            // First try by document ID (most direct) - convert gameId to string
+            const gameDocById = await db.collection('userGames').doc(userId)
+              .collection('games')
+              .doc(gameIdStr)
+              .get();
+            
+            if (gameDocById.exists) {
+              const data = gameDocById.data();
+              const docId = gameDocById.id;
+              const title = data.title || data.gameName || null;
+              if (title && title !== 'Unknown Game') {
+                console.log(`[ExpectedGames] Found game by docId ${gameIdStr} for user ${userId}: ${title}`);
+                return {
+                  id: docId,
+                  title: title,
+                  bggId: data.bggId || null,
+                  image: data.image || data.bggImage || null,
+                  thumbnail: data.thumbnail || data.bggThumbnail || null,
+                  bggThumbnail: data.bggThumbnail || data.thumbnail || null,
+                  description: data.description || '',
+                  yearPublished: data.yearPublished || null,
+                  minPlayers: data.minPlayers || null,
+                  maxPlayers: data.maxPlayers || null,
+                  playingTime: data.playingTime || null,
+                  bggRating: data.bggRating || null,
+                  userRating: data.userRating || null,
+                  numplays: data.numplays || null,
+                  teachingStatus: data.teachingStatus || null,
+                  addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                  source: data.source || 'manual',
+                  updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                };
+              }
+            }
+            
+            // If document ID didn't work, try by bggId (if gameId looks like a number)
+            // Try both as string and as number
+            const gameIdNum = !isNaN(parseInt(gameIdStr)) ? parseInt(gameIdStr) : null;
+            if (gameIdNum !== null) {
+              // Try as string first
+              let gameDoc = await db.collection('userGames').doc(userId)
+                .collection('games')
+                .where('bggId', '==', gameIdStr)
+                .limit(1)
+                .get();
+              
+              // If not found, try as number
+              if (gameDoc.empty) {
+                gameDoc = await db.collection('userGames').doc(userId)
+                  .collection('games')
+                  .where('bggId', '==', gameIdNum)
+                  .limit(1)
+                  .get();
+              }
+              
+              if (!gameDoc.empty) {
+                const data = gameDoc.docs[0].data();
+                const docId = gameDoc.docs[0].id;
+                const title = data.title || data.gameName || null;
+                if (title && title !== 'Unknown Game') {
+                  console.log(`[ExpectedGames] Found game by bggId ${gameIdStr} for user ${userId}: ${title}`);
+                  return {
+                    id: docId,
+                    title: title,
+                    bggId: data.bggId || gameIdNum,
+                    image: data.image || data.bggImage || null,
+                    thumbnail: data.thumbnail || data.bggThumbnail || null,
+                    bggThumbnail: data.bggThumbnail || data.thumbnail || null,
+                    description: data.description || '',
+                    yearPublished: data.yearPublished || null,
+                    minPlayers: data.minPlayers || null,
+                    maxPlayers: data.maxPlayers || null,
+                    playingTime: data.playingTime || null,
+                    bggRating: data.bggRating || null,
+                    userRating: data.userRating || null,
+                    numplays: data.numplays || null,
+                    teachingStatus: data.teachingStatus || null,
+                    addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                    source: data.source || 'manual',
+                    updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                  };
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`Error fetching game ${gameIdStr} from Firestore for user ${userId}:`, error);
+          }
+          return null;
+        };
+        
+        // Get all games that are marked as "bringing"
+        const gamePromises = Object.keys(gameInterests).map(async (gameId) => {
+          const statuses = gameInterests[gameId] || {};
+          const bringingUserIds = Object.keys(statuses).filter(
+            uid => statuses[uid] === 'bringing'
+          );
+          
+          if (bringingUserIds.length === 0 || seenGameIds.has(gameId)) {
+            return null;
+          }
+          
           // Find the game in any user's collection
           // Match by BGG ID first, then fallback to game.id
           let gameData = null;
@@ -1806,8 +2400,74 @@ const EventHub = () => {
             });
           }
           
-          if (gameData) {
-            expected.push({
+          // If not found in collections, fetch from Firestore (from the first user bringing it)
+          if (!gameData && db && bringingUserIds.length > 0) {
+            // Try to fetch from each user bringing it until we find it
+            for (const fetchFromUserId of bringingUserIds) {
+              gameData = await fetchGameFromFirestore(gameId, fetchFromUserId);
+              if (gameData && gameData.title && gameData.title !== 'Unknown Game' && gameData.title !== `Game ${gameId}`) {
+                console.log(`[ExpectedGames] Found game ${gameId} for user ${fetchFromUserId}:`, gameData.title);
+                break;
+              }
+            }
+            
+            // If still no good data, try fetching all games from the user and matching
+            if ((!gameData || !gameData.title || gameData.title === 'Unknown Game' || gameData.title === `Game ${gameId}`) && bringingUserIds.length > 0) {
+              try {
+                const fetchFromUserId = bringingUserIds[0];
+                console.log(`[ExpectedGames] Fetching all games for user ${fetchFromUserId} to find gameId ${gameId}`);
+                const allGamesSnapshot = await db.collection('userGames').doc(fetchFromUserId)
+                  .collection('games')
+                  .get();
+                
+                if (!allGamesSnapshot.empty) {
+                  console.log(`[ExpectedGames] Found ${allGamesSnapshot.docs.length} games for user ${fetchFromUserId}`);
+                  for (const doc of allGamesSnapshot.docs) {
+                    const data = doc.data();
+                    const docId = doc.id;
+                    const dataBggId = data.bggId || null;
+                    
+                    // Match by document ID or bggId (convert to string for comparison)
+                    const gameIdStr = String(gameId);
+                    const docIdStr = String(docId);
+                    const dataBggIdStr = dataBggId ? String(dataBggId) : null;
+                    
+                    if (docIdStr === gameIdStr || dataBggIdStr === gameIdStr) {
+                      console.log(`[ExpectedGames] Matched game! docId: ${docId}, bggId: ${dataBggId}, title: ${data.title || data.gameName}`);
+                      gameData = {
+                        id: docId,
+                        title: data.title || data.gameName || 'Unknown Game',
+                        bggId: dataBggId || (typeof gameId === 'string' && !isNaN(parseInt(gameId)) ? gameId : null),
+                        image: data.image || data.bggImage || null,
+                        thumbnail: data.thumbnail || data.bggThumbnail || null,
+                        bggThumbnail: data.bggThumbnail || data.thumbnail || null,
+                        description: data.description || '',
+                        yearPublished: data.yearPublished || null,
+                        minPlayers: data.minPlayers || null,
+                        maxPlayers: data.maxPlayers || null,
+                        playingTime: data.playingTime || null,
+                        bggRating: data.bggRating || null,
+                        userRating: data.userRating || null,
+                        numplays: data.numplays || null,
+                        teachingStatus: data.teachingStatus || null,
+                        addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                        source: data.source || 'manual',
+                        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                      };
+                      break;
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error(`Error fetching all games for user ${bringingUserIds[0]}:`, error);
+              }
+            }
+          }
+          
+          // Only add game if we have valid game data with a real title
+          if (gameData && gameData.title && gameData.title !== 'Unknown Game' && gameData.title !== `Game ${gameId}`) {
+            seenGameIds.add(gameId);
+            return {
               ...gameData,
               bringingBy: bringingUserIds.map(uid => ({
                 userId: uid,
@@ -1815,14 +2475,72 @@ const EventHub = () => {
                   ? (user?.name || user?.email || userId) 
                   : (memberNames[uid] || uid),
               })),
-            });
-            seenGameIds.add(gameId);
+            };
+          } else {
+            console.warn(`[ExpectedGames] Could not find valid game data for gameId ${gameId}. gameData:`, gameData);
           }
-        }
-      });
+          
+          return null;
+        });
+        
+        const results = await Promise.all(gamePromises);
+        const validGames = results.filter(g => g !== null);
+        setExpectedGames(validGames);
+      };
       
-      setExpectedGames(expected);
+      computeExpectedGames();
     }, [gameInterests, event?.id, members, collections, userId, user, memberNames]);
+
+    // Load nominations from Firestore
+    useEffect(() => {
+      if (!event?.id || !db || !isMember) return;
+      
+      const loadNominations = async () => {
+        try {
+          const nominationsSnapshot = await db.collection('gamingGroups').doc(event.id)
+            .collection('nominations').get();
+          
+          const nominationsMap = new Map();
+          const userNoms = new Set();
+          
+          nominationsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const gameId = data.gameId;
+            
+            if (!gameId) return;
+            
+            // Track user's nominations
+            if (data.nominatedBy === userId) {
+              userNoms.add(gameId);
+            }
+            
+            // Initialize or update nomination
+            if (!nominationsMap.has(gameId)) {
+              nominationsMap.set(gameId, {
+                gameId,
+                gameName: data.gameName || 'Unknown Game',
+                gameImage: data.gameImage || null,
+                nominatedBy: data.nominatedBy,
+                ratings: {},
+              });
+            }
+            
+            // Add rating if this is a rating document (has userId and rating)
+            if (data.userId && data.rating !== undefined) {
+              const nomination = nominationsMap.get(gameId);
+              nomination.ratings[data.userId] = data.rating;
+            }
+          });
+          
+          setNominatedGames(Array.from(nominationsMap.values()));
+          setUserNominations(userNoms);
+        } catch (error) {
+          console.error('Error loading nominations:', error);
+        }
+      };
+      
+      loadNominations();
+    }, [event?.id, db, isMember, userId]);
 
     const toggleGameSelection = (gameId) => {
       setSelectedGamesForBringing(prev => {
@@ -1856,6 +2574,176 @@ const EventHub = () => {
           </View>
         )}
 
+        {/* Browse and Nominate Section */}
+        {isMember && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Browse and Nominate</Text>
+            <Text style={styles.sectionCopy}>
+              Browse other attendee's collections and nominate up to 5 games you'd like to play at the next game night.
+            </Text>
+            <View style={styles.attendeesGrid}>
+              {members.map((member) => {
+                const memberId = member.userId;
+                const memberName = memberNames[memberId] || memberId;
+                const avatarUrl = memberAvatars[memberId] || null;
+                const memberGames = collections[memberId] || [];
+                const gameCount = memberGames.length;
+                const isCurrentUser = memberId === userId;
+                
+                // Skip current user
+                if (isCurrentUser) return null;
+                
+                return (
+                  <TouchableOpacity
+                    key={memberId}
+                    style={styles.attendeeCard}
+                    onPress={() => {
+                      setSelectedAttendeeForBrowse({
+                        userId: memberId,
+                        userName: memberName,
+                        avatarUrl: avatarUrl,
+                      });
+                      setAttendeeCollectionPage(1);
+                      setShowAttendeeCollectionModal(true);
+                    }}
+                  >
+                    {avatarUrl ? (
+                      <Image 
+                        source={{ uri: avatarUrl }} 
+                        style={styles.attendeeAvatar}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.attendeeAvatarPlaceholder}>
+                        <Text style={styles.attendeeAvatarInitial}>
+                          {memberName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={styles.attendeeName} numberOfLines={1}>
+                      {memberName}
+                    </Text>
+                    <Text style={styles.attendeeGameCount}>
+                      {gameCount} {gameCount === 1 ? 'game' : 'games'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {members.filter(m => m.userId !== userId).length === 0 && (
+              <Text style={styles.sectionCopy}>
+                No other attendees yet. Invite people to join this MeepleUp!
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* Nominated to Play Next Section */}
+        {isMember && nominatedGames.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Nominated to Play Next</Text>
+            <Text style={styles.sectionCopy}>
+              Games nominated for the next game night. Rate each game to help decide what to play.
+            </Text>
+            {nominatedGames.map((nomination) => {
+              const gameId = nomination.gameId;
+              const userRating = nomination.ratings?.[userId] ?? null;
+              
+              return (
+                <View key={gameId} style={styles.nominatedGameItem}>
+                  <View style={styles.nominatedGameHeader}>
+                    {nomination.gameImage ? (
+                      <Image 
+                        source={{ uri: nomination.gameImage }} 
+                        style={styles.nominatedGameThumbnail}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.nominatedGameThumbnailPlaceholder}>
+                        <Text style={styles.nominatedGameThumbnailText}>
+                          {(nomination.gameName || '?').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.nominatedGameInfo}>
+                      <Text style={styles.nominatedGameTitle}>{nomination.gameName}</Text>
+                      <Text style={styles.nominatedGameSubtext}>
+                        Nominated by {memberNames[nomination.nominatedBy] || nomination.nominatedBy}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  {/* Rating Buttons */}
+                  <View style={styles.ratingButtonsContainer}>
+                    {[
+                      { value: 3, label: '⭐⭐⭐', text: 'Really want' },
+                      { value: 2, label: '⭐⭐', text: 'Want' },
+                      { value: 1, label: '⭐', text: 'Fine with it' },
+                      { value: 0, label: '⚪', text: 'Not sure' },
+                      { value: -1, label: '👎', text: 'Rather not' },
+                    ].map(({ value, label, text }) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={[
+                          styles.ratingButton,
+                          userRating === value && styles.ratingButtonActive
+                        ]}
+                        onPress={async () => {
+                          if (!event?.id || !db || !userId) return;
+                          
+                          try {
+                            const ratingDoc = {
+                              gameId,
+                              gameName: nomination.gameName,
+                              gameImage: nomination.gameImage,
+                              userId,
+                              rating: value,
+                              nominatedBy: nomination.nominatedBy,
+                              updatedAt: firebase.firestore.Timestamp.now(),
+                            };
+                            
+                            await db.collection('gamingGroups').doc(event.id)
+                              .collection('nominations')
+                              .doc(`${gameId}_${userId}`)
+                              .set(ratingDoc, { merge: true });
+                            
+                            // Update local state
+                            setNominatedGames(prev => prev.map(n => {
+                              if (n.gameId === gameId) {
+                                return {
+                                  ...n,
+                                  ratings: { ...n.ratings, [userId]: value }
+                                };
+                              }
+                              return n;
+                            }));
+                          } catch (error) {
+                            console.error('Error saving rating:', error);
+                            Alert.alert('Error', 'Failed to save rating. Please try again.');
+                          }
+                        }}
+                      >
+                        <Text style={[
+                          styles.ratingButtonLabel,
+                          userRating === value && styles.ratingButtonLabelActive
+                        ]}>
+                          {label}
+                        </Text>
+                        <Text style={[
+                          styles.ratingButtonText,
+                          userRating === value && styles.ratingButtonTextActive
+                        ]}>
+                          {text}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* Expected Games Section */}
         {isMember && expectedGames.length > 0 && (
           <View style={styles.section}>
@@ -1867,6 +2755,9 @@ const EventHub = () => {
               // Use BGG ID as primary identifier, fallback to game.id
               const gameId = game.bggId || game.id;
               const isUserBringing = game.bringingBy?.some(b => b.userId === userId) || false;
+              // Check multiple possible thumbnail fields
+              const thumbnail = game.bggThumbnail || game.thumbnail || game.image || null;
+              
               return (
                 <View key={gameId} style={styles.expectedGameItem}>
                   <TouchableOpacity
@@ -1874,11 +2765,53 @@ const EventHub = () => {
                     style={styles.expectedGameContent}
                     activeOpacity={0.7}
                   >
+                    {/* Game Thumbnail */}
+                    {thumbnail ? (
+                      <Image 
+                        source={{ uri: thumbnail }} 
+                        style={styles.expectedGameThumbnail}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.expectedGameThumbnailPlaceholder}>
+                        <Text style={styles.expectedGameThumbnailPlaceholderText}>
+                          {(game.title || '?').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {/* Game Title */}
                     <Text style={styles.expectedGameTitle}>{game.title || 'Unknown Game'}</Text>
+                    
+                    {/* Bringing By */}
                     {game.bringingBy && game.bringingBy.length > 0 && (
-                      <Text style={styles.expectedGameBringingBy}>
-                        Bringing: {game.bringingBy.map(b => b.userName).join(', ')}
-                      </Text>
+                      <View style={styles.expectedGameBringingSection}>
+                        <Text style={styles.expectedGameBringingLabel}>Bringing:</Text>
+                        <View style={styles.expectedGameBringingAvatars}>
+                          {game.bringingBy.map((b) => {
+                            const avatarUrl = memberAvatars[b.userId] || null;
+                            return (
+                              <View key={b.userId} style={styles.expectedGameAvatarContainer}>
+                                {avatarUrl ? (
+                                  <Image 
+                                    source={{ uri: avatarUrl }} 
+                                    style={styles.expectedGameAvatar}
+                                  />
+                                ) : (
+                                  <View style={styles.expectedGameAvatarPlaceholder}>
+                                    <Text style={styles.expectedGameAvatarInitial}>
+                                      {(b.userName || b.userId).charAt(0).toUpperCase()}
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                        <Text style={styles.expectedGameBringingNames}>
+                          {game.bringingBy.map(b => b.userName).join(', ')}
+                        </Text>
+                      </View>
                     )}
                   </TouchableOpacity>
                   {isUserBringing && (
@@ -1943,6 +2876,11 @@ const EventHub = () => {
                     ? 'No games found matching your search.' 
                     : 'No games in your collection yet.'}
             </Text>
+            <Button
+              onPress={() => setShowPlanningGamesModal(false)}
+              label="Back"
+              style={styles.emptyStateBackButton}
+            />
               </View>
           ) : (
               <FlatList
@@ -2005,73 +2943,6 @@ const EventHub = () => {
     return GamesTabComponent;
   }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, members, user, memberNames, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
 
-  // Members Tab Component
-  const MembersTab = () => (
-    <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Members ({members.length})</Text>
-        {members.length === 0 ? (
-          <Text style={styles.sectionCopy}>
-            No members yet. Invite trusted players to join.
-          </Text>
-        ) : (
-          members.map((member) => {
-            const displayName = memberNames[member.userId] || member.userId;
-            const rsvpStatus = memberRSVPs[member.userId] || null;
-            const isCurrentUser = member.userId === userId;
-
-            return (
-              <View key={member.userId} style={styles.memberCard}>
-                <View style={styles.memberInfo}>
-                  <Text style={styles.memberName}>
-                    {member.role === 'organizer' ? '👑 ' : ''}{displayName}
-                    {isCurrentUser && ' (You)'}
-                  </Text>
-                  <Text style={styles.memberRole}>
-                    {member.role === 'organizer' ? 'Organizer' : 'Member'}
-                  </Text>
-                  {rsvpStatus && (
-                    <Text style={styles.memberRSVP}>
-                      RSVP: {getRSVPStatusLabel(rsvpStatus)}
-                    </Text>
-                  )}
-                </View>
-                {isOrganizer && !isCurrentUser && member.role !== 'organizer' && (
-                  <TouchableOpacity
-                    style={styles.removeMemberButton}
-                    onPress={() => {
-                      Alert.alert(
-                        'Remove Member?',
-                        `Are you sure you want to remove ${displayName} from this MeepleUp?`,
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Remove',
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                await leaveEvent(event.id, member.userId);
-                                Alert.alert('Member Removed', `${displayName} has been removed from the MeepleUp.`);
-                              } catch (error) {
-                                Alert.alert('Error', 'Failed to remove member. Please try again.');
-                                console.error(error);
-                              }
-                            },
-                          },
-                        ],
-                      );
-                    }}
-                  >
-                    <Text style={styles.removeMemberText}>Remove</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })
-        )}
-      </View>
-    </ScrollView>
-  );
 
   return (
     <KeyboardAvoidingView
@@ -2087,11 +2958,11 @@ const EventHub = () => {
         {/* Tabs */}
         <View style={styles.tabs}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === TABS.SCHEDULE && styles.tabActive]}
-          onPress={() => setActiveTab(TABS.SCHEDULE)}
+          style={[styles.tab, activeTab === TABS.EVENT && styles.tabActive]}
+          onPress={() => setActiveTab(TABS.EVENT)}
         >
-          <Text style={[styles.tabText, activeTab === TABS.SCHEDULE && styles.tabTextActive]}>
-            Schedule
+          <Text style={[styles.tabText, activeTab === TABS.EVENT && styles.tabTextActive]}>
+            Event
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -2099,7 +2970,7 @@ const EventHub = () => {
           onPress={() => setActiveTab(TABS.GAMES)}
         >
           <Text style={[styles.tabText, activeTab === TABS.GAMES && styles.tabTextActive]}>
-            Games
+            Gameplan
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -2110,59 +2981,405 @@ const EventHub = () => {
             Discussion
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === TABS.MEMBERS && styles.tabActive]}
-          onPress={() => setActiveTab(TABS.MEMBERS)}
-        >
-          <Text style={[styles.tabText, activeTab === TABS.MEMBERS && styles.tabTextActive]}>
-            Members
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {/* Tab Content */}
-      {activeTab === TABS.SCHEDULE && <ScheduleTab />}
+      {activeTab === TABS.EVENT && <EventTab />}
       {activeTab === TABS.GAMES && <GamesTab />}
       {activeTab === TABS.DISCUSSION && DiscussionTab}
-      {activeTab === TABS.MEMBERS && <MembersTab />}
 
       {/* Game Details Modal */}
-      <GameDetailsModal
-        game={selectedGame}
-        isOpen={isGameModalOpen}
+      {selectedGame && (
+        <GameDetailsModal
+          game={selectedGame}
+          isOpen={isGameModalOpen}
+          onClose={() => {
+            console.log('[EventHub] Closing game details modal');
+            setIsGameModalOpen(false);
+            setSelectedGame(null);
+            setSelectedGameBggData(null);
+          }}
+          preloadedBggData={selectedGameBggData}
+          eventMembers={isMember ? members : null}
+          memberNames={memberNames}
+          eventId={event?.id}
+        />
+      )}
+
+      {/* Attendee Collection Modal */}
+      <Modal
+        isOpen={showAttendeeCollectionModal}
         onClose={() => {
-          setIsGameModalOpen(false);
-          setSelectedGame(null);
-          setSelectedGameBggData(null);
+          setShowAttendeeCollectionModal(false);
+          setSelectedAttendeeForBrowse(null);
+          setAttendeeCollectionPage(1);
         }}
-        preloadedBggData={selectedGameBggData}
-        showTeachingStatus={true}
-        eventMembers={isMember ? members : null}
-        memberNames={memberNames}
-      />
+        title={selectedAttendeeForBrowse?.userName || 'Collection'}
+        fullScreen={true}
+      >
+        {selectedAttendeeForBrowse && (() => {
+          const attendeeGames = collections[selectedAttendeeForBrowse.userId] || [];
+          
+          return (
+            <View style={styles.fullScreenModalContent}>
+              {/* Attendee Header */}
+              <View style={styles.attendeeModalHeader}>
+                {selectedAttendeeForBrowse.avatarUrl ? (
+                  <Image 
+                    source={{ uri: selectedAttendeeForBrowse.avatarUrl }} 
+                    style={styles.attendeeModalAvatar}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.attendeeModalAvatarPlaceholder}>
+                    <Text style={styles.attendeeModalAvatarInitial}>
+                      {selectedAttendeeForBrowse.userName.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.attendeeModalName}>
+                  {selectedAttendeeForBrowse.userName}'s Collection
+                </Text>
+                <Text style={styles.attendeeModalGameCount}>
+                  {attendeeGames.length} {attendeeGames.length === 1 ? 'game' : 'games'}
+                </Text>
+                <Text style={styles.attendeeModalHint}>
+                  Tap any game to view details. Use "Nominate Game" to nominate up to 5 games for the next game night.
+                </Text>
+              </View>
+
+              {/* Games by Category */}
+              {enrichedAttendeeGames.length === 0 ? (
+                <View style={styles.emptyStateContainer}>
+                  <Text style={styles.sectionCopy}>
+                    No games in this collection yet.
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView 
+                  style={styles.fullScreenGamesList}
+                  contentContainerStyle={styles.categoryContent}
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                >
+                  {ALL_CATEGORIES.map((category) => {
+                    const games = attendeeGamesByCategory[category] || [];
+                    const sortMode = attendeeCategorySortPreference[category] || 'rating';
+                    return (
+                      <View key={category} style={styles.categorySection}>
+                        <View style={styles.categoryHeader}>
+                          <Text style={styles.categoryTitle}>
+                            {category} ({games.length})
+                          </Text>
+                          {games.length > 0 && (
+                            <View style={styles.categorySortToggleContainer}>
+                              <Pressable
+                                style={[styles.categorySortToggleOption, sortMode === 'rating' && styles.categorySortToggleOptionActive]}
+                                onPress={() => setAttendeeCategorySortPreference(prev => ({ ...prev, [category]: 'rating' }))}
+                              >
+                                <Text style={[styles.categorySortToggleOptionText, sortMode === 'rating' && styles.categorySortToggleOptionTextActive]}>
+                                  ⭐ Rating
+                                </Text>
+                              </Pressable>
+                              <Pressable
+                                style={[styles.categorySortToggleOption, sortMode === 'title' && styles.categorySortToggleOptionActive]}
+                                onPress={() => setAttendeeCategorySortPreference(prev => ({ ...prev, [category]: 'title' }))}
+                              >
+                                <Text style={[styles.categorySortToggleOptionText, sortMode === 'title' && styles.categorySortToggleOptionTextActive]}>
+                                  A-Z
+                                </Text>
+                              </Pressable>
+                            </View>
+                          )}
+                        </View>
+                        {games.length > 0 ? (
+                          <View style={styles.categoryGamesGrid}>
+                            {games.map((game, index) => {
+                              const gameId = game.bggId || game.id;
+                              const isNominatedByUser = userNominations.has(gameId);
+                              const isNominatedByAnyone = nominatedGames.some(n => n.gameId === gameId);
+                              const canNominate = userNominations.size < 5 || isNominatedByUser;
+                              
+                              return (
+                                <View key={game.bggId || game.id || `game-${index}`} style={styles.gameCardWithNominate}>
+                                  <Pressable
+                                    onPress={() => {
+                                      console.log('[EventHub] Opening game details for:', game.title);
+                                      // Add owner info to the game object so GameDetailsModal can identify the owner
+                                      const gameWithOwner = {
+                                        ...game,
+                                        _ownerId: selectedAttendeeForBrowse.userId,
+                                        _ownerName: selectedAttendeeForBrowse.userName,
+                                      };
+                                      handleOpenGameDetails(gameWithOwner);
+                                    }}
+                                    style={styles.selectableGameCardWrapper}
+                                    activeOpacity={0.7}
+                                  >
+                                    <GameCard 
+                                      game={game} 
+                                      preloadedBggData={game._bggData}
+                                      disableModal={true}
+                                    />
+                                  </Pressable>
+                                  {!isNominatedByUser && canNominate && (
+                                    <TouchableOpacity
+                                      style={styles.nominateGameButton}
+                                      onPress={async () => {
+                                        if (!event?.id || !db || !userId) return;
+                                        
+                                        if (userNominations.size >= 5) {
+                                          Alert.alert('Limit Reached', 'You can only nominate up to 5 games. Remove a nomination first to nominate another game.');
+                                          return;
+                                        }
+                                        
+                                        try {
+                                          const nominationDoc = {
+                                            gameId,
+                                            gameName: game.title || 'Unknown Game',
+                                            gameImage: game.image || game.thumbnail || null,
+                                            nominatedBy: userId,
+                                            createdAt: firebase.firestore.Timestamp.now(),
+                                          };
+                                          
+                                          await db.collection('gamingGroups').doc(event.id)
+                                            .collection('nominations')
+                                            .doc(gameId)
+                                            .set(nominationDoc, { merge: true });
+                                          
+                                          // Update local state
+                                          setUserNominations(prev => new Set([...prev, gameId]));
+                                          setNominatedGames(prev => {
+                                            const exists = prev.some(n => n.gameId === gameId);
+                                            if (exists) return prev;
+                                            return [...prev, {
+                                              gameId,
+                                              gameName: game.title || 'Unknown Game',
+                                              gameImage: game.image || game.thumbnail || null,
+                                              nominatedBy: userId,
+                                              ratings: {},
+                                            }];
+                                          });
+                                          
+                                          Alert.alert('Game Nominated', `${game.title || 'Game'} has been nominated!`);
+                                        } catch (error) {
+                                          console.error('Error nominating game:', error);
+                                          Alert.alert('Error', 'Failed to nominate game. Please try again.');
+                                        }
+                                      }}
+                                    >
+                                      <Text style={styles.nominateGameButtonText}>Nominate Game</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                  {isNominatedByUser && (
+                                    <View style={styles.nominatedBadge}>
+                                      <Text style={styles.nominatedBadgeText}>✓ You Nominated This</Text>
+                                    </View>
+                                  )}
+                                  {isNominatedByAnyone && !isNominatedByUser && (
+                                    <View style={styles.nominatedByOthersBadge}>
+                                      <Text style={styles.nominatedByOthersBadgeText}>Already Nominated</Text>
+                                    </View>
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        ) : (
+                          <Text style={styles.emptyCategoryText}>No games in this category</Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+          );
+        })()}
+      </Modal>
 
       {/* Edit Schedule Modal */}
       <Modal
         isOpen={showEditSchedule}
         onClose={() => setShowEditSchedule(false)}
         title="Edit Schedule"
+        fullScreen={true}
       >
-        <View style={styles.modalContent}>
+        <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent}>
+          {/* Usual Time Section */}
           <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Date & Time</Text>
-            <Input
-              value={scheduleForm.scheduledFor}
-              onChangeText={(text) => setScheduleForm({ ...scheduleForm, scheduledFor: text })}
-              placeholder="e.g., 2024-12-25T18:00:00"
-              style={styles.modalInput}
-            />
+            <Text style={styles.fieldLabel}>Usual Time</Text>
             <Text style={styles.fieldHint}>
-              Format: YYYY-MM-DDTHH:mm:ss (e.g., 2024-12-25T18:00:00)
+              Set the default start and end times. These will be used for all selected dates unless you edit individual dates.
             </Text>
+            
+            <View style={styles.timeRow}>
+              <View style={styles.timeInputContainer}>
+                <Text style={styles.timeLabel}>Start Time</Text>
+                <TouchableOpacity
+                  style={styles.timeButton}
+                  onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
+                >
+                  <Text style={styles.timeButtonText}>
+                    {scheduleForm.usualStartTime.toLocaleTimeString('en-US', {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true,
+                    })}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.timeInputContainer}>
+                <Text style={styles.timeLabel}>End Time</Text>
+                <TouchableOpacity
+                  style={styles.timeButton}
+                  onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
+                >
+                  <Text style={styles.timeButtonText}>
+                    {scheduleForm.usualEndTime.toLocaleTimeString('en-US', {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true,
+                    })}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
 
+          {/* Calendar Date Picker */}
           <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>General Location</Text>
+            <Text style={styles.fieldLabel}>Select Event Dates</Text>
+            <Text style={styles.fieldHint}>
+              Scroll through the calendar to see the next 12 months. Long-press a date to select it (highlighted in green). Tap a selected date to view its details.
+            </Text>
+            <CalendarDatePicker
+              selectedDates={scheduleForm.selectedDates}
+              onDatesChange={handleDatesChange}
+              minDate={new Date()}
+              usualStartTime={scheduleForm.usualStartTime}
+              usualEndTime={scheduleForm.usualEndTime}
+              onDateTimeEdit={(dateIndex, timeType) => {
+                // When user taps on a time in the calendar, open the time picker
+                setShowTimePicker({ type: timeType || 'start', dateIndex });
+              }}
+              onDatePress={(dateIndex, dateInfo) => {
+                // When user taps a selected date in the calendar, scroll to it in the main view
+                // First, find the corresponding index in event.eventDates
+                if (event && event.eventDates && Array.isArray(event.eventDates)) {
+                  const dateItem = scheduleForm.selectedDates[dateIndex];
+                  if (dateItem && dateInfo) {
+                    const calendarDate = dateInfo.date || dateItem.date;
+                    const matchingIndex = event.eventDates.findIndex(ed => {
+                      const edDate = safeParseDate(ed.date);
+                      return edDate && calendarDate && 
+                        edDate.getFullYear() === calendarDate.getFullYear() &&
+                        edDate.getMonth() === calendarDate.getMonth() &&
+                        edDate.getDate() === calendarDate.getDate();
+                    });
+                    
+                    if (matchingIndex !== -1) {
+                      const ed = event.eventDates[matchingIndex];
+                      const date = safeParseDate(ed.date);
+                      const startTime = safeParseDate(ed.startTime);
+                      const endTime = safeParseDate(ed.endTime);
+                      const location = ed.location || ed.generalLocation || event.generalLocation || '';
+                      const exactLocation = ed.exactLocation || (isMember ? event.exactLocation : null);
+                      const note = ed.note || '';
+                      
+                      setSelectedDateDetail({
+                        date,
+                        startTime,
+                        endTime,
+                        location,
+                        exactLocation,
+                        note,
+                        index: matchingIndex,
+                      });
+                      setHighlightedDateIndex(matchingIndex);
+                      
+                      // Scroll to this date entry
+                      setTimeout(() => {
+                        const position = dateEntryPositions.current[matchingIndex];
+                        if (position !== undefined && scheduleScrollRef.current) {
+                          scheduleScrollRef.current.scrollTo({
+                            y: Math.max(0, position - 20), // Add some padding from top
+                            animated: true,
+                          });
+                        }
+                      }, 100);
+                      // Clear highlight after 3 seconds
+                      setTimeout(() => {
+                        setHighlightedDateIndex(null);
+                      }, 3000);
+                    }
+                  }
+                }
+              }}
+            />
+          </View>
+
+          {/* Location Fields for Each Date */}
+          {scheduleForm.selectedDates.length > 0 && (
+            <View style={styles.modalFieldContainer}>
+              <Text style={styles.fieldLabel}>Location for Each Date</Text>
+              <Text style={styles.fieldHint}>
+                You can specify different locations for each date, or leave blank to use the default location below.
+              </Text>
+              {scheduleForm.selectedDates.map((dateItem, index) => {
+                const dateStr = dateItem.date.toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                });
+                return (
+                  <View key={index} style={styles.dateLocationContainer}>
+                    <Text style={styles.dateLocationLabel}>{dateStr}</Text>
+                    <Input
+                      value={dateItem.location || ''}
+                      onChangeText={(text) => {
+                        const updatedDates = [...scheduleForm.selectedDates];
+                        updatedDates[index] = { ...updatedDates[index], location: text };
+                        setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
+                      }}
+                      placeholder={`Location (default: ${scheduleForm.generalLocation || 'not set'})`}
+                      style={styles.modalInput}
+                    />
+                    <Input
+                      value={dateItem.exactLocation || ''}
+                      onChangeText={(text) => {
+                        const updatedDates = [...scheduleForm.selectedDates];
+                        updatedDates[index] = { ...updatedDates[index], exactLocation: text };
+                        setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
+                      }}
+                      placeholder={`Exact address (default: ${scheduleForm.exactLocation || 'not set'})`}
+                      style={styles.modalInput}
+                    />
+                    <Input
+                      value={dateItem.note || ''}
+                      onChangeText={(text) => {
+                        const updatedDates = [...scheduleForm.selectedDates];
+                        updatedDates[index] = { ...updatedDates[index], note: text };
+                        setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
+                      }}
+                      placeholder="Optional note for this date"
+                      multiline
+                      style={styles.modalInput}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Default Location Fields */}
+          <View style={styles.modalFieldContainer}>
+            <Text style={styles.fieldLabel}>Default Location</Text>
+            <Text style={styles.fieldHint}>
+              This location will be used for dates that don't have a specific location set above.
+            </Text>
             <Input
               value={scheduleForm.generalLocation}
               onChangeText={(text) => setScheduleForm({ ...scheduleForm, generalLocation: text })}
@@ -2172,7 +3389,7 @@ const EventHub = () => {
           </View>
 
           <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Exact Location</Text>
+            <Text style={styles.fieldLabel}>Default Exact Location</Text>
             <Input
               value={scheduleForm.exactLocation}
               onChangeText={(text) => setScheduleForm({ ...scheduleForm, exactLocation: text })}
@@ -2194,7 +3411,152 @@ const EventHub = () => {
               style={styles.modalButton}
             />
           </View>
-        </View>
+        </ScrollView>
+
+        {/* Time Picker Modal */}
+        {showTimePicker.type && (
+          Platform.OS === 'ios' ? (
+            <Modal
+              isOpen={true}
+              onClose={() => setShowTimePicker({ type: null, dateIndex: null })}
+              title={
+                showTimePicker.type === 'usualStart' ? 'Usual Start Time' :
+                showTimePicker.type === 'usualEnd' ? 'Usual End Time' :
+                showTimePicker.type === 'start' ? 'Start Time' :
+                'End Time'
+              }
+            >
+              <View style={styles.timePickerModalContent}>
+                <DateTimePicker
+                  value={
+                    showTimePicker.type === 'usualStart' ? scheduleForm.usualStartTime :
+                    showTimePicker.type === 'usualEnd' ? scheduleForm.usualEndTime :
+                    showTimePicker.dateIndex !== null && scheduleForm.selectedDates[showTimePicker.dateIndex]
+                      ? (showTimePicker.type === 'start' 
+                          ? scheduleForm.selectedDates[showTimePicker.dateIndex].startTime
+                          : scheduleForm.selectedDates[showTimePicker.dateIndex].endTime)
+                      : new Date()
+                  }
+                  mode="time"
+                  display="spinner"
+                  is24Hour={false}
+                  onChange={(event, date) => {
+                    if (date) {
+                      handleTimeChange(event, date, showTimePicker.type, showTimePicker.dateIndex);
+                    }
+                  }}
+                  style={{ width: '100%', height: 200 }}
+                />
+                <View style={styles.iosPickerActions}>
+                  <Button
+                    label="Done"
+                    onPress={() => setShowTimePicker({ type: null, dateIndex: null })}
+                    style={styles.modalButton}
+                  />
+                </View>
+              </View>
+            </Modal>
+          ) : (
+            showTimePicker.type && (
+              <DateTimePicker
+                value={
+                  showTimePicker.type === 'usualStart' ? scheduleForm.usualStartTime :
+                  showTimePicker.type === 'usualEnd' ? scheduleForm.usualEndTime :
+                  showTimePicker.dateIndex !== null && scheduleForm.selectedDates[showTimePicker.dateIndex]
+                    ? (showTimePicker.type === 'start' 
+                        ? scheduleForm.selectedDates[showTimePicker.dateIndex].startTime
+                        : scheduleForm.selectedDates[showTimePicker.dateIndex].endTime)
+                    : new Date()
+                }
+                mode="time"
+                display="default"
+                is24Hour={false}
+                onChange={(event, date) => {
+                  handleTimeChange(event, date, showTimePicker.type, showTimePicker.dateIndex);
+                }}
+              />
+            )
+          )
+        )}
+      </Modal>
+
+      {/* Date Detail Modal */}
+      <Modal
+        isOpen={selectedDateDetail !== null}
+        onClose={() => setSelectedDateDetail(null)}
+        title="Event Date Details"
+      >
+        {selectedDateDetail && (
+          <View style={styles.dateDetailModalContent}>
+            <View style={styles.dateDetailSection}>
+              <Text style={styles.dateDetailLabel}>Date</Text>
+              <Text style={styles.dateDetailValue}>
+                {formatDate(selectedDateDetail.date.toISOString())}
+              </Text>
+            </View>
+
+            {selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime()) && (
+              <View style={styles.dateDetailSection}>
+                <Text style={styles.dateDetailLabel}>Start Time</Text>
+                <Text style={styles.dateDetailValue}>
+                  {formatTime(selectedDateDetail.startTime.toISOString())}
+                </Text>
+              </View>
+            )}
+
+            {selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime()) && (
+              <View style={styles.dateDetailSection}>
+                <Text style={styles.dateDetailLabel}>End Time</Text>
+                <Text style={styles.dateDetailValue}>
+                  {formatTime(selectedDateDetail.endTime.toISOString())}
+                </Text>
+              </View>
+            )}
+
+            {selectedDateDetail.location && (
+              <View style={styles.dateDetailSection}>
+                <Text style={styles.dateDetailLabel}>Location</Text>
+                <Text style={styles.dateDetailValue}>
+                  {selectedDateDetail.location}
+                </Text>
+              </View>
+            )}
+
+            {isMember && selectedDateDetail.exactLocation && (
+              <View style={styles.dateDetailSection}>
+                <Text style={styles.dateDetailLabel}>Exact Location</Text>
+                <Text style={styles.dateDetailValue}>
+                  {selectedDateDetail.exactLocation}
+                </Text>
+              </View>
+            )}
+
+            {!selectedDateDetail.location && !selectedDateDetail.exactLocation && (
+              <View style={styles.dateDetailSection}>
+                <Text style={styles.dateDetailValue}>
+                  Location to be announced
+                </Text>
+              </View>
+            )}
+
+            {selectedDateDetail.note && (
+              <View style={styles.dateDetailSection}>
+                <Text style={styles.dateDetailLabel}>Note</Text>
+                <Text style={styles.dateDetailValue}>
+                  {selectedDateDetail.note}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.dateDetailActions}>
+              <Button
+                label="Close"
+                onPress={() => setSelectedDateDetail(null)}
+                style={styles.modalButton}
+              />
+            </View>
+          </View>
+        )}
       </Modal>
 
       {/* Edit Pinned Notes Modal */}
@@ -2360,6 +3722,73 @@ const styles = StyleSheet.create({
     color: '#1f4f8c',
     marginTop: 4,
   },
+  dateTimeEntry: {
+    marginBottom: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderRadius: 4,
+  },
+  dateTimeEntryPressed: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+  },
+  dateTimeEntryHighlighted: {
+    backgroundColor: '#e8f5e9',
+    borderWidth: 2,
+    borderColor: '#4caf50',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  exactLocationText: {
+    marginTop: 4,
+    fontSize: 13,
+  },
+  dateLocationContainer: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  dateLocationLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  dateDetailModalContent: {
+    padding: 20,
+  },
+  dateDetailSection: {
+    marginBottom: 20,
+  },
+  dateDetailLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    color: '#666',
+    letterSpacing: 1,
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  dateDetailValue: {
+    fontSize: 16,
+    color: '#2f2f2f',
+    fontWeight: '500',
+  },
+  dateDetailActions: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
   exportButton: {
     marginLeft: 12,
     paddingHorizontal: 12,
@@ -2394,6 +3823,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#444',
     marginBottom: 4,
+  },
+  rsvpSummaryCategory: {
+    marginBottom: 12,
+  },
+  rsvpSummaryAvatars: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    marginLeft: -4,
+  },
+  rsvpSummaryAvatarContainer: {
+    marginLeft: 4,
+    marginBottom: 4,
+  },
+  rsvpSummaryAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  rsvpSummaryAvatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#4a90e2',
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rsvpSummaryAvatarInitial: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
   bold: {
     fontWeight: '600',
@@ -2587,6 +4051,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
   },
+  memberAvatarContainer: {
+    marginRight: 12,
+  },
+  memberAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  memberAvatarPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#4a90e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  memberAvatarInitial: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
   memberInfo: {
     flex: 1,
   },
@@ -2665,6 +4150,85 @@ const styles = StyleSheet.create({
   modalContent: {
     padding: 20,
   },
+  modalScrollContent: {
+    paddingBottom: 40,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  timeInputContainer: {
+    flex: 1,
+  },
+  timeLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
+    marginBottom: 8,
+  },
+  timeButton: {
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  timeButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#2f2f2f',
+  },
+  dateItem: {
+    padding: 12,
+    marginBottom: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  dateItemDate: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2f2f2f',
+    marginBottom: 8,
+  },
+  dateItemTimes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateTimeButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#d45d5d',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  dateTimeButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#d45d5d',
+  },
+  dateTimeSeparator: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  iosPickerActions: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  timePickerModalContent: {
+    padding: 20,
+    minHeight: 280,
+  },
   modalFieldContainer: {
     marginBottom: 24,
   },
@@ -2724,10 +4288,12 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     paddingTop: 0,
+    minHeight: 0, // Important for ScrollView to work properly
   },
   fullScreenGamesList: {
     flex: 1,
     marginBottom: 80, // Space for fixed button
+    minHeight: 0, // Important for ScrollView to work properly
   },
   emptyStateContainer: {
     flex: 1,
@@ -2735,10 +4301,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 40,
   },
+  emptyStateBackButton: {
+    marginTop: 24,
+    minWidth: 120,
+  },
   selectableGameCardWrapper: {
     position: 'relative',
     width: '31%',
     alignSelf: 'flex-start',
+    zIndex: 1,
   },
   selectedBorder: {
     position: 'absolute',
@@ -2842,26 +4413,170 @@ const styles = StyleSheet.create({
   expectedGameItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     padding: 16,
-    marginBottom: 12,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#4a5ec5',
+    marginBottom: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   expectedGameContent: {
     flex: 1,
   },
-  expectedGameTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2f2f2f',
-    marginBottom: 8,
+  expectedGameThumbnail: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 12,
+    backgroundColor: '#f5f5f5',
   },
-  expectedGameBringingBy: {
+  expectedGameThumbnailPlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 12,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  expectedGameThumbnailPlaceholderText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#999',
+  },
+  expectedGameTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2f2f2f',
+    marginBottom: 12,
+  },
+  expectedGameBringingSection: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  expectedGameBringingLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4a5ec5',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  expectedGameBringingAvatars: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    gap: -8,
+  },
+  expectedGameBringingNames: {
     fontSize: 14,
     color: '#666',
+    fontWeight: '500',
+  },
+  expectedGameFeelingsSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  expectedGameFeelingsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4a90e2',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  expectedGameFeelingItem: {
+    marginBottom: 12,
+    padding: 10,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  expectedGameFeelingMember: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  expectedGameFeelingAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  expectedGameFeelingAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#4a90e2',
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  expectedGameFeelingAvatarInitial: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  expectedGameFeelingName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  expectedGameFeelingBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  expectedGameFeelingBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#e8f4fd',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4a90e2',
+  },
+  expectedGameFeelingBadgeText: {
+    fontSize: 12,
+    color: '#4a90e2',
+    fontWeight: '500',
+  },
+  expectedGameAvatarContainer: {
+    marginRight: -8,
+  },
+  expectedGameAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  expectedGameAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#4a5ec5',
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  expectedGameAvatarInitial: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
   expectedGameDeleteButton: {
     width: 28,
@@ -2972,40 +4687,6 @@ const styles = StyleSheet.create({
     color: '#4a90e2',
     fontWeight: '500',
     marginRight: 8,
-  },
-  expectedGameAvatars: {
-    flexDirection: 'row',
-    marginRight: 8,
-  },
-  expectedGameAvatarContainer: {
-    marginRight: -8,
-  },
-  expectedGameAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  expectedGameAvatarPlaceholder: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#4a90e2',
-    borderWidth: 2,
-    borderColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  expectedGameAvatarInitial: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  expectedGameBringingNames: {
-    fontSize: 13,
-    color: '#4a90e2',
-    fontWeight: '500',
   },
   expectedGameOwners: {
     fontSize: 12,
@@ -3152,6 +4833,308 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     gap: 8,
     alignItems: 'flex-start',
+  },
+  attendeesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 12,
+  },
+  attendeeCard: {
+    width: '30%',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  attendeeAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
+  },
+  attendeeAvatarPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#4a90e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  attendeeAvatarInitial: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  attendeeName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  attendeeGameCount: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+  },
+  attendeeModalHeader: {
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  attendeeModalAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 12,
+  },
+  attendeeModalAvatarPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#4a90e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  attendeeModalAvatarInitial: {
+    fontSize: 32,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  attendeeModalName: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  attendeeModalGameCount: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  attendeeModalHint: {
+    fontSize: 12,
+    color: '#4a90e2',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+  paginationControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  categoryContent: {
+    paddingBottom: 10,
+  },
+  categorySection: {
+    marginBottom: 24,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 2,
+    borderBottomColor: '#4a90e2',
+    marginBottom: 12,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  categorySortToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    padding: 2,
+    gap: 0,
+  },
+  categorySortToggleOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 6,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  categorySortToggleOptionActive: {
+    backgroundColor: '#4a90e2',
+  },
+  categorySortToggleOptionText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
+  },
+  categorySortToggleOptionTextActive: {
+    fontWeight: '600',
+    color: '#fff',
+  },
+  categoryGamesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+  },
+  emptyCategoryText: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  nominatedGameItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  nominatedGameHeader: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  nominatedGameThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  nominatedGameThumbnailPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  nominatedGameThumbnailText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#999',
+  },
+  nominatedGameInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  nominatedGameTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  nominatedGameSubtext: {
+    fontSize: 12,
+    color: '#666',
+  },
+  ratingButtonsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  ratingButton: {
+    flex: 1,
+    minWidth: '18%',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ratingButtonActive: {
+    borderColor: '#4a90e2',
+    backgroundColor: '#e8f4fd',
+  },
+  ratingButtonLabel: {
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  ratingButtonLabelActive: {
+    opacity: 1,
+  },
+  ratingButtonText: {
+    fontSize: 10,
+    color: '#666',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  ratingButtonTextActive: {
+    color: '#4a90e2',
+    fontWeight: '600',
+  },
+  gameCardWithNominate: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  nominateGameButton: {
+    backgroundColor: '#4a90e2',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    width: '100%',
+  },
+  nominateGameButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  nominatedBadge: {
+    backgroundColor: '#28a745',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    width: '100%',
+  },
+  nominatedBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  nominatedByOthersBadge: {
+    backgroundColor: '#6c757d',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    width: '100%',
+  },
+  nominatedByOthersBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
 

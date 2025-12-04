@@ -3,6 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
+import { Platform } from 'react-native';
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY || 'AIzaSyAqbf2-S5W-O6zvdnb9zVPiobJXFHazLKU',
@@ -18,9 +19,23 @@ if (!firebase.apps.length) {
 }
 
 export const auth = firebase.auth();
-// Note: Firebase Auth automatically persists authentication state in React Native/Expo
-// using AsyncStorage. Users will remain logged in across app restarts.
-// No explicit persistence configuration is needed for React Native.
+
+// Explicitly set persistence for web (local = persists across browser sessions)
+// React Native/Expo automatically uses AsyncStorage, so no configuration needed
+if (Platform.OS === 'web' && auth.setPersistence) {
+  // For web, explicitly set to 'local' persistence (default, but being explicit)
+  // This ensures users stay logged in across page refreshes and server restarts
+  // Note: 'local' is the default, but we're being explicit for clarity
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
+    console.warn('Error setting auth persistence:', error);
+    // Continue anyway - default behavior should still work
+  });
+}
+
+// Note: 
+// - Web: Uses localStorage (persists across browser sessions)
+// - React Native/Expo: Automatically uses AsyncStorage (persists across app restarts)
+// Users will remain logged in across app restarts in both environments.
 
 export const db = firebase.firestore();
 export const storage = firebase.storage();

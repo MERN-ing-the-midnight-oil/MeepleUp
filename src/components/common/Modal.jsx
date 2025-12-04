@@ -83,6 +83,7 @@ const styles = StyleSheet.create({
     maxHeight: '100%',
     borderRadius: 0,
     padding: 0,
+    minHeight: 0, // Important for ScrollView to work properly
   },
   header: {
     flexDirection: 'row',

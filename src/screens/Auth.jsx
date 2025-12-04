@@ -10,7 +10,7 @@ import { bggLogoColor } from '../components/BGGLogoAssets';
 const Auth = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { login, signup } = useAuth();
+  const { login, signup, signInWithGoogle } = useAuth();
   const mode = route.params?.mode || 'login'; // 'login' or 'register'
   const { width: screenWidth } = Dimensions.get('window');
   const isMobile = screenWidth < 600;
@@ -74,6 +74,21 @@ const Auth = () => {
     } catch (err) {
       setError(err.message || 'An error occurred. Please try again.');
       console.error('Auth error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      await signInWithGoogle();
+      // Navigation will happen automatically via auth state change
+    } catch (err) {
+      setError(err.message || 'Failed to sign in with Google. Please try again.');
+      console.error('Google sign-in error:', err);
     } finally {
       setLoading(false);
     }
@@ -183,6 +198,20 @@ const Auth = () => {
             style={styles.submitButton}
           />
 
+          <View style={styles.dividerContainer}>
+            <View style={styles.divider} />
+            <Text style={styles.dividerText}>OR</Text>
+            <View style={styles.divider} />
+          </View>
+
+          <Button
+            label="Sign in with Google"
+            onPress={handleGoogleSignIn}
+            disabled={loading}
+            variant="outline"
+            style={styles.googleButton}
+          />
+
           <View style={styles.switchContainer}>
             <Text style={styles.switchText}>
               {mode === 'register'
@@ -257,6 +286,27 @@ const styles = StyleSheet.create({
   submitButton: {
     width: '100%',
     marginTop: 8,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+    width: '100%',
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#ddd',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  googleButton: {
+    width: '100%',
+    marginBottom: 8,
   },
   switchContainer: {
     flexDirection: 'row',

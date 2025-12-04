@@ -129,7 +129,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
 
   try {
     return (
-      <View style={styles.card}>
+      <View style={styles.card} pointerEvents={disableModal ? 'box-none' : 'auto'}>
         {/* Delete Button */}
         {onDelete && (
           <Pressable
@@ -170,6 +170,12 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
                 </Text>
               </View>
             )}
+            {/* Crown icon for favorites */}
+            {game.isFavorite && (
+              <View style={styles.crownContainer}>
+                <Text style={styles.crownIcon}>👑</Text>
+              </View>
+            )}
           </View>
 
           {/* Card Content */}
@@ -207,7 +213,6 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
           isOpen={isModalOpen}
           onClose={closeModal}
           preloadedBggData={preloadedBggData}
-          showTeachingStatus={true}
         />
       </View>
     );
@@ -277,6 +282,19 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 140, // Reduced height for smaller cards
     backgroundColor: '#f5f5f5',
+    position: 'relative',
+  },
+  crownContainer: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(255, 215, 0, 0.9)',
+    borderRadius: 12,
+    padding: 4,
+    zIndex: 5,
+  },
+  crownIcon: {
+    fontSize: 16,
   },
   thumbnail: {
     width: '100%',

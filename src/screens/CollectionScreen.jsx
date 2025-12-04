@@ -11,6 +11,9 @@ import { getStarRating } from '../utils/gameBadges';
 // Note: BarcodeScanner has been archived (see src/archive/barcode-scanner/)
 // BGGImport will need to be converted separately if needed
 
+// All game categories in order
+const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
+
 const CollectionScreen = () => {
   console.log('[CollectionScreen] Component rendering');
   
@@ -18,7 +21,8 @@ const CollectionScreen = () => {
   const { user } = useAuth();
   const { collections, getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'import'
-  const [sortBy, setSortBy] = useState('rating'); // 'rating', 'category', 'title'
+  const [sortBy, setSortBy] = useState('category'); // 'rating', 'category', 'title'
+  const [categorySortPreference, setCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   
@@ -135,6 +139,55 @@ const CollectionScreen = () => {
     loadAndSort();
   }, [rawCollection, sortBy]);
 
+  // Group games by category when sortBy is 'category'
+  const gamesByCategory = useMemo(() => {
+    if (sortBy !== 'category') {
+      return {};
+    }
+
+    const grouped = {};
+    ALL_CATEGORIES.forEach(cat => {
+      grouped[cat] = [];
+    });
+
+    sortedCollection.forEach(game => {
+      const category = game._primaryCategory || 'Other';
+      if (grouped[category]) {
+        grouped[category].push(game);
+      } else {
+        grouped['Other'].push(game);
+      }
+    });
+
+    // Sort each category based on user preference
+    ALL_CATEGORIES.forEach(cat => {
+      const games = grouped[cat] || [];
+      const sortMode = categorySortPreference[cat] || 'rating';
+      
+      games.sort((a, b) => {
+        if (sortMode === 'rating') {
+          return (b._rating || 0) - (a._rating || 0);
+        } else {
+          // title sort (A-Z)
+          return (a.title || '').localeCompare(b.title || '');
+        }
+      });
+    });
+
+    return grouped;
+  }, [sortedCollection, sortBy, categorySortPreference]);
+
+  // Toggle category sort preference
+  const toggleCategorySort = useCallback((category) => {
+    setCategorySortPreference(prev => {
+      const current = prev[category] || 'rating';
+      return {
+        ...prev,
+        [category]: current === 'rating' ? 'title' : 'rating'
+      };
+    });
+  }, []);
+
   const handleAddToCollection = (gameData) => {
     console.log('[CollectionScreen] handleAddToCollection called for:', gameData.title || gameData.id);
     if (userIdentifier) {
@@ -219,6 +272,75 @@ const CollectionScreen = () => {
     }
   }, [handleDeleteGame, userIdentifier]);
 
+  // Render category header with sort toggle
+  const renderCategoryHeader = useCallback((category, gameCount) => {
+    const sortMode = categorySortPreference[category] || 'rating';
+    return (
+      <View style={styles.categoryHeader}>
+        <Text style={styles.categoryTitle}>
+          {category} ({gameCount})
+        </Text>
+        {gameCount > 0 && (
+          <View style={styles.categorySortToggleContainer}>
+            <Pressable
+              style={[styles.categorySortToggleOption, sortMode === 'rating' && styles.categorySortToggleOptionActive]}
+              onPress={() => setCategorySortPreference(prev => ({ ...prev, [category]: 'rating' }))}
+            >
+              <Text style={[styles.categorySortToggleOptionText, sortMode === 'rating' && styles.categorySortToggleOptionTextActive]}>
+                ⭐ Rating
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.categorySortToggleOption, sortMode === 'title' && styles.categorySortToggleOptionActive]}
+              onPress={() => setCategorySortPreference(prev => ({ ...prev, [category]: 'title' }))}
+            >
+              <Text style={[styles.categorySortToggleOptionText, sortMode === 'title' && styles.categorySortToggleOptionTextActive]}>
+                A-Z
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    );
+  }, [categorySortPreference]);
+
+  // Render games grouped by category
+  const renderGamesByCategory = useCallback(() => {
+    return (
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.categoryContent}
+        showsVerticalScrollIndicator={true}
+      >
+        {renderHeader()}
+        
+        <View style={styles.inventoryHeader}>
+          <Text style={styles.inventoryTitle}>Your Games Inventory</Text>
+        </View>
+
+        {ALL_CATEGORIES.map((category) => {
+          const games = gamesByCategory[category] || [];
+          return (
+            <View key={category} style={styles.categorySection}>
+              {renderCategoryHeader(category, games.length)}
+              {games.length > 0 ? (
+                <View style={styles.categoryGamesGrid}>
+                  {games.map((game, index) => (
+                    <View key={game.id || `game-${index}`} style={styles.gameCardWrapper}>
+                      {renderGameCard({ item: game })}
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyCategoryText}>No games in this category</Text>
+              )}
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader]);
+
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
 
@@ -234,7 +356,7 @@ const CollectionScreen = () => {
           style={[styles.gamescannerIcon, { width: gamescannerIconSize, height: gamescannerIconSize }]}
           resizeMode="contain"
         />
-        <Text style={styles.gamescannerButtonTitle}>Import game titles with AI camera scanner</Text>
+        <Text style={styles.gamescannerButtonTitle}>Import game titles with our AI scanner</Text>
       </View>
     </Pressable>
   );
@@ -250,7 +372,13 @@ const CollectionScreen = () => {
     return (
       <>
         <View style={styles.menuContainer}>
+          <Text style={styles.menuTitle}>
+            Please choose a method to create a games inventory. A games inventory will allow your meepleup friends to see what you have in common and discuss what to play at the next get-together.
+          </Text>
+          
           {renderInventoryButton()}
+
+          <Text style={styles.orDivider}>OR</Text>
 
           <Pressable
             style={styles.menuOption}
@@ -263,7 +391,7 @@ const CollectionScreen = () => {
                 resizeMode="contain"
               />
               <View style={styles.menuOptionText}>
-                <Text style={styles.menuOptionTitle}>Import existing BGG collection titles</Text>
+                <Text style={styles.menuOptionTitle}>Import pre-existing BGG collection titles</Text>
               </View>
               <Text style={styles.menuOptionArrow}>→</Text>
             </View>
@@ -272,7 +400,7 @@ const CollectionScreen = () => {
 
         {sortedCollection.length > 0 && (
           <View style={styles.inventoryHeader}>
-            <Text style={styles.inventoryTitle}>Your Games Inventory</Text>
+            <Text style={styles.inventoryTitle}>Your Games Inventory:</Text>
             <View style={styles.sortRow}>
               <Text style={styles.sortLabel}>Sort by:</Text>
               <View style={styles.sortButtons}>
@@ -328,51 +456,55 @@ const CollectionScreen = () => {
   return (
     <View style={styles.container}>
       {showMenu && sortedCollection.length > 0 ? (
-        (() => {
-          console.log('[CollectionScreen] Rendering FlatList with', sortedCollection.length, 'items');
-          return (
-            <FlatList
-              data={sortedCollection}
-              keyExtractor={(item) => {
-                const key = item.id;
-                if (!key) {
-                  console.warn('[CollectionScreen] GameCard missing id:', item);
-                }
-                return key || `game-${Math.random()}`;
-              }}
-              renderItem={(props) => {
-                console.log('[CollectionScreen] FlatList renderItem called for index:', props.index);
-                try {
-                  return renderGameCard(props);
-                } catch (error) {
-                  console.error('[CollectionScreen] Error in renderItem:', error);
-                  return null;
-                }
-              }}
-              numColumns={3}
-              columnWrapperStyle={styles.row}
-              contentContainerStyle={styles.listContainer}
-              ListHeaderComponent={() => {
-                console.log('[CollectionScreen] Rendering ListHeaderComponent');
-                return renderHeader();
-              }}
-              ListHeaderComponentStyle={styles.headerContainer}
-              scrollEnabled={true}
-              showsVerticalScrollIndicator={true}
-              removeClippedSubviews={true}
-              maxToRenderPerBatch={10}
-              updateCellsBatchingPeriod={50}
-              initialNumToRender={5}
-              windowSize={10}
-              onLayout={() => {
-                console.log('[CollectionScreen] FlatList onLayout called');
-              }}
-              onContentSizeChange={(width, height) => {
-                console.log('[CollectionScreen] FlatList content size changed:', width, 'x', height);
-              }}
-            />
-          );
-        })()
+        sortBy === 'category' ? (
+          renderGamesByCategory()
+        ) : (
+          (() => {
+            console.log('[CollectionScreen] Rendering FlatList with', sortedCollection.length, 'items');
+            return (
+              <FlatList
+                data={sortedCollection}
+                keyExtractor={(item) => {
+                  const key = item.id;
+                  if (!key) {
+                    console.warn('[CollectionScreen] GameCard missing id:', item);
+                  }
+                  return key || `game-${Math.random()}`;
+                }}
+                renderItem={(props) => {
+                  console.log('[CollectionScreen] FlatList renderItem called for index:', props.index);
+                  try {
+                    return renderGameCard(props);
+                  } catch (error) {
+                    console.error('[CollectionScreen] Error in renderItem:', error);
+                    return null;
+                  }
+                }}
+                numColumns={3}
+                columnWrapperStyle={styles.row}
+                contentContainerStyle={styles.listContainer}
+                ListHeaderComponent={() => {
+                  console.log('[CollectionScreen] Rendering ListHeaderComponent');
+                  return renderHeader();
+                }}
+                ListHeaderComponentStyle={styles.headerContainer}
+                scrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                updateCellsBatchingPeriod={50}
+                initialNumToRender={5}
+                windowSize={10}
+                onLayout={() => {
+                  console.log('[CollectionScreen] FlatList onLayout called');
+                }}
+                onContentSizeChange={(width, height) => {
+                  console.log('[CollectionScreen] FlatList content size changed:', width, 'x', height);
+                }}
+              />
+            );
+          })()
+        )
       ) : (
         (() => {
           console.log('[CollectionScreen] Rendering ScrollView (no games or not menu)');
@@ -391,25 +523,31 @@ const CollectionScreen = () => {
               {showMenu && (
                 <>
                   <View style={styles.menuContainer}>
+                    <Text style={styles.menuTitle}>
+                      Please choose a method to create a games inventory. A games inventory will allow your meepleup friends to see what you have in common and discuss what to play at the next get-together.
+                    </Text>
+                    
                     {renderInventoryButton()}
 
-                <Pressable
-                  style={styles.menuOption}
-                  onPress={() => setActiveView('import')}
-                >
-                  <View style={styles.menuOptionContent}>
-                    <Image 
-                      source={require('../../assets/images/BGGDownload.png')}
-                      style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
-                      resizeMode="contain"
-                    />
-                    <View style={styles.menuOptionText}>
-                      <Text style={styles.menuOptionTitle}>Import existing BGG collection titles</Text>
-                    </View>
-                    <Text style={styles.menuOptionArrow}>→</Text>
+                    <Text style={styles.orDivider}>OR</Text>
+
+                    <Pressable
+                      style={styles.menuOption}
+                      onPress={() => setActiveView('import')}
+                    >
+                      <View style={styles.menuOptionContent}>
+                        <Image 
+                          source={require('../../assets/images/BGGDownload.png')}
+                          style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
+                          resizeMode="contain"
+                        />
+                        <View style={styles.menuOptionText}>
+                          <Text style={styles.menuOptionTitle}>Import existing BGG collection titles</Text>
+                        </View>
+                        <Text style={styles.menuOptionArrow}>→</Text>
+                      </View>
+                    </Pressable>
                   </View>
-                </Pressable>
-              </View>
 
               {sortedCollection.length === 0 && (
                 <View style={styles.emptyCollection}>
@@ -482,6 +620,21 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     paddingVertical: 20,
+  },
+  menuTitle: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 24,
+    marginBottom: 24,
+    paddingHorizontal: 4,
+    textAlign: 'left',
+  },
+  orDivider: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginVertical: 16,
   },
   menuOption: {
     backgroundColor: '#fff',
@@ -724,6 +877,71 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginBottom: 12,
+  },
+  categoryContent: {
+    paddingBottom: 10,
+  },
+  categorySection: {
+    marginBottom: 24,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 2,
+    borderBottomColor: '#4a90e2',
+    marginBottom: 12,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  categorySortToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    padding: 2,
+    gap: 0,
+  },
+  categorySortToggleOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 6,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  categorySortToggleOptionActive: {
+    backgroundColor: '#4a90e2',
+  },
+  categorySortToggleOptionText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
+  },
+  categorySortToggleOptionTextActive: {
+    fontWeight: '600',
+    color: '#fff',
+  },
+  categoryGamesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+  },
+  gameCardWrapper: {
+    width: '32%',
+    marginBottom: 8,
+  },
+  emptyCategoryText: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
 });
 

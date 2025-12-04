@@ -9,6 +9,8 @@
  * Teaching Status Values (can be multiple per player):
  * - 'happy-to-teach': Player can and wants to teach this game (highest priority for teaching)
  * - 'would-happily-play': Player knows the game and wants to play (can potentially teach if needed)
+ * - 'want-to-play': Player wants to play this game (has interest, may or may not know it)
+ * - 'please-bring': Player wants someone to bring this game (high interest, request to owner)
  * - 'want-to-learn': Player is interested in learning this game (needs teaching)
  * - 'havent-played-yet': Player owns it but hasn't played (needs teaching)
  * - 'not-excited-to-play': Player is not excited to play this game (negative interest)
@@ -36,6 +38,7 @@ const normalizeStatuses = (status) => {
 export const canTeach = (status) => {
   const statuses = normalizeStatuses(status);
   return statuses.includes('happy-to-teach') || statuses.includes('would-happily-play');
+  // Note: 'want-to-play' and 'please-bring' don't indicate teaching ability
 };
 
 /**
@@ -69,8 +72,12 @@ const getSingleStatusWeight = (status) => {
   switch (status) {
     case 'happy-to-teach':
       return 3; // Highest - actively wants to teach/play
+    case 'please-bring':
+      return 2.5; // Very high - explicit request to bring
     case 'would-happily-play':
       return 2; // High - knows it and wants to play
+    case 'want-to-play':
+      return 1.5; // Medium-high - wants to play
     case 'want-to-learn':
       return 1; // Medium - interested but needs teaching
     case 'havent-played-yet':
@@ -144,6 +151,8 @@ export const analyzeGameForEvent = (game, memberGames) => {
   const statusCounts = {
     'happy-to-teach': 0,
     'would-happily-play': 0,
+    'want-to-play': 0,
+    'please-bring': 0,
     'want-to-learn': 0,
     'havent-played-yet': 0,
     'not-excited-to-play': 0,

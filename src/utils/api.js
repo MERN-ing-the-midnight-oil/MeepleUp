@@ -589,19 +589,20 @@ export const getGameDetails = async (gameId) => {
 /**
  * Generate a random join code for events
  */
-import { wordlist } from './wordlist';
+import { wordList1, wordList2, wordList3 } from './wordlist';
 
 export const generateJoinCode = () => {
-  const words = [];
-  for (let i = 0; i < 3; i++) {
-    const randomIndex = Math.floor(Math.random() * wordlist.length);
-    words.push(wordlist[randomIndex]);
-  }
-  return words.join(' ');
+  // Select one word from each list: word1, word2, word3
+  const word1Index = Math.floor(Math.random() * wordList1.length);
+  const word2Index = Math.floor(Math.random() * wordList2.length);
+  const word3Index = Math.floor(Math.random() * wordList3.length);
+  
+  return `${wordList1[word1Index]} ${wordList2[word2Index]} ${wordList3[word3Index]}`;
 };
 
 /**
- * Validate join code format - expects 3 lowercase words separated by spaces or hyphens
+ * Validate join code format - expects 3 words separated by spaces or hyphens
+ * Case-insensitive: accepts any case combination
  */
 export const validateJoinCode = (code) => {
   if (!code || typeof code !== 'string') {

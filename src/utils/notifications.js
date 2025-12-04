@@ -1,5 +1,27 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import { Platform } from 'react-native';
+
+// Note: Email sending requires a Cloud Function to be deployed
+// See EMAIL_SETUP.md for instructions on setting up the email Cloud Function
+
+// Try to import expo-notifications (may not be installed)
+let Notifications = null;
+try {
+  Notifications = require('expo-notifications');
+  // Configure how notifications are handled when app is in foreground
+  if (Notifications && Notifications.setNotificationHandler) {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  }
+} catch (error) {
+  console.log('[notifications] expo-notifications not available, push notifications will be limited');
+}
 
 /**
  * Notification types based on schema
@@ -68,8 +90,11 @@ export const getUserNotificationPreferences = async (userId) => {
     const userData = userDoc.data();
     return userData.notificationPreferences || {
       meepleupChanges: true,
+      meepleupChangesEmail: false,
       newPublicMeepleups: true,
+      newPublicMeepleupsEmail: false,
       gameMarking: true,
+      gameMarkingEmail: false,
       nearbyMeepleupDistance: 25,
     };
   } catch (error) {
@@ -255,13 +280,13 @@ export const notifyNearbyUsersOfNewPublicMeepleUp = async (
 };
 
 /**
- * Notify a user when someone marks interest in their game
+ * Notify a user when someone comments on their game
  * @param {string} ownerId - User ID who owns the game
- * @param {string} interestedUserId - User ID who marked interest
- * @param {string} interestedUserName - Name of user who marked interest
+ * @param {string} interestedUserId - User ID who commented
+ * @param {string} interestedUserName - Name of user who commented
  * @param {string} gameId - Game ID
  * @param {string} gameName - Game name
- * @param {string} groupId - MeepleUp ID where the interest was marked
+ * @param {string} groupId - MeepleUp ID where the comment was made
  */
 export const notifyGameOwner = async (
   ownerId,
@@ -271,26 +296,82 @@ export const notifyGameOwner = async (
   gameName,
   groupId
 ) => {
+  console.log('[notifyGameOwner] Starting notification process:', {
+    ownerId,
+    interestedUserId,
+    interestedUserName,
+    gameId,
+    gameName,
+    groupId
+  });
+
   if (!ownerId || !interestedUserId || !db) {
+    console.warn('[notifyGameOwner] Missing required parameters:', { ownerId, interestedUserId, hasDb: !!db });
     return;
   }
 
-  // Don't notify if user marked interest in their own game
+  // Don't notify if user commented on their own game
   if (ownerId === interestedUserId) {
+    console.log('[notifyGameOwner] Skipping: user is commenting on their own game');
+    return;
+  }
+
+  // Verify both users are members of the same MeepleUp
+  if (!groupId) {
+    console.warn('[notifyGameOwner] Cannot notify game owner: groupId is required to verify MeepleUp membership');
     return;
   }
 
   try {
-    // Get owner's notification preferences
-    const preferences = await getUserNotificationPreferences(ownerId);
-
-    if (!isNotificationEnabled(preferences, 'gameMarking')) {
+    // Check if both users are members of the MeepleUp
+    console.log('[notifyGameOwner] Checking MeepleUp membership for group:', groupId);
+    const groupRef = db.collection('gamingGroups').doc(groupId);
+    const groupDoc = await groupRef.get();
+    
+    if (!groupDoc.exists) {
+      console.warn(`[notifyGameOwner] MeepleUp ${groupId} does not exist`);
       return;
     }
 
-    const message = `${interestedUserName || 'Someone'} marked interest in your game "${gameName}"`;
+    const groupData = groupDoc.data();
+    const memberIds = groupData.memberIds || [];
+    
+    console.log('[notifyGameOwner] MeepleUp members:', memberIds);
+    
+    // Check if both users are members
+    const ownerIsMember = memberIds.includes(ownerId);
+    const commenterIsMember = memberIds.includes(interestedUserId);
+    
+    console.log('[notifyGameOwner] Membership check:', {
+      ownerIsMember,
+      commenterIsMember,
+      ownerId,
+      interestedUserId
+    });
+    
+    if (!ownerIsMember || !commenterIsMember) {
+      console.log(`[notifyGameOwner] Skipping notification: users do not share MeepleUp ${groupId}`, {
+        ownerIsMember,
+        commenterIsMember
+      });
+      return;
+    }
 
-    await createNotification(ownerId, {
+    // Get owner's notification preferences
+    console.log('[notifyGameOwner] Fetching notification preferences for owner:', ownerId);
+    const preferences = await getUserNotificationPreferences(ownerId);
+    console.log('[notifyGameOwner] Notification preferences:', preferences);
+
+    if (!isNotificationEnabled(preferences, 'gameMarking')) {
+      console.log('[notifyGameOwner] Skipping: gameMarking notification is disabled for user:', ownerId);
+      return;
+    }
+
+    const message = `${interestedUserName || 'Someone'} has expressed interest in ${gameName} for your next meeting`;
+    console.log('[notifyGameOwner] Creating notification with message:', message);
+
+    // Create in-app notification
+    const notificationId = await createNotification(ownerId, {
       type: 'game_interest',
       groupId: groupId,
       fromUserId: interestedUserId,
@@ -298,9 +379,129 @@ export const notifyGameOwner = async (
       message: message,
     });
 
-    console.log(`Game interest notification sent to owner ${ownerId} for game ${gameName}`);
+    console.log('[notifyGameOwner] Notification created with ID:', notificationId);
+
+    // Send push notification
+    try {
+      await sendPushNotification(ownerId, message, {
+        type: 'game_interest',
+        groupId: groupId,
+        gameId: gameId,
+        gameName: gameName,
+        fromUserId: interestedUserId,
+        fromUserName: interestedUserName,
+      });
+    } catch (pushError) {
+      console.error('[notifyGameOwner] Error sending push notification:', pushError);
+      // Don't fail the notification if push fails
+    }
+
+    // Send email if email notifications are enabled
+    if (preferences.gameMarkingEmail === true && notificationId) {
+      console.log('[notifyGameOwner] Sending email notification');
+      try {
+        await sendGameRequestEmail(ownerId, interestedUserName, gameName, groupId);
+        console.log('[notifyGameOwner] Email notification sent successfully');
+      } catch (emailError) {
+        console.error('[notifyGameOwner] Error sending game request email:', emailError);
+        // Don't fail the notification if email fails
+      }
+    } else {
+      console.log('[notifyGameOwner] Email notifications disabled or notificationId missing:', {
+        gameMarkingEmail: preferences.gameMarkingEmail,
+        notificationId
+      });
+    }
+
+    console.log(`[notifyGameOwner] Successfully sent notification to owner ${ownerId} for game ${gameName}`);
   } catch (error) {
-    console.error('Error notifying game owner:', error);
+    console.error('[notifyGameOwner] Error notifying game owner:', error);
+    console.error('[notifyGameOwner] Error stack:', error.stack);
+  }
+};
+
+/**
+ * Send email notification for game request
+ * This calls a Cloud Function to send the email
+ * @param {string} ownerId - User ID who owns the game
+ * @param {string} interestedUserName - Name of user who requested
+ * @param {string} gameName - Game name
+ * @param {string} groupId - MeepleUp ID
+ * @returns {Promise<void>}
+ */
+const sendGameRequestEmail = async (ownerId, interestedUserName, gameName, groupId) => {
+  if (!ownerId || !db) {
+    return;
+  }
+
+  try {
+    // Get owner's email from Firestore
+    const ownerDoc = await db.collection('users').doc(ownerId).get();
+    if (!ownerDoc.exists) {
+      console.warn(`Cannot send email: user ${ownerId} not found`);
+      return;
+    }
+
+    const ownerData = ownerDoc.data();
+    const ownerEmail = ownerData.email;
+    
+    if (!ownerEmail) {
+      console.warn(`Cannot send email: user ${ownerId} has no email`);
+      return;
+    }
+
+    // Get MeepleUp name
+    let meepleUpName = 'your MeepleUp';
+    if (groupId) {
+      try {
+        const groupDoc = await db.collection('gamingGroups').doc(groupId).get();
+        if (groupDoc.exists) {
+          meepleUpName = groupDoc.data().name || meepleUpName;
+        }
+      } catch (error) {
+        console.error('Error fetching MeepleUp name:', error);
+      }
+    }
+
+    // Call Cloud Function to send email
+    // Note: This requires a Cloud Function to be deployed
+    // The function should be at: https://us-central1-meepleup-951a1.cloudfunctions.net/sendGameRequestEmail
+    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
+    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendGameRequestEmail`;
+    
+    try {
+      const response = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: ownerEmail,
+          subject: `Game Request: ${interestedUserName} wants you to bring ${gameName}`,
+          gameName: gameName,
+          interestedUserName: interestedUserName,
+          meepleUpName: meepleUpName,
+          groupId: groupId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Email service returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`Game request email sent to ${ownerEmail}`, result);
+    } catch (error) {
+      // If Cloud Function doesn't exist or fails, log but don't throw
+      // This allows the in-app notification to still be created
+      console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
+      console.warn('To enable emails, deploy a Cloud Function. See EMAIL_SETUP.md for instructions.');
+      console.warn('Expected function URL:', functionsUrl);
+    }
+  } catch (error) {
+    console.error('Error in sendGameRequestEmail:', error);
+    // Don't throw - allow notification to be created even if email fails
   }
 };
 
@@ -342,5 +543,100 @@ export const calculateZipcodeDistance = (zipcode1, zipcode2) => {
   }
 
   return estimatedDistance;
+};
+
+/**
+ * Send push notification to a user
+ * @param {string} userId - User ID to send notification to
+ * @param {string} message - Notification message
+ * @param {object} data - Additional data to include in notification
+ * @returns {Promise<void>}
+ */
+const sendPushNotification = async (userId, message, data = {}) => {
+  if (!userId || !message) {
+    console.warn('[sendPushNotification] Missing userId or message');
+    return;
+  }
+
+  try {
+    // Get user's push token from Firestore
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      console.warn(`[sendPushNotification] User ${userId} not found`);
+      return;
+    }
+
+    const userData = userDoc.data();
+    const pushToken = userData.pushToken || userData.expoPushToken;
+
+    if (!pushToken) {
+      console.log(`[sendPushNotification] User ${userId} does not have a push token registered`);
+      // Still try to send a local notification if on the same device
+      if (Platform.OS !== 'web' && Notifications && Notifications.scheduleNotificationAsync) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'MeepleUp',
+              body: message,
+              data: data,
+            },
+            trigger: null, // Show immediately
+          });
+          console.log('[sendPushNotification] Local notification sent');
+        } catch (localError) {
+          console.error('[sendPushNotification] Error sending local notification:', localError);
+        }
+      }
+      return;
+    }
+
+    // Send push notification via Expo's push notification service
+    // Note: For production, you'd typically send this from a backend/Cloud Function
+    // For now, we'll use Expo's API directly (requires EXPO_ACCESS_TOKEN in production)
+    try {
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: pushToken,
+          sound: 'default',
+          title: 'MeepleUp',
+          body: message,
+          data: data,
+          priority: 'high',
+        }),
+      });
+
+      const result = await response.json();
+      if (result.data?.status === 'ok') {
+        console.log(`[sendPushNotification] Push notification sent successfully to ${userId}`);
+      } else {
+        console.warn(`[sendPushNotification] Push notification may have failed:`, result);
+      }
+    } catch (pushError) {
+      console.error('[sendPushNotification] Error sending push notification:', pushError);
+      // Fallback to local notification if push fails
+      if (Platform.OS !== 'web' && Notifications && Notifications.scheduleNotificationAsync) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'MeepleUp',
+              body: message,
+              data: data,
+            },
+            trigger: null,
+          });
+        } catch (localError) {
+          console.error('[sendPushNotification] Error sending fallback local notification:', localError);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[sendPushNotification] Error in sendPushNotification:', error);
+  }
 };
 
