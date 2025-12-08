@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Switch } from 'react-native';
+import { View, Text, StyleSheet, Switch, TouchableOpacity } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import Input from './common/Input';
 import Button from './common/Button';
@@ -11,8 +11,9 @@ const NotificationSettings = () => {
     meepleupChangesEmail: false,
     newPublicMeepleups: true,
     newPublicMeepleupsEmail: false,
-    gameMarking: true,
-    gameMarkingEmail: false,
+    discussion: true,
+    discussionEmail: false,
+    discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
     nearbyMeepleupDistance: 25,
   });
   const [saving, setSaving] = useState(false);
@@ -26,8 +27,9 @@ const NotificationSettings = () => {
         meepleupChangesEmail: user.notificationPreferences.meepleupChangesEmail === true,
         newPublicMeepleups: user.notificationPreferences.newPublicMeepleups !== false,
         newPublicMeepleupsEmail: user.notificationPreferences.newPublicMeepleupsEmail === true,
-        gameMarking: user.notificationPreferences.gameMarking !== false,
-        gameMarkingEmail: user.notificationPreferences.gameMarkingEmail === true,
+        discussion: user.notificationPreferences.discussion !== false && user.notificationPreferences.gameMarking !== false,
+        discussionEmail: user.notificationPreferences.discussionEmail === true || user.notificationPreferences.gameMarkingEmail === true,
+        discussionFrequency: user.notificationPreferences.discussionFrequency || user.notificationPreferences.gameMarkingFrequency || 'all',
         nearbyMeepleupDistance: user.notificationPreferences.nearbyMeepleupDistance || 25,
       });
     }
@@ -116,8 +118,9 @@ const NotificationSettings = () => {
         meepleupChangesEmail: preferences.meepleupChangesEmail,
         newPublicMeepleups: preferences.newPublicMeepleups,
         newPublicMeepleupsEmail: preferences.newPublicMeepleupsEmail,
-        gameMarking: preferences.gameMarking,
-        gameMarkingEmail: preferences.gameMarkingEmail,
+        discussion: preferences.discussion,
+        discussionEmail: preferences.discussionEmail,
+        discussionFrequency: preferences.discussionFrequency,
         nearbyMeepleupDistance: distance,
       });
       setMessage('Notification preferences saved successfully!');
@@ -220,33 +223,102 @@ const NotificationSettings = () => {
         </View>
       )}
 
-      {/* Game Marking Notification */}
+      {/* Discussion Notification */}
       <View style={styles.settingItem}>
         <View style={styles.settingContent}>
-          <Text style={styles.settingLabel}>Game Talk</Text>
+          <Text style={styles.settingLabel}>Discussion</Text>
           <Text style={styles.settingDescription}>
-            Get notified when someone in your MeepleUp comments on one of your games
+            Get notified about new activity in the Discussion section of your MeepleUps
           </Text>
         </View>
         <Switch
-          value={preferences.gameMarking}
-          onValueChange={(value) => handlePreferenceChange('gameMarking', value)}
+          value={preferences.discussion}
+          onValueChange={(value) => handlePreferenceChange('discussion', value)}
           trackColor={{ false: '#ddd', true: '#d45d5d' }}
           thumbColor="#fff"
         />
       </View>
-      {preferences.gameMarking && (
-        <View style={styles.emailSettingItem}>
-          <View style={styles.settingContent}>
-            <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
+      {preferences.discussion && (
+        <>
+          <View style={styles.emailSettingItem}>
+            <View style={styles.settingContent}>
+              <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
+            </View>
+            <Switch
+              value={preferences.discussionEmail}
+              onValueChange={(value) => handlePreferenceChange('discussionEmail', value)}
+              trackColor={{ false: '#ddd', true: '#d45d5d' }}
+              thumbColor="#fff"
+            />
           </View>
-          <Switch
-            value={preferences.gameMarkingEmail}
-            onValueChange={(value) => handlePreferenceChange('gameMarkingEmail', value)}
-            trackColor={{ false: '#ddd', true: '#d45d5d' }}
-            thumbColor="#fff"
-          />
-        </View>
+          <View style={styles.frequencyContainer}>
+            <Text style={styles.frequencyLabel}>Notification frequency:</Text>
+            <View style={styles.frequencyOptions}>
+              <TouchableOpacity
+                style={[
+                  styles.frequencyOption,
+                  preferences.discussionFrequency === 'all' && styles.frequencyOptionActive
+                ]}
+                onPress={() => handlePreferenceChange('discussionFrequency', 'all')}
+              >
+                <Text style={[
+                  styles.frequencyOptionText,
+                  preferences.discussionFrequency === 'all' && styles.frequencyOptionTextActive
+                ]}>
+                  All activity
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.frequencyOption,
+                  preferences.discussionFrequency === 'daily' && styles.frequencyOptionActive
+                ]}
+                onPress={() => handlePreferenceChange('discussionFrequency', 'daily')}
+              >
+                <Text style={[
+                  styles.frequencyOptionText,
+                  preferences.discussionFrequency === 'daily' && styles.frequencyOptionTextActive
+                ]}>
+                  Daily summary
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.frequencyOption,
+                  preferences.discussionFrequency === 'mentions' && styles.frequencyOptionActive
+                ]}
+                onPress={() => handlePreferenceChange('discussionFrequency', 'mentions')}
+              >
+                <Text style={[
+                  styles.frequencyOptionText,
+                  preferences.discussionFrequency === 'mentions' && styles.frequencyOptionTextActive
+                ]}>
+                  Mentions only
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.frequencyOption,
+                  preferences.discussionFrequency === 'responses' && styles.frequencyOptionActive
+                ]}
+                onPress={() => handlePreferenceChange('discussionFrequency', 'responses')}
+              >
+                <Text style={[
+                  styles.frequencyOptionText,
+                  preferences.discussionFrequency === 'responses' && styles.frequencyOptionTextActive
+                ]}>
+                  Responses to my comments
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.helpText}>
+              {preferences.discussionFrequency === 'all' && 'Get notified about all new posts and comments'}
+              {preferences.discussionFrequency === 'daily' && 'Receive one daily summary of all Discussion activity'}
+              {preferences.discussionFrequency === 'mentions' && 'Only get notified when someone mentions you'}
+              {preferences.discussionFrequency === 'responses' && 'Only get notified when someone replies to your comments'}
+            </Text>
+          </View>
+        </>
       )}
 
       {message ? (
@@ -377,6 +449,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     color: '#666',
+  },
+  frequencyContainer: {
+    marginTop: 8,
+    marginBottom: 16,
+    paddingLeft: 20,
+    paddingRight: 0,
+  },
+  frequencyLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 12,
+  },
+  frequencyOptions: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  frequencyOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+  },
+  frequencyOptionActive: {
+    borderColor: '#d45d5d',
+    backgroundColor: '#fef5f5',
+  },
+  frequencyOptionText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  frequencyOptionTextActive: {
+    color: '#d45d5d',
+    fontWeight: '500',
   },
 });
 

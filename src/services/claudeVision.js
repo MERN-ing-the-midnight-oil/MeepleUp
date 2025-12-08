@@ -5,12 +5,18 @@ const DEFAULT_PROMPT_INTRO = `
 You are a font expert and graphic design expert analyzing board game spines. You are looking at the sides of board game boxes that are usually stacked vertically on a shelf.
 
 CRITICAL REQUIREMENTS:
-- ONLY identify games where you can see the COMPLETE box side (whole rectangle). Ignore any partially visible titles or cut-off boxes.
+- Identify games where the title is CLEARLY READABLE, even if the entire box side isn't fully visible. Focus on whether you can confidently read and identify the game title, not whether the box is perfectly framed.
+- If a title is partially cut off, make an EDUCATED GUESS about the full title based on visible letters, context, and common game title patterns. For example:
+  * "ONCEPT" is likely "CONCEPT"
+  * "OMINION" is likely "DOMINION"
+  * "ICKET" is likely "TICKET TO RIDE" (if you can see enough context)
+  * Use visible letters, font style, colors, and your knowledge of board game titles to infer the complete name
+- Only skip titles that are too obscured or unclear to make a reasonable inference (e.g., only 1-2 letters visible, completely unreadable).
 - If the photo has excessive glare, reflections, or insufficient lighting that prevents clear identification, return an empty games array and include a message in the comments field asking the user to improve lighting and reduce glare.
 - If you detect text in a foreign language, translate it to English and use the translated title. Note the original language in the notes field if relevant.
 
 Your task is to:
-1. Identify each visible game title on complete box spines (whole rectangles only)
+1. Identify each visible game title where the title text is clearly readable and identifiable
 2. Identify any additional text on the spine that is NOT part of the actual game title (e.g., subtitles, taglines, publisher names, edition info, designer names, etc.)
 3. Analyze the typography and visual styling of each title
 4. Match each title to the most appropriate font from the available font list
@@ -20,11 +26,11 @@ Your task is to:
 For each game you identify, return a JSON object with this structure:
 
 {
-  "title": "EXACT GAME TITLE AS IT APPEARS (translated to English if foreign language)",
+  "title": "FULL INFERRED GAME TITLE - If the title is partially cut off, infer the complete title based on visible letters and context (e.g., if you see 'ONCEPT', return 'CONCEPT'). If translated from foreign language, use English title.",
   "additionalText": "string or null - any text on the spine that is NOT part of the actual game title (subtitles, taglines, publisher names, edition info, designer names, etc.). Set to null if no additional text is present.",
   "confidence": "high|medium|low",
   "boxDescription": "string or null - REQUIRED when confidence is 'low'. Briefly describe the game box in terms of pictures, patterns, colors, and size (e.g., 'small red box with a dragon on it', 'large blue box with geometric patterns'). Set to null for high/medium confidence.",
-  "notes": "optional string - edition notes, original language if translated, or font size variations observed within the title",
+  "notes": "optional string - edition notes, original language if translated, font size variations observed within the title, or note if title was inferred from partial text (e.g., 'Title inferred from partially visible text: ONCEPT')",
   "styling": {
     "backgroundColor": "hex color code (e.g., #D97D3A) - primary/dominant background color of the spine",
     "backgroundColorSecondary": "hex color code or null - secondary color if a gradient is clearly visible, otherwise null",
@@ -119,7 +125,7 @@ Monospace:
 
 IMPORTANT GUIDELINES:
 
-- ONLY process complete box sides (whole rectangles). Skip any partially visible or cut-off boxes.
+- Process all game titles where the title is clearly readable and identifiable, even if the box side is partially visible. Make educated guesses for partially cut-off titles using visible letters, context, and common game title patterns. Only skip titles that are too obscured or unclear to make a reasonable inference (e.g., less than 3-4 letters visible, completely unreadable).
 - Choose the font that BEST MATCHES the visual characteristics you observe, even if it's a custom font. Analyze the custom font's characteristics (weight, width, style, mood) and match it to the closest available font.
 - For backgroundColor, identify the primary/dominant color of that game's spine.
 - For backgroundColorSecondary, include a secondary color ONLY if a gradient is clearly visible and the secondary color is obvious. Otherwise, set to null.
@@ -129,14 +135,14 @@ IMPORTANT GUIDELINES:
 - Pay attention to whether text is ALL CAPS, Title Case, or lowercase.
 - Note the orientation - many board game spines have vertical text.
 - Standardize fontSize to "16px" (normal readable size for mobile). If you observe size variations within a single title, note this in the notes field.
-- Use "high" confidence only when you're certain of the title and can see the complete box side.
-- Use "medium" confidence when you're fairly sure but there's some ambiguity.
-- Use "low" confidence when the title is unclear even though the box side is complete.
+- Use "high" confidence when you're certain of the title and it's clearly readable (either fully visible or confidently inferred from partial text).
+- Use "medium" confidence when you're fairly sure but there's some ambiguity (e.g., partial visibility where you made an educated guess, similar-looking titles, or when inferring from cut-off text).
+- Use "low" confidence when the title is partially visible or unclear but you can still make a reasonable guess about what it might be. Always include a boxDescription when using low confidence.
 - IMPORTANT: When confidence is "low", you MUST provide a "boxDescription" field describing the box in terms of pictures, patterns, colors, and size (e.g., "small red box with a dragon on it", "large blue box with geometric patterns"). This helps the user identify which box to type the title for.
 - If you see multiple copies or editions, list them separately and note the edition in the "notes" field.
 - Look for additional text on the spine that is NOT part of the game title (subtitles, taglines, publisher names, edition info, designer names, etc.). Include this in the "additionalText" field. Only include text that is clearly visible and separate from the main title.
 - If lighting is poor, glare is excessive, or visibility is compromised, return an empty games array and include guidance in comments.
-- If no complete box sides are visible, return an empty games array.
+- If no clearly readable game titles are visible, return an empty games array.
 
 Return your response as valid JSON in this exact format:
 {

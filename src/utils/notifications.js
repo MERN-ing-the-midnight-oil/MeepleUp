@@ -120,7 +120,10 @@ export const isNotificationEnabled = (preferences, notificationType) => {
     case 'newPublicMeepleups':
       return preferences.newPublicMeepleups !== false;
     case 'gameMarking':
-      return preferences.gameMarking !== false;
+      // Legacy support - check both gameMarking and discussion
+      return preferences.gameMarking !== false && preferences.discussion !== false;
+    case 'discussion':
+      return preferences.discussion !== false;
     default:
       return true;
   }
@@ -185,6 +188,119 @@ export const notifyMeepleUpMembers = async (groupId, excludeUserId, notification
     }
   } catch (error) {
     console.error('Error notifying MeepleUp members:', error);
+  }
+};
+
+/**
+ * Notify members about Discussion activity (posts, comments)
+ * Respects user's discussion notification frequency preferences
+ * @param {string} groupId - MeepleUp/Group ID
+ * @param {string} excludeUserId - User ID to exclude from notifications (the one who made the change)
+ * @param {object} notificationData - Notification data
+ * @param {string} notificationData.type - 'new_post' or 'new_comment'
+ * @param {string} notificationData.postId - Post ID
+ * @param {string} notificationData.commentId - Comment ID (for comment notifications)
+ * @param {string} notificationData.postAuthorId - Post author ID (for comment notifications, to check if it's a response)
+ * @param {string} notificationData.fromUserName - Name of user who created the post/comment
+ * @param {string} notificationData.message - Notification message
+ */
+export const notifyDiscussionActivity = async (groupId, excludeUserId, notificationData) => {
+  if (!groupId || !db) {
+    return;
+  }
+
+  try {
+    // Get all members of the group
+    const membersRef = db.collection('gamingGroups').doc(groupId).collection('members');
+    const membersSnapshot = await membersRef.get();
+
+    if (membersSnapshot.empty) {
+      return;
+    }
+
+    const memberIds = membersSnapshot.docs
+      .map(doc => doc.data().userId)
+      .filter(userId => userId && userId !== excludeUserId);
+
+    // Batch create notifications for all members
+    const batch = db.batch();
+    let notificationCount = 0;
+
+    for (const memberId of memberIds) {
+      // Get member's preferences
+      const preferences = await getUserNotificationPreferences(memberId);
+      
+      // Check if Discussion notifications are enabled
+      if (!isNotificationEnabled(preferences, 'discussion')) {
+        continue;
+      }
+
+      const frequency = preferences.discussionFrequency || 'all';
+      
+      // Check frequency settings
+      if (frequency === 'responses') {
+        // Only notify if this is a response to the user's comment or post
+        // For new posts, skip (not a response to the user)
+        if (notificationData.type === 'new_post') {
+          continue;
+        }
+        // For comments, check if the post author is the current user
+        // or if this comment is a reply to one of the user's comments
+        if (notificationData.type === 'new_comment') {
+          let shouldNotify = false;
+          
+          // Check if this comment is on a post by the user
+          if (notificationData.postAuthorId === memberId) {
+            // This is a comment on the user's post - notify
+            shouldNotify = true;
+          } else if (notificationData.parentCommentAuthorId === memberId) {
+            // This is a reply to the user's comment - notify
+            shouldNotify = true;
+          }
+          
+          if (!shouldNotify) {
+            // Not a response to the user - skip
+            continue;
+          }
+        }
+      } else if (frequency === 'mentions') {
+        // Only notify if the user is mentioned
+        // For now, we'll skip this as mention detection would need to be implemented
+        // TODO: Implement mention detection (@username)
+        continue;
+      } else if (frequency === 'daily') {
+        // For daily aggregation, we'll still create the notification
+        // but it should be aggregated by a separate process
+        // For now, create it normally - aggregation can be handled separately
+      }
+      // 'all' frequency - notify for all activity
+
+      const notificationsRef = db.collection('users').doc(memberId).collection('notifications');
+      const notificationId = notificationsRef.doc().id;
+
+      const notification = {
+        id: notificationId,
+        type: notificationData.type || 'new_post',
+        groupId: groupId,
+        postId: notificationData.postId || null,
+        commentId: notificationData.commentId || null,
+        fromUserId: excludeUserId || null,
+        fromUserName: notificationData.fromUserName || null,
+        message: notificationData.message,
+        read: false,
+        createdAt: firebase.firestore.Timestamp.now(),
+      };
+
+      batch.set(notificationsRef.doc(notificationId), notification);
+      notificationCount++;
+    }
+
+    if (notificationCount > 0) {
+      await batch.commit();
+      console.log(`Created ${notificationCount} Discussion notifications for MeepleUp ${groupId}`);
+    }
+  } catch (error) {
+    console.error('Error notifying Discussion activity:', error);
   }
 };
 

@@ -13,6 +13,9 @@ import CalendarDatePicker from '../components/common/CalendarDatePicker';
 import Modal from '../components/common/Modal';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import PoweredByBGG from '../components/PoweredByBGG';
+import JoinForm from '../components/JoinForm';
+import EventCard from '../components/EventCard';
+import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
 
 const Onboarding = () => {
   const navigation = useNavigation();
@@ -171,45 +174,8 @@ const Onboarding = () => {
   };
 
   const handleLeaveEvent = async (eventId) => {
-    if (!user) {
-      Alert.alert('Error', 'You must be signed in to leave a MeepleUp.');
-      return;
-    }
-
     const userIdentifier = user?.uid || user?.id;
-    const event = getEventById(eventId);
-    
-    if (!event) {
-      Alert.alert('Error', 'MeepleUp not found.');
-      return;
-    }
-
-    // Don't allow organizer to leave
-    if (event.organizerId === userIdentifier) {
-      Alert.alert('Cannot Leave', 'As the organizer, you cannot leave this MeepleUp. You can archive it instead.');
-      return;
-    }
-
-    Alert.alert(
-      'Leave MeepleUp?',
-      'Are you sure you want to leave this MeepleUp? You will need to get a new invitation to rejoin.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await leaveEvent(eventId, userIdentifier);
-              Alert.alert('Left MeepleUp', 'You have successfully left the MeepleUp.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to leave MeepleUp. Please try again.');
-              console.error(error);
-            }
-          },
-        },
-      ],
-    );
+    handleLeaveEventUtil(eventId, userIdentifier, leaveEvent, getEventById);
   };
 
   const handleCreateEvent = async () => {
@@ -298,12 +264,24 @@ const Onboarding = () => {
   if (mode === 'choice') {
     // Get user's events and sort by creation date (newest first)
     const userIdentifier = user?.uid || user?.id;
-    const userEvents = userIdentifier ? getUserEvents(userIdentifier) : [];
-    const sortedEvents = [...userEvents].sort((a, b) => {
-      const dateA = new Date(a.createdAt || 0);
-      const dateB = new Date(b.createdAt || 0);
-      return dateB - dateA; // Newest first
-    });
+    let userEvents = [];
+    try {
+      if (userIdentifier && getUserEvents) {
+        const events = getUserEvents(userIdentifier);
+        userEvents = Array.isArray(events) ? events : [];
+      }
+    } catch (error) {
+      console.error('Error getting user events:', error);
+      userEvents = [];
+    }
+    
+    const sortedEvents = Array.isArray(userEvents) && userEvents.length > 0
+      ? [...userEvents].sort((a, b) => {
+          const dateA = new Date(a?.createdAt || 0);
+          const dateB = new Date(b?.createdAt || 0);
+          return dateB - dateA; // Newest first
+        })
+      : [];
 
     return (
       <KeyboardAvoidingView
@@ -323,67 +301,44 @@ const Onboarding = () => {
           </View>
     
           {/* User's MeepleUps */}
-          {sortedEvents.length > 0 && (
+          {Array.isArray(sortedEvents) && sortedEvents.length > 0 && (
             <View style={styles.eventsSection}>
               {sortedEvents.map((event) => {
+                if (!event || !event.id) return null;
                 const userIdentifier = user?.uid || user?.id;
                 const isOrganizer = event.organizerId === userIdentifier;
                 
                 return (
-                  <View
+                  <EventCard
                     key={event.id}
+                    event={event}
+                    onPress={() => navigation.navigate('EventHub', {
+                      eventId: event.id,
+                    })}
+                    onLeave={handleLeaveEvent}
+                    showLeaveButton={!isOrganizer}
+                    isOrganizer={isOrganizer}
                     style={styles.eventCard}
-                  >
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.eventCardContent,
-                        pressed && styles.eventCardPressed,
-                      ]}
-                      onPress={() => navigation.navigate('EventHub', {
-                        eventId: event.id,
-                      })}
-                    >
-                      <View style={styles.eventCardTitleContainer}>
-                        <Text style={styles.eventCardTitle}>
-                          {event.name || 'Untitled MeepleUp'}
-                        </Text>
-                        <Text style={styles.eventCardArrow}>→</Text>
-                      </View>
-                    </Pressable>
-                    {!isOrganizer && (
-                      <Pressable
-                        style={styles.leaveButton}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleLeaveEvent(event.id);
-                        }}
-                      >
-                        <Text style={styles.leaveButtonText}>Leave</Text>
-                      </Pressable>
-                    )}
-                  </View>
+                  />
                 );
               })}
             </View>
           )}
           
+          {/* Join with Code Section */}
+          <View style={styles.joinSection}>
+            <JoinForm
+              joinCodeWord1={joinCodeWord1}
+              joinCodeWord2={joinCodeWord2}
+              joinCodeWord3={joinCodeWord3}
+              onJoinCodeWordChange={handleJoinCodeWordChange}
+              onJoin={handleJoinByCode}
+              error={error}
+              loading={loading}
+            />
+          </View>
+
           <View style={styles.options}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.optionCard,
-                pressed && styles.optionCardPressed,
-              ]}
-              onPress={() => handleModeChange('join')}
-            >
-              <View style={styles.optionTitleContainer}>
-                <FontAwesome5 name="handshake" size={20} color="#d45d5d" />
-                <Text style={styles.optionTitle}>Join</Text>
-              </View>
-              <Text style={styles.optionText}>
-                Join an existing MeepleUp with a code someone gave you.
-              </Text>
-            </Pressable>
-            
             <Pressable
               style={({ pressed }) => [
                 styles.optionCard,
@@ -431,54 +386,30 @@ const Onboarding = () => {
       >
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.content}>
-          <Button
-            label="← Back"
-            onPress={() => handleModeChange('choice')}
-            variant="outline"
-            style={styles.backButton}
-          />
-          <Text style={styles.title}>Join with Code</Text>
-          <Text style={styles.subtitle}>
-            Enter the three-word join code provided by your game night organizer.
-          </Text>
-          
-          {error && <Text style={styles.error}>{error}</Text>}
-          
-          <View style={styles.joinCodeFields}>
-            <Input 
-              placeholder="Word 1"
-              value={joinCodeWord1} 
-              onChangeText={(text) => handleJoinCodeWordChange(1, text)}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.input, styles.joinCodeInput]}
+            <Button
+              label="← Back"
+              onPress={() => handleModeChange('choice')}
+              variant="outline"
+              style={styles.backButton}
             />
-            <Input 
-              placeholder="Word 2"
-              value={joinCodeWord2} 
-              onChangeText={(text) => handleJoinCodeWordChange(2, text)}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.input, styles.joinCodeInput]}
-            />
-            <Input 
-              placeholder="Word 3"
-              value={joinCodeWord3} 
-              onChangeText={(text) => handleJoinCodeWordChange(3, text)}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.input, styles.joinCodeInput]}
+            <Text style={styles.title}>Join with Code</Text>
+            <Text style={styles.subtitle}>
+              Enter the three-word join code provided by your game night organizer.
+            </Text>
+            
+            <JoinForm
+              joinCodeWord1={joinCodeWord1}
+              joinCodeWord2={joinCodeWord2}
+              joinCodeWord3={joinCodeWord3}
+              onJoinCodeWordChange={handleJoinCodeWordChange}
+              onJoin={handleJoinByCode}
+              error={error}
+              loading={loading}
+              showTitle={false}
+              showSubtitle={false}
             />
           </View>
-          
-          <Button
-            label={loading ? 'Joining...' : 'Join MeepleUp'}
-            onPress={handleJoinByCode}
-            disabled={loading || !joinCodeWord1.trim() || !joinCodeWord2.trim() || !joinCodeWord3.trim()}
-            style={styles.fullButton}
-          />
-        </View>
-      </ScrollView>
+        </ScrollView>
       </KeyboardAvoidingView>
     );
   }
@@ -1289,11 +1220,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  joinCodeFields: {
-    marginBottom: 16,
+  joinSection: {
+    marginBottom: 32,
+    padding: 20,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
-  joinCodeInput: {
-    marginBottom: 12,
+  joinTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  joinSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 20,
+    lineHeight: 22,
   },
   requiredAsterisk: {
     color: '#d45d5d',

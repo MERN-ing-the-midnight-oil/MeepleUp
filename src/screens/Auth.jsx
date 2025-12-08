@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, Dimensions, TouchableOpacity } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
@@ -10,7 +11,7 @@ import { bggLogoColor } from '../components/BGGLogoAssets';
 const Auth = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { login, signup, signInWithGoogle } = useAuth();
+  const { login, signup, signInWithGoogle, resetPassword } = useAuth();
   const mode = route.params?.mode || 'login'; // 'login' or 'register'
   const { width: screenWidth } = Dimensions.get('window');
   const isMobile = screenWidth < 600;
@@ -21,6 +22,9 @@ const Auth = () => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleSubmit = async () => {
     setError('');
@@ -72,7 +76,22 @@ const Auth = () => {
         // Navigation will happen automatically via auth state change
       }
     } catch (err) {
-      setError(err.message || 'An error occurred. Please try again.');
+      // Provide more helpful error messages
+      let errorMessage = err.message || 'An error occurred. Please try again.';
+      
+      if (err.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered. Try signing in instead, or use "Forgot Password" if you don\'t remember your password.';
+      } else if (err.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.';
+      } else if (err.code === 'auth/weak-password') {
+        errorMessage = 'Password is too weak. Please use a stronger password.';
+      } else if (err.code === 'auth/user-not-found') {
+        errorMessage = 'No account found with this email. Please create an account first.';
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        errorMessage = 'Incorrect password. Try again or use "Forgot Password" to reset it.';
+      }
+      
+      setError(errorMessage);
       console.error('Auth error:', err);
     } finally {
       setLoading(false);
@@ -89,6 +108,31 @@ const Auth = () => {
     } catch (err) {
       setError(err.message || 'Failed to sign in with Google. Please try again.');
       console.error('Google sign-in error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setError('Please enter your email address first');
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+
+    try {
+      await resetPassword(email.trim());
+      Alert.alert(
+        'Password Reset Email Sent',
+        'Check your email for instructions to reset your password.',
+        [{ text: 'OK' }]
+      );
+      setShowForgotPassword(false);
+    } catch (err) {
+      setError(err.message || 'Failed to send password reset email. Please try again.');
+      console.error('Password reset error:', err);
     } finally {
       setLoading(false);
     }
@@ -159,36 +203,98 @@ const Auth = () => {
             blurOnSubmit={false}
           />
 
-          <Input
-            placeholder="Password"
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              setError('');
-            }}
-            secureTextEntry
-            style={styles.input}
-            returnKeyType={mode === 'register' ? 'next' : 'done'}
-            blurOnSubmit={mode === 'register' ? false : true}
-            onSubmitEditing={mode === 'register' ? undefined : handleSubmit}
-            ref={mode === 'register' ? undefined : lastInputRef}
-          />
-
-          {mode === 'register' && (
+          <View style={styles.passwordContainer}>
             <Input
-              placeholder="Confirm Password"
-              value={confirmPassword}
+              placeholder="Password"
+              value={password}
               onChangeText={(text) => {
-                setConfirmPassword(text);
+                setPassword(text);
                 setError('');
               }}
-              secureTextEntry
+              secureTextEntry={!showPassword}
               style={styles.input}
-              returnKeyType="done"
-              blurOnSubmit={true}
-              onSubmitEditing={handleSubmit}
-              ref={lastInputRef}
+              returnKeyType={mode === 'register' ? 'next' : 'done'}
+              blurOnSubmit={mode === 'register' ? false : true}
+              onSubmitEditing={mode === 'register' ? undefined : handleSubmit}
+              ref={mode === 'register' ? undefined : lastInputRef}
+              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+              textContentType={mode === 'register' ? 'newPassword' : 'password'}
             />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons
+                name={showPassword ? 'visibility' : 'visibility-off'}
+                size={24}
+                color="#666"
+              />
+            </TouchableOpacity>
+          </View>
+
+          {mode === 'login' && !showForgotPassword && (
+            <Pressable
+              onPress={() => setShowForgotPassword(true)}
+              style={styles.forgotPasswordContainer}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+            </Pressable>
+          )}
+
+          {showForgotPassword && (
+            <View style={styles.forgotPasswordView}>
+              <Text style={styles.forgotPasswordLabel}>
+                Enter your email and we'll send you a password reset link.
+              </Text>
+              <View style={styles.forgotPasswordActions}>
+                <Button
+                  label="Send Reset Link"
+                  onPress={handleForgotPassword}
+                  disabled={loading || !email.trim()}
+                  style={styles.forgotPasswordButton}
+                />
+                <Pressable
+                  onPress={() => {
+                    setShowForgotPassword(false);
+                    setError('');
+                  }}
+                  style={styles.cancelButton}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {mode === 'register' && (
+            <View style={styles.passwordContainer}>
+              <Input
+                placeholder="Confirm Password"
+                value={confirmPassword}
+                onChangeText={(text) => {
+                  setConfirmPassword(text);
+                  setError('');
+                }}
+                secureTextEntry={!showConfirmPassword}
+                style={styles.input}
+                returnKeyType="done"
+                blurOnSubmit={true}
+                onSubmitEditing={handleSubmit}
+                ref={lastInputRef}
+              />
+              <TouchableOpacity
+                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                style={styles.eyeIcon}
+                activeOpacity={0.7}
+              >
+                <MaterialIcons
+                  name={showConfirmPassword ? 'visibility' : 'visibility-off'}
+                  size={24}
+                  color="#666"
+                />
+              </TouchableOpacity>
+            </View>
           )}
 
           <Button
@@ -322,6 +428,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4a90e2',
     fontWeight: '600',
+  },
+  forgotPasswordContainer: {
+    alignSelf: 'flex-end',
+    marginTop: -8,
+    marginBottom: 16,
+  },
+  forgotPasswordText: {
+    fontSize: 14,
+    color: '#4a90e2',
+    fontWeight: '500',
+  },
+  forgotPasswordView: {
+    marginTop: 8,
+    marginBottom: 16,
+    padding: 16,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  forgotPasswordLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  forgotPasswordActions: {
+    gap: 8,
+  },
+  forgotPasswordButton: {
+    width: '100%',
+  },
+  cancelButton: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  passwordContainer: {
+    position: 'relative',
+    marginBottom: 16,
+  },
+  eyeIcon: {
+    position: 'absolute',
+    right: 12,
+    top: 10,
+    padding: 4,
+    zIndex: 1,
   },
 });
 

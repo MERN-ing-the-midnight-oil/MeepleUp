@@ -358,6 +358,13 @@ export const AvailabilityProvider = ({ children }) => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!db || !user) {
+      // Don't subscribe if user is not authenticated
+      setLoading(false);
+      setProfiles([]);
+      return;
+    }
+    
     const colRef = collection(db, 'availabilityProfiles');
     const unsubscribe = onSnapshot(
       colRef,
@@ -372,11 +379,13 @@ export const AvailabilityProvider = ({ children }) => {
         console.error('[Availability] Failed to subscribe', snapshotError);
         setError(snapshotError);
         setLoading(false);
+        // Don't crash the app - just set empty profiles
+        setProfiles([]);
       },
     );
 
     return unsubscribe;
-  }, []);
+  }, [user]);
 
   const currentProfile = useMemo(() => {
     if (!user?.uid) {
@@ -587,6 +596,8 @@ export const useAvailability = () => {
 };
 
 export default AvailabilityContext;
+
+
 
 
 

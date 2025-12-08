@@ -126,6 +126,12 @@ const normalizeEvent = (event) => {
     allowStrangerMessages: event.allowStrangerMessages ?? true,
     isActive,
     deletedAt,
+    // RSVP settings
+    rsvpSettings: event.rsvpSettings || {
+      enabled: true,
+      allowMaybe: true,
+      attendanceLimit: null, // null means no limit
+    },
   };
 };
 
@@ -273,7 +279,8 @@ export const EventsProvider = ({ children }) => {
                 status: MEMBERSHIP_STATUS.MEMBER,
                 role: memberData.role || MEMBER_ROLES.MEMBER,
                 joinedAt: memberData.joinedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                rsvpStatus: memberData.rsvpStatus || null,
+                rsvpStatus: memberData.rsvpStatus || null, // Backward compatibility
+                rsvpStatuses: memberData.rsvpStatuses || {}, // Date-specific RSVPs
                 rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || null,
               };
             });
@@ -304,6 +311,11 @@ export const EventsProvider = ({ children }) => {
               isActive: firestoreData.isActive !== false,
               deletedAt: firestoreData.deletedAt?.toDate?.()?.toISOString() || firestoreData.deletedAt || null,
               lastUpdatedAt: firestoreData.updatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+              rsvpSettings: firestoreData.rsvpSettings || {
+                enabled: true,
+                allowMaybe: true,
+                attendanceLimit: null,
+              },
             };
           } catch (error) {
             console.error(`Error fetching group ${groupDoc.id}:`, error);
@@ -432,6 +444,11 @@ export const EventsProvider = ({ children }) => {
             createdAt: firebase.firestore.Timestamp.now(),
             updatedAt: firebase.firestore.Timestamp.now(),
             createdBy: organizerId,
+            rsvpSettings: baseEvent.rsvpSettings || {
+              enabled: true,
+              allowMaybe: true,
+              attendanceLimit: null,
+            },
           };
           
           await eventsRef.set(firestoreData);
@@ -442,9 +459,11 @@ export const EventsProvider = ({ children }) => {
             await membersRef.set({
               userId: organizerId,
               userName: user?.name || user?.email || '',
+              userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
               role: 'organizer',
               joinedAt: firebase.firestore.Timestamp.now(),
               rsvpStatus: null,
+              rsvpStatuses: {},
             });
           }
 
@@ -790,20 +809,26 @@ export const EventsProvider = ({ children }) => {
             
             // Use current user's data from Auth context if this is the current user joining
             let userName = '';
+            let userAvatarUrl = '';
             if (user && userId === (user.uid || user.id)) {
               userName = user.name || user.email || '';
+              userAvatarUrl = user.photoURL || user.avatarUrl || '';
             } else {
               // Fallback: fetch from Firestore for other users (shouldn't happen in normal flow)
               const userData = await db.collection('users').doc(userId).get().catch(() => null);
-              userName = userData?.data()?.name || userData?.data()?.email || '';
+              const userDocData = userData?.data();
+              userName = userDocData?.name || userDocData?.email || '';
+              userAvatarUrl = userDocData?.avatarUrl || '';
             }
             
             await membersRef.set({
               userId,
               userName: userName || userId, // Fallback to userId if no name found
+              userAvatarUrl: userAvatarUrl || null,
               role: 'member',
               joinedAt: firebase.firestore.Timestamp.now(),
               rsvpStatus: null,
+              rsvpStatuses: {},
             }, { merge: true });
             
             // Update memberIds array in the group document
@@ -935,15 +960,20 @@ export const EventsProvider = ({ children }) => {
   );
 
   const getUserEvents = useCallback(
-    (userId) =>
-      events.filter((event) => {
+    (userId) => {
+      if (!userId || !Array.isArray(events)) {
+        return [];
+      }
+      return events.filter((event) => {
+        if (!event) return false;
         // Filter out archived events
         if (event.deletedAt || event.isActive === false) {
           return false;
         }
         // Check if user is a member
-        return (event.members || []).some((member) => member.userId === userId);
-      }),
+        return (event.members || []).some((member) => member?.userId === userId);
+      });
+    },
     [events],
   );
 
@@ -1040,7 +1070,7 @@ export const EventsProvider = ({ children }) => {
   }, []);
 
   const updateMemberRSVP = useCallback(
-    async (eventId, userId, rsvpStatus) => {
+    async (eventId, userId, rsvpStatus, eventDate = null) => {
       if (!eventId || !userId || !rsvpStatus) {
         throw new Error('Event ID, user ID, and RSVP status are required.');
       }
@@ -1051,18 +1081,292 @@ export const EventsProvider = ({ children }) => {
         throw new Error(`Invalid RSVP status. Must be one of: ${validStatuses.join(', ')}`);
       }
 
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('Event not found.');
+      }
+
+      // Check if maybe is allowed
+      if (rsvpStatus === 'maybe' && !event.rsvpSettings?.allowMaybe) {
+        throw new Error('Maybe option is not enabled for this event.');
+      }
+
+      // Create date key for this RSVP
+      // If eventDate is provided, use it; otherwise use 'default' for single-date events
+      let dateKey = 'default';
+      if (eventDate) {
+        // Normalize date to ISO string for consistent key
+        const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
+        dateKey = date.toISOString().split('T')[0]; // Use YYYY-MM-DD format
+      } else if (event.scheduledFor) {
+        const date = new Date(event.scheduledFor);
+        dateKey = date.toISOString().split('T')[0];
+      }
+
+      // Get current member and their RSVP statuses
+      const currentMember = event.members.find((m) => m.userId === userId);
+      const currentRsvpStatuses = currentMember?.rsvpStatuses || {};
+      const previousStatus = currentRsvpStatuses[dateKey] || null;
+
+      // Update in Firestore if available (non-blocking - update local state even if this fails)
+      if (db && eventId) {
+        // Fire and forget - don't block local state update
+        const membersRef = db.collection('gamingGroups').doc(eventId)
+          .collection('members').doc(userId);
+        
+        membersRef.get().then(async (memberDoc) => {
+          const existingData = memberDoc.data() || {};
+          const existingRsvpStatuses = existingData.rsvpStatuses || {};
+          
+          // Update the specific date's RSVP
+          const updatedRsvpStatuses = {
+            ...existingRsvpStatuses,
+            [dateKey]: rsvpStatus,
+          };
+          
+          await membersRef.set({
+            rsvpStatuses: updatedRsvpStatuses,
+            rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
+            // Keep backward compatibility with single rsvpStatus
+            rsvpStatus: eventDate ? existingData.rsvpStatus : rsvpStatus,
+          }, { merge: true });
+        }).catch((error) => {
+          console.error('Error updating RSVP in Firestore (non-blocking):', error);
+          // Don't throw - allow local state to update for better UX
+        });
+      }
+
+      // Update local state and handle waitlist promotion
+      setEvents((prev) =>
+        prev.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          // Get all members with their RSVPs
+          const updatedMembers = event.members.map((member) => {
+            if (member.userId !== userId) {
+              return member;
+            }
+
+            const existingRsvpStatuses = member.rsvpStatuses || {};
+            const updatedRsvpStatuses = {
+              ...existingRsvpStatuses,
+              [dateKey]: rsvpStatus,
+            };
+
+          return {
+                    ...member,
+              rsvpStatuses: updatedRsvpStatuses,
+              rsvpStatus: eventDate ? member.rsvpStatus : rsvpStatus, // Backward compatibility
+                    rsvpUpdatedAt: new Date().toISOString(),
+            };
+          });
+
+          // Handle waitlist promotion if someone changed from 'going' to something else
+          // and there's an attendance limit (only for the specific date)
+          const attendanceLimit = event.rsvpSettings?.attendanceLimit;
+          if (attendanceLimit && previousStatus === 'going' && rsvpStatus !== 'going') {
+            // Count current 'going' RSVPs for this specific date
+            const goingCount = updatedMembers.filter((m) => {
+              const memberRsvpStatuses = m.rsvpStatuses || {};
+              return memberRsvpStatuses[dateKey] === 'going';
+            }).length;
+
+            // If we're under the limit, promote the first waitlisted member for this date
+            if (goingCount < attendanceLimit) {
+              // Find waitlisted members for this date
+              const waitlistedMembers = updatedMembers.filter((m) => {
+                if (m.userId === userId) return false; // Skip the person who just changed
+                const memberRsvpStatuses = m.rsvpStatuses || {};
+                const memberStatus = memberRsvpStatuses[dateKey];
+                return !memberStatus || memberStatus === 'maybe';
+              });
+
+              if (waitlistedMembers.length > 0) {
+                // Promote the first waitlisted member (oldest join date)
+                const toPromote = waitlistedMembers.sort(
+                  (a, b) => new Date(a.joinedAt) - new Date(b.joinedAt)
+                )[0];
+
+                const finalMembers = updatedMembers.map((member) => {
+                  if (member.userId !== toPromote.userId) {
+                    return member;
+                  }
+
+                  const existingRsvpStatuses = member.rsvpStatuses || {};
+                  return {
+                    ...member,
+                    rsvpStatuses: {
+                      ...existingRsvpStatuses,
+                      [dateKey]: 'going',
+                    },
+                    rsvpUpdatedAt: new Date().toISOString(),
+                  };
+                });
+
+                // Update in Firestore (fire and forget)
+                if (db) {
+                  const promoteRef = db.collection('gamingGroups').doc(eventId)
+                    .collection('members').doc(toPromote.userId);
+                  
+                  promoteRef.get().then((promoteDoc) => {
+                    const promoteData = promoteDoc.data() || {};
+                    const promoteRsvpStatuses = promoteData.rsvpStatuses || {};
+                    
+                    return promoteRef.set({
+                      rsvpStatuses: {
+                        ...promoteRsvpStatuses,
+                        [dateKey]: 'going',
+                      },
+                      rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
+                    }, { merge: true });
+                  }).catch(console.error);
+                }
+
+                return {
+                  ...event,
+                  members: finalMembers,
+                  lastUpdatedAt: new Date().toISOString(),
+                };
+              }
+            }
+          }
+
+          return {
+            ...event,
+            members: updatedMembers,
+            lastUpdatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    [events],
+  );
+
+  const updateRSVPSettings = useCallback(
+    async (eventId, userId, settings) => {
+      if (!eventId || !userId) {
+        throw new Error('Event ID and user ID are required.');
+      }
+
+      // Verify user is the organizer
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('Event not found.');
+      }
+
+      if (event.organizerId !== userId) {
+        throw new Error('Only the organizer can update RSVP settings.');
+      }
+
+      // Update in Firestore if available
+      if (db && eventId) {
+        try {
+          const groupRef = db.collection('gamingGroups').doc(eventId);
+          await groupRef.update({
+            'rsvpSettings.enabled': settings.enabled !== undefined ? settings.enabled : event.rsvpSettings?.enabled ?? true,
+            'rsvpSettings.allowMaybe': settings.allowMaybe !== undefined ? settings.allowMaybe : event.rsvpSettings?.allowMaybe ?? true,
+            'rsvpSettings.attendanceLimit': settings.attendanceLimit !== undefined ? settings.attendanceLimit : event.rsvpSettings?.attendanceLimit ?? null,
+            updatedAt: firebase.firestore.Timestamp.now(),
+          });
+        } catch (error) {
+          console.error('Error updating RSVP settings in Firestore:', error);
+          throw error;
+        }
+      }
+
+      // Update local state
+      setEvents((prev) =>
+        prev.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          const currentSettings = event.rsvpSettings || {
+            enabled: true,
+            allowMaybe: true,
+            attendanceLimit: null,
+          };
+
+          return {
+            ...event,
+            rsvpSettings: {
+              enabled: settings.enabled !== undefined ? settings.enabled : currentSettings.enabled,
+              allowMaybe: settings.allowMaybe !== undefined ? settings.allowMaybe : currentSettings.allowMaybe,
+              attendanceLimit: settings.attendanceLimit !== undefined ? settings.attendanceLimit : currentSettings.attendanceLimit,
+            },
+            lastUpdatedAt: new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    [events],
+  );
+
+  const overrideMemberRSVP = useCallback(
+    async (eventId, userId, targetUserId, rsvpStatus, eventDate = null) => {
+      if (!eventId || !userId) {
+        throw new Error('Event ID and user ID are required.');
+      }
+
+      // Verify user is the organizer
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('Event not found.');
+      }
+
+      if (event.organizerId !== userId) {
+        throw new Error('Only the organizer can override RSVP status.');
+      }
+
+      // Validate RSVP status
+      const validStatuses = ['going', 'maybe', 'not-going', null];
+      if (!validStatuses.includes(rsvpStatus)) {
+        throw new Error(`Invalid RSVP status. Must be one of: ${validStatuses.filter(Boolean).join(', ')}, or null`);
+      }
+
+      // Create date key
+      let dateKey = 'default';
+      if (eventDate) {
+        const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
+        dateKey = date.toISOString().split('T')[0];
+      } else if (event.scheduledFor) {
+        const date = new Date(event.scheduledFor);
+        dateKey = date.toISOString().split('T')[0];
+      }
+
       // Update in Firestore if available
       if (db && eventId) {
         try {
           const membersRef = db.collection('gamingGroups').doc(eventId)
-            .collection('members').doc(userId);
+            .collection('members').doc(targetUserId);
           
-          await membersRef.set({
-            rsvpStatus,
-            rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
-          }, { merge: true });
+          const memberDoc = await membersRef.get();
+          const existingData = memberDoc.data() || {};
+          const existingRsvpStatuses = existingData.rsvpStatuses || {};
+          
+          if (rsvpStatus === null) {
+            // Remove this date's RSVP
+            const updatedRsvpStatuses = { ...existingRsvpStatuses };
+            delete updatedRsvpStatuses[dateKey];
+            
+            await membersRef.set({
+              rsvpStatuses: updatedRsvpStatuses,
+              rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
+            }, { merge: true });
+          } else {
+            await membersRef.set({
+              rsvpStatuses: {
+                ...existingRsvpStatuses,
+                [dateKey]: rsvpStatus,
+              },
+              rsvpStatus: eventDate ? existingData.rsvpStatus : rsvpStatus, // Backward compatibility
+              rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
+            }, { merge: true });
+          }
         } catch (error) {
-          console.error('Error updating RSVP in Firestore:', error);
+          console.error('Error overriding RSVP in Firestore:', error);
           throw error;
         }
       }
@@ -1076,21 +1380,37 @@ export const EventsProvider = ({ children }) => {
 
           return {
             ...event,
-            members: event.members.map((member) =>
-              member.userId === userId
-                ? {
-                    ...member,
-                    rsvpStatus,
-                    rsvpUpdatedAt: new Date().toISOString(),
-                  }
-                : member,
-            ),
+            members: event.members.map((member) => {
+              if (member.userId !== targetUserId) {
+                return member;
+              }
+
+              const existingRsvpStatuses = member.rsvpStatuses || {};
+              let updatedRsvpStatuses;
+              
+              if (rsvpStatus === null) {
+                updatedRsvpStatuses = { ...existingRsvpStatuses };
+                delete updatedRsvpStatuses[dateKey];
+              } else {
+                updatedRsvpStatuses = {
+                  ...existingRsvpStatuses,
+                  [dateKey]: rsvpStatus,
+                };
+              }
+
+              return {
+                ...member,
+                rsvpStatuses: updatedRsvpStatuses,
+                rsvpStatus: eventDate ? member.rsvpStatus : rsvpStatus, // Backward compatibility
+                rsvpUpdatedAt: rsvpStatus ? new Date().toISOString() : null,
+              };
+            }),
             lastUpdatedAt: new Date().toISOString(),
           };
         }),
       );
     },
-    [],
+    [events],
   );
 
   const updateEventSchedule = useCallback(
@@ -1229,6 +1549,8 @@ export const EventsProvider = ({ children }) => {
       updateContactRequest,
       updateMemberRSVP,
       updateEventSchedule,
+      updateRSVPSettings,
+      overrideMemberRSVP,
       loading,
       membershipStatus: MEMBERSHIP_STATUS,
       contactStatus: CONTACT_STATUS,
@@ -1254,6 +1576,8 @@ export const EventsProvider = ({ children }) => {
       updateContactRequest,
       updateMemberRSVP,
       updateEventSchedule,
+      updateRSVPSettings,
+      overrideMemberRSVP,
     ],
   );
 

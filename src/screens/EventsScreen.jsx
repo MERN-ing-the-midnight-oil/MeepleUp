@@ -1,5 +1,4 @@
-import React, { useState, useMemo } from 'react';
-import { Platform } from 'react-native';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,46 +7,23 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-
-// Only import react-router-dom on web platform
-let useNavigateHook;
-if (Platform.OS === 'web') {
-  try {
-    const { useNavigate } = require('react-router-dom');
-    useNavigateHook = useNavigate;
-  } catch (e) {
-    // react-router-dom not available
-    useNavigateHook = () => () => {};
-  }
-} else {
-  // React Native - return no-op function
-  useNavigateHook = () => () => {};
-}
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
 import { formatDate } from '../utils/helpers';
 import { validateJoinCode } from '../utils/api';
+import { useUnifiedNavigation } from '../utils/navigation';
+import { db } from '../config/firebase';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
 import ContactOrganizerForm from '../components/ContactOrganizerForm';
+import JoinForm from '../components/JoinForm';
+import CreateEventForm from '../components/CreateEventForm';
+import EventCard from '../components/EventCard';
+import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
 
 const EventsScreen = () => {
-  const navigate = useNavigateHook();
-  
-  // If not on web, show a message that this screen is web-only
-  if (Platform.OS !== 'web') {
-    return (
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <Text style={styles.title}>MeepleUps</Text>
-          <Text style={styles.subtitle}>
-            MeepleUps management is available on the web version. Use the Collection or Profile screens on mobile.
-          </Text>
-        </View>
-      </View>
-    );
-  }
+  const navigate = useUnifiedNavigation();
   const { user } = useAuth();
   const {
     events,
@@ -61,9 +37,9 @@ const EventsScreen = () => {
     leaveEvent,
     getEventById,
     membershipStatus,
+    updateMemberRSVP,
   } = useEvents();
 
-  const [showJoinModal, setShowJoinModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
   const [joinCodeWord1, setJoinCodeWord1] = useState('');
@@ -74,6 +50,9 @@ const EventsScreen = () => {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [contactLoading, setContactLoading] = useState(false);
   const [infoMessage, setInfoMessage] = useState('');
+  const [memberRSVPs, setMemberRSVPs] = useState({});
+  const scrollViewRef = useRef(null);
+  const scrollPositionRef = useRef(0);
 
   // Event creation form state
   const [eventForm, setEventForm] = useState({
@@ -81,7 +60,89 @@ const EventsScreen = () => {
     generalLocation: '',
     scheduledFor: '',
     description: '',
+    rsvpSettings: {
+      enabled: true,
+      allowMaybe: true,
+      attendanceLimit: null,
+    },
   });
+
+  // Fetch RSVP data for all user events
+  useEffect(() => {
+    if (!userIdentifier || !db || userEvents.length === 0) return;
+
+    const fetchRSVPs = async () => {
+      const rsvps = {};
+      try {
+        for (const event of userEvents) {
+          if (!event.id) continue;
+          try {
+            const membersSnapshot = await db
+              .collection('gamingGroups')
+              .doc(event.id)
+              .collection('members')
+              .get();
+
+            membersSnapshot.docs.forEach((memberDoc) => {
+              const memberData = memberDoc.data();
+              const memberId = memberDoc.id;
+              if (memberData.rsvpStatus) {
+                rsvps[`${event.id}_${memberId}`] = memberData.rsvpStatus;
+              }
+            });
+          } catch (error) {
+            console.error(`Error fetching RSVPs for event ${event.id}:`, error);
+          }
+        }
+        setMemberRSVPs(rsvps);
+      } catch (error) {
+        console.error('Error fetching RSVPs:', error);
+      }
+    };
+
+    fetchRSVPs();
+  }, [userIdentifier, userEvents.length]);
+
+  const handleRSVP = useCallback(async (eventId, status) => {
+    if (!userIdentifier) {
+      Alert.alert('Error', 'Please sign in to RSVP.');
+      return;
+    }
+
+    // Capture scroll position before any updates
+    const savedScroll = scrollPositionRef.current;
+
+    // Optimistically update local state immediately
+    setMemberRSVPs((prev) => ({
+      ...prev,
+      [`${eventId}_${userIdentifier}`]: status,
+    }));
+
+    // Restore scroll position after React has painted the update
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (scrollViewRef.current && savedScroll > 0) {
+          scrollViewRef.current.scrollTo({
+            y: savedScroll,
+            animated: false,
+          });
+        }
+      });
+    });
+
+    // Update context asynchronously
+    try {
+      await updateMemberRSVP(eventId, userIdentifier, status);
+    } catch (error) {
+      // Revert optimistic update on error
+      setMemberRSVPs((prev) => {
+        const updated = { ...prev };
+        delete updated[`${eventId}_${userIdentifier}`];
+        return updated;
+      });
+      Alert.alert('Error', error.message || 'Failed to update RSVP.');
+    }
+  }, [userIdentifier, updateMemberRSVP]);
 
   const userIdentifier = user?.uid || user?.id;
   const userEvents = userIdentifier ? getUserEvents(userIdentifier) : [];
@@ -95,6 +156,25 @@ const EventsScreen = () => {
     ),
     [events],
   );
+
+  // Memoize eventRSVPs mapping to prevent unnecessary re-renders
+  // Only re-create when memberRSVPs or userEvents change
+  const eventRSVPsMap = useMemo(() => {
+    const map = {};
+    userEvents.forEach((event) => {
+      const eventRSVPs = {};
+      (event.members || []).forEach((member) => {
+        const rsvpKey = `${event.id}_${member.userId}`;
+        if (memberRSVPs[rsvpKey]) {
+          eventRSVPs[member.userId] = memberRSVPs[rsvpKey];
+        } else if (member.rsvpStatus) {
+          eventRSVPs[member.userId] = member.rsvpStatus;
+        }
+      });
+      map[event.id] = eventRSVPs;
+    });
+    return map;
+  }, [userEvents, memberRSVPs]);
 
   const handleEventClick = (eventId) => {
     navigate(`/event/${eventId}`);
@@ -147,7 +227,6 @@ const EventsScreen = () => {
         return;
       }
 
-      setShowJoinModal(false);
       setJoinCodeWord1('');
       setJoinCodeWord2('');
       setJoinCodeWord3('');
@@ -178,6 +257,11 @@ const EventsScreen = () => {
         scheduledFor: eventForm.scheduledFor.trim() || '',
         description: eventForm.description.trim() || '',
         visibility: 'private',
+        rsvpSettings: eventForm.rsvpSettings || {
+          enabled: true,
+          allowMaybe: true,
+          attendanceLimit: null,
+        },
       });
 
       setShowCreateModal(false);
@@ -267,49 +351,29 @@ const EventsScreen = () => {
   };
 
   const handleLeaveEvent = async (eventId) => {
-    if (!userIdentifier) {
-      Alert.alert('Error', 'You must be signed in to leave a MeepleUp.');
-      return;
-    }
-
-    const event = getEventById(eventId);
-    if (!event) {
-      Alert.alert('Error', 'MeepleUp not found.');
-      return;
-    }
-
-    // Don't allow organizer to leave
-    if (event.organizerId === userIdentifier) {
-      Alert.alert('Cannot Leave', 'As the organizer, you cannot leave this MeepleUp. You can archive it instead.');
-      return;
-    }
-
-    Alert.alert(
-      'Leave MeepleUp?',
-      'Are you sure you want to leave this MeepleUp? You will need to get a new invitation to rejoin.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await leaveEvent(eventId, userIdentifier);
-              Alert.alert('Left MeepleUp', 'You have successfully left the MeepleUp.');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to leave MeepleUp. Please try again.');
-              console.error(error);
-            }
-          },
-        },
-      ],
-    );
+    handleLeaveEventUtil(eventId, userIdentifier, leaveEvent, getEventById);
   };
+
+  // Memoize RSVP handlers to prevent unnecessary re-renders
+  const rsvpHandlers = useMemo(() => {
+    const handlers = {};
+    userEvents.forEach((event) => {
+      handlers[event.id] = (status) => handleRSVP(event.id, status);
+    });
+    return handlers;
+  }, [userEvents, handleRSVP]);
 
 
   return (
     <>
-      <ScrollView style={styles.container}>
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.container}
+        onScroll={(event) => {
+          scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Your MeepleUps</Text>
           <Text style={styles.subtitle}>Manage your game night MeepleUps</Text>
@@ -322,11 +386,18 @@ const EventsScreen = () => {
             onPress={() => setShowCreateModal(true)}
             style={styles.actionButton}
           />
-          <Button
-            label="Join MeepleUp"
-            onPress={() => setShowJoinModal(true)}
-            variant="outline"
-            style={styles.actionButton}
+        </View>
+
+        {/* Join with Code Section */}
+        <View style={styles.joinSection}>
+          <JoinForm
+            joinCodeWord1={joinCodeWord1}
+            joinCodeWord2={joinCodeWord2}
+            joinCodeWord3={joinCodeWord3}
+            onJoinCodeWordChange={handleJoinCodeWordChange}
+            onJoin={handleJoinEvent}
+            error={joinError}
+            loading={joinLoading}
           />
         </View>
 
@@ -342,50 +413,22 @@ const EventsScreen = () => {
           <View style={styles.eventsSection}>
             <Text style={styles.sectionTitle}>My MeepleUps</Text>
             {userEvents.map((event) => {
-              const memberCount = (event.members || []).filter(
-                (member) => member.status === 'member',
-              ).length;
               const isOrganizer = event.organizerId === userIdentifier;
+              const eventRSVPs = eventRSVPsMap[event.id] || {};
 
               return (
-                <View key={event.id} style={styles.eventTile}>
-                  <Pressable
-                    style={styles.eventTileContent}
-                    onPress={() => handleEventClick(event.id)}
-                  >
-                    <View style={styles.eventHeader}>
-                      <View style={styles.eventInfo}>
-                        <Text style={styles.eventTitle}>
-                          {event.name || 'Untitled MeepleUp'}
-                        </Text>
-                        <Text style={styles.eventMeta}>
-                          {event.generalLocation || event.exactLocation || 'Location TBD'}
-                        </Text>
-                      </View>
-                    </View>
-                    {event.scheduledFor && (
-                      <Text style={styles.eventDate}>
-                        {formatDate(event.scheduledFor) || event.scheduledFor}
-                      </Text>
-                    )}
-                    {event.members && (
-                      <Text style={styles.eventMembers}>
-                        {memberCount} member{memberCount !== 1 ? 's' : ''}
-                      </Text>
-                    )}
-                  </Pressable>
-                  {!isOrganizer && (
-                    <Pressable
-                      style={styles.leaveButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleLeaveEvent(event.id);
-                      }}
-                    >
-                      <Text style={styles.leaveButtonText}>Leave</Text>
-                    </Pressable>
-                  )}
-                </View>
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onPress={() => handleEventClick(event.id)}
+                  onLeave={handleLeaveEvent}
+                  showLeaveButton={!isOrganizer}
+                  isOrganizer={isOrganizer}
+                  style={styles.eventTile}
+                  currentUserId={userIdentifier}
+                  onRSVP={rsvpHandlers[event.id]}
+                  memberRSVPs={eventRSVPs}
+                />
               );
             })}
           </View>
@@ -529,128 +572,45 @@ const EventsScreen = () => {
         )}
       </ScrollView>
 
-      {/* Join Event Modal */}
-      <Modal
-        isOpen={showJoinModal}
-        onClose={() => {
-          setShowJoinModal(false);
-          setJoinCodeWord1('');
-          setJoinCodeWord2('');
-          setJoinCodeWord3('');
-          setJoinError('');
-        }}
-        title="Join MeepleUp"
-      >
-        <View style={styles.modalContent}>
-          <Text style={styles.modalText}>
-            Enter the three-word join code provided by the MeepleUp organizer.
-          </Text>
-          <View style={styles.joinCodeFields}>
-            <Input
-              value={joinCodeWord1}
-              onChangeText={(text) => handleJoinCodeWordChange(1, text)}
-              placeholder="Word 1"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.modalInput, styles.joinCodeInput]}
-            />
-            <Input
-              value={joinCodeWord2}
-              onChangeText={(text) => handleJoinCodeWordChange(2, text)}
-              placeholder="Word 2"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.modalInput, styles.joinCodeInput]}
-            />
-            <Input
-              value={joinCodeWord3}
-              onChangeText={(text) => handleJoinCodeWordChange(3, text)}
-              placeholder="Word 3"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.modalInput, styles.joinCodeInput]}
-            />
-          </View>
-          {joinError ? (
-            <Text style={styles.errorText}>{joinError}</Text>
-          ) : null}
-          <View style={styles.modalActions}>
-            <Button
-              label={joinLoading ? 'Joining...' : 'Join MeepleUp'}
-              onPress={handleJoinEvent}
-              disabled={joinLoading || !joinCodeWord1.trim() || !joinCodeWord2.trim() || !joinCodeWord3.trim()}
-              style={styles.modalButton}
-            />
-            <Button
-              label="Cancel"
-              onPress={() => {
-                setShowJoinModal(false);
-                setJoinCodeWord1('');
-                setJoinCodeWord2('');
-                setJoinCodeWord3('');
-                setJoinError('');
-              }}
-              variant="outline"
-              style={styles.modalButton}
-            />
-          </View>
-        </View>
-      </Modal>
-
       {/* Host Event Modal */}
       <Modal
         isOpen={showCreateModal}
         onClose={() => {
           setShowCreateModal(false);
-          setEventForm({ name: '', generalLocation: '', scheduledFor: '', description: '' });
+          setEventForm({
+            name: '',
+            generalLocation: '',
+            scheduledFor: '',
+            description: '',
+            rsvpSettings: {
+              enabled: true,
+              allowMaybe: true,
+              attendanceLimit: null,
+            },
+          });
         }}
         title="Host MeepleUp"
       >
-        <View style={styles.modalContent}>
-          <Text style={styles.fieldLabel}>MeepleUp name <Text style={styles.requiredAsterisk}>*</Text></Text>
-          <Input
-            value={eventForm.name}
-            onChangeText={(text) => setEventForm({ ...eventForm, name: text })}
-            placeholder="MeepleUp name"
-            style={styles.modalInput}
-          />
-          <Input
-            value={eventForm.generalLocation}
-            onChangeText={(text) => setEventForm({ ...eventForm, generalLocation: text })}
-            placeholder="General location (e.g., Seattle, WA)"
-            style={styles.modalInput}
-          />
-          <Input
-            value={eventForm.scheduledFor}
-            onChangeText={(text) => setEventForm({ ...eventForm, scheduledFor: text })}
-            placeholder="Date & time (optional)"
-            style={styles.modalInput}
-          />
-          <Input
-            value={eventForm.description}
-            onChangeText={(text) => setEventForm({ ...eventForm, description: text })}
-            placeholder="Description (optional)"
-            multiline
-            numberOfLines={3}
-            style={styles.modalInput}
-          />
-          <View style={styles.modalActions}>
-            <Button
-              label="Host MeepleUp"
-              onPress={handleCreateEvent}
-              style={styles.modalButton}
-            />
-            <Button
-              label="Cancel"
-              onPress={() => {
-                setShowCreateModal(false);
-                setEventForm({ name: '', generalLocation: '', scheduledFor: '', description: '' });
-              }}
-              variant="outline"
-              style={styles.modalButton}
-            />
-          </View>
-        </View>
+        <CreateEventForm
+          eventForm={eventForm}
+          onFormChange={setEventForm}
+          onSubmit={handleCreateEvent}
+          onCancel={() => {
+            setShowCreateModal(false);
+            setEventForm({
+              name: '',
+              generalLocation: '',
+              scheduledFor: '',
+              description: '',
+              rsvpSettings: {
+                enabled: true,
+                allowMaybe: true,
+                attendanceLimit: null,
+              },
+            });
+          }}
+          loading={false}
+        />
       </Modal>
 
       {/* Contact Organizer Modal */}
@@ -706,6 +666,34 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  joinSection: {
+    padding: 20,
+    paddingTop: 0,
+  },
+  joinTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  joinSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  joinCodeFields: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  joinCodeInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  joinButton: {
+    width: '100%',
   },
   eventsSection: {
     padding: 20,
@@ -878,12 +866,6 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#d45d5d',
     fontSize: 14,
-    marginBottom: 12,
-  },
-  joinCodeFields: {
-    marginBottom: 16,
-  },
-  joinCodeInput: {
     marginBottom: 12,
   },
   fieldLabel: {

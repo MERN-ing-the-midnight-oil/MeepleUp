@@ -1,0 +1,167 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is a member of a group by reading the group document
+    // This function can be used when we already have access to the group document
+    function isMemberOfGroup(groupData) {
+      return isAuthenticated() && 
+        request.auth.uid in (groupData.memberIds || []);
+    }
+    
+    // Check if user is organizer of a group by reading the group document
+    function isOrganizerOfGroup(groupData) {
+      return isAuthenticated() && 
+        request.auth.uid == groupData.organizerId;
+    }
+    
+    // Check membership using get() - use carefully to avoid circular dependencies
+    function isGroupMember(groupId) {
+      return isAuthenticated() && 
+        request.auth.uid in get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds;
+    }
+    
+    function isGroupOrganizer(groupId) {
+      return isAuthenticated() && 
+        request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId;
+    }
+    
+    // Users can read/write their own profile
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+    
+    // Gaming Groups
+    match /gamingGroups/{groupId} {
+      // Allow reading if authenticated AND (public OR user is in memberIds)
+      // Use resource.data to check memberIds without needing get()
+      allow read: if isAuthenticated() && (
+        resource.data.privacy == 'public' ||
+        request.auth.uid in (resource.data.memberIds || [])
+      );
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.organizerId
+      );
+      
+      // Group members - allow members to update their own member document (including RSVP fields)
+      match /members/{userId} {
+        // Allow reading if user is authenticated and either:
+        // - They are reading their own member document, OR
+        // - The parent group is public, OR
+        // - They are a member of the group (check parent group's memberIds)
+        allow read: if isAuthenticated() && (
+          isOwner(userId) ||
+          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public' ||
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
+        );
+        allow create: if isAuthenticated() && (
+          isOwner(userId) ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+        // Allow members to update their own member document (including rsvpStatus, rsvpStatuses, rsvpUpdatedAt)
+        // Organizers can update any member's data
+        allow update: if isAuthenticated() && (
+          isOwner(userId) ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+        allow delete: if isAuthenticated() && (
+          isOwner(userId) ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+      }
+      
+      // Discussion Forum Posts
+      match /posts/{postId} {
+        allow read: if isAuthenticated() && (
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
+          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+        );
+        allow create: if isAuthenticated() && 
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
+        allow update, delete: if isAuthenticated() && (
+          resource.data.userId == request.auth.uid ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+        
+        // Post Comments
+        match /comments/{commentId} {
+          allow read: if isAuthenticated() && (
+            request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
+            get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+          );
+          allow create: if isAuthenticated() && 
+            request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
+          allow update, delete: if isAuthenticated() && (
+            resource.data.userId == request.auth.uid ||
+            request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          );
+        }
+      }
+      
+      // Game Interests
+      match /gameInterests/{interestId} {
+        allow read: if isAuthenticated() && (
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
+          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+        );
+        allow create: if isAuthenticated() && 
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
+        allow update: if isAuthenticated() && (
+          resource.data.ownerId == request.auth.uid ||
+          resource.data.interestedUserId == request.auth.uid ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+        allow delete: if isAuthenticated() && (
+          resource.data.interestedUserId == request.auth.uid ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+      }
+      
+      // Game Proposals/Nominations
+      match /nominations/{proposalId} {
+        allow read: if isAuthenticated() && (
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
+          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+        );
+        allow create: if isAuthenticated() && 
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
+        allow update, delete: if isAuthenticated() && (
+          resource.data.proposedBy == request.auth.uid ||
+          resource.data.nominatedBy == request.auth.uid ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+      }
+    }
+    
+    // Games (read-only for most users, anyone can create)
+    match /games/{gameId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated(); // Could restrict to admins
+    }
+    
+    // User Games
+    match /userGames/{userId}/games/{gameId} {
+      allow read: if isAuthenticated(); // Members can see each other's games in groups
+      allow write: if isOwner(userId);
+    }
+    
+    // Availability Profiles
+    match /availabilityProfiles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+  }
+}
+

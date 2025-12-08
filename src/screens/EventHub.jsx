@@ -31,6 +31,8 @@ import { formatDate, formatTime } from '../utils/helpers';
 import { getStarRating } from '../utils/gameBadges';
 import { Linking } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { notifyDiscussionActivity } from '../utils/notifications';
+import RSVPManagementScreen from '../components/RSVPManagementScreen';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -130,8 +132,9 @@ const EventHub = () => {
   const [highlightedDateIndex, setHighlightedDateIndex] = useState(null); // Index of date to highlight
   const scheduleScrollRef = useRef(null);
   const dateEntryPositions = useRef({}); // Map of index to Y position
+  const scrollPositionRef = useRef(0); // Track scroll position to prevent jumps
   const [memberNames, setMemberNames] = useState({});
-  const [memberRSVPs, setMemberRSVPs] = useState({});
+  const [memberRSVPs, setMemberRSVPs] = useState({}); // { [userId]: { [dateKey]: status } }
   const [memberAvatars, setMemberAvatars] = useState({});
   const [pinnedNotes, setPinnedNotes] = useState('');
   const [showEditPinnedNotes, setShowEditPinnedNotes] = useState(false);
@@ -151,15 +154,19 @@ const EventHub = () => {
   const [planningGamesSearchQuery, setPlanningGamesSearchQuery] = useState('');
   const [gameInterests, setGameInterests] = useState({}); // { gameId: { userId: 'bringing' } }
   const [showSelectedGamesList, setShowSelectedGamesList] = useState(true);
-  const [nominatedGames, setNominatedGames] = useState([]); // Array of { gameId, gameName, gameImage, nominatedBy: userId, ratings: { userId: rating } }
-  const [userNominations, setUserNominations] = useState(new Set()); // Set of gameIds user has nominated
+  const [proposedGames, setProposedGames] = useState([]); // Array of { gameId, gameName, gameImage, proposedBy: userId, ratings: { userId: rating } }
+  const [userProposals, setUserProposals] = useState(new Set()); // Set of gameIds user has proposed
   // Browse and Request state
   const [selectedAttendeeForBrowse, setSelectedAttendeeForBrowse] = useState(null); // { userId, userName, avatarUrl }
+  // RSVP Management
+  const [showRSVPManagement, setShowRSVPManagement] = useState(false);
   const [showAttendeeCollectionModal, setShowAttendeeCollectionModal] = useState(false);
   const [attendeeCollectionPage, setAttendeeCollectionPage] = useState(1);
   const [attendeeCategorySortPreference, setAttendeeCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
   const [enrichedAttendeeGames, setEnrichedAttendeeGames] = useState([]);
   const GAMES_PER_PAGE = 30;
+  // Game night date selection for aggregated collections
+  const [selectedGameNightDateIndex, setSelectedGameNightDateIndex] = useState(null);
 
   const event = getEventById(eventId);
   const userId = user?.uid || user?.id || null;
@@ -172,7 +179,7 @@ const EventHub = () => {
 
   const members = useMemo(
     () => (event?.members || []).filter((member) => member.status === membershipStatus.MEMBER),
-    [event, membershipStatus],
+    [event?.members, membershipStatus],
   );
 
   // Stable key representing the member IDs for this event.
@@ -243,7 +250,7 @@ const EventHub = () => {
 
   // Fetch member names, RSVP data, and avatars from Firestore
   useEffect(() => {
-    if (!members.length || !db || !event?.id) return;
+    if (!memberIdsKey || !db || !event?.id) return;
 
     const fetchMemberData = async () => {
       const names = {};
@@ -265,8 +272,12 @@ const EventHub = () => {
               
               if (memberDoc.exists) {
                 const memberData = memberDoc.data();
-                if (memberData.rsvpStatus) {
-                  rsvps[member.userId] = memberData.rsvpStatus;
+                // Support both old format (rsvpStatus) and new format (rsvpStatuses)
+                if (memberData.rsvpStatuses) {
+                  rsvps[member.userId] = memberData.rsvpStatuses;
+                } else if (memberData.rsvpStatus) {
+                  // Backward compatibility: convert single status to date-specific
+                  rsvps[member.userId] = { default: memberData.rsvpStatus };
                 }
               }
             }
@@ -289,8 +300,12 @@ const EventHub = () => {
               if (memberData.userName) {
                 names[member.userId] = memberData.userName;
               }
-              if (memberData.rsvpStatus) {
-                rsvps[member.userId] = memberData.rsvpStatus;
+              // Support both old format (rsvpStatus) and new format (rsvpStatuses)
+              if (memberData.rsvpStatuses) {
+                rsvps[member.userId] = memberData.rsvpStatuses;
+              } else if (memberData.rsvpStatus) {
+                // Backward compatibility: convert single status to date-specific
+                rsvps[member.userId] = { default: memberData.rsvpStatus };
               }
               if (memberData.userAvatarUrl && memberData.userAvatarUrl.trim() !== '') {
                 avatars[member.userId] = memberData.userAvatarUrl;
@@ -310,6 +325,19 @@ const EventHub = () => {
               if (!avatarFound) {
                 if (userData.avatarUrl && userData.avatarUrl.trim() !== '') {
                   avatars[member.userId] = userData.avatarUrl;
+                  // Update member document to cache the avatar URL for future fetches
+                  if (event.id) {
+                    try {
+                      const memberDocRef = db.collection('gamingGroups').doc(event.id)
+                        .collection('members').doc(member.userId);
+                      await memberDocRef.set({
+                        userAvatarUrl: userData.avatarUrl,
+                      }, { merge: true });
+                    } catch (updateError) {
+                      // Silently fail - this is just a cache optimization
+                      console.error('Error updating member avatar cache:', updateError);
+                    }
+                  }
                 } else {
                   avatars[member.userId] = null;
                 }
@@ -350,7 +378,8 @@ const EventHub = () => {
     };
 
     fetchMemberData();
-  }, [members, event?.id, user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberIdsKey, event?.id, user?.uid, user?.id]);
 
   // Fetch current user's RSVP from Firestore
   useEffect(() => {
@@ -363,10 +392,17 @@ const EventHub = () => {
         
         if (memberDoc.exists) {
           const memberData = memberDoc.data();
-          if (memberData.rsvpStatus) {
+          // Support both old format (rsvpStatus) and new format (rsvpStatuses)
+          if (memberData.rsvpStatuses) {
             setMemberRSVPs(prev => ({
               ...prev,
-              [userId]: memberData.rsvpStatus,
+              [userId]: memberData.rsvpStatuses,
+            }));
+          } else if (memberData.rsvpStatus) {
+            // Backward compatibility: convert single status to date-specific
+            setMemberRSVPs(prev => ({
+              ...prev,
+              [userId]: { default: memberData.rsvpStatus },
             }));
           }
         }
@@ -397,20 +433,134 @@ const EventHub = () => {
     );
   }
 
-  const handleRSVP = async (status) => {
+  // Helper to get date key from event date
+  const getDateKey = (eventDate) => {
+    if (!eventDate) return 'default';
+    const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
+    return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+  };
+
+  // Helper to get RSVP status for a specific date
+  const getRSVPForDate = (userId, eventDate) => {
+    const userRSVPs = memberRSVPs[userId] || {};
+    if (typeof userRSVPs === 'string') {
+      // Backward compatibility: old format with single status
+      return eventDate ? null : userRSVPs;
+    }
+    const dateKey = getDateKey(eventDate);
+    return userRSVPs[dateKey] || null;
+  };
+
+  // Helper to get members who are "going" or "maybe" for a specific date
+  const getAttendingMembersForDate = (eventDate) => {
+    const dateKey = getDateKey(eventDate);
+    return members.filter((member) => {
+      const memberRsvps = memberRSVPs[member.userId] || {};
+      if (typeof memberRsvps === 'string') {
+        // Backward compatibility: old format
+        return eventDate ? false : (memberRsvps === 'going' || memberRsvps === 'maybe');
+      }
+      const status = memberRsvps[dateKey];
+      return status === 'going' || status === 'maybe';
+    });
+  };
+
+  const handleRSVP = async (status, eventDate = null, e = null) => {
     if (!userId || !isMember) {
       Alert.alert('Error', 'You must be a member to RSVP.');
       return;
     }
 
-    try {
-      await updateMemberRSVP(event.id, userId, status);
-      setMemberRSVPs(prev => ({
+    // Prevent default button behavior that might cause scroll jump
+    if (e) {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+
+    const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
+    
+    // Check if maybe is allowed
+    if (status === 'maybe' && !rsvpSettings.allowMaybe) {
+      Alert.alert('Error', 'Maybe option is not enabled for this event.');
+      return;
+    }
+
+    // Check attendance limit
+    if (status === 'going' && rsvpSettings.attendanceLimit) {
+      const dateKey = getDateKey(eventDate);
+      const goingCount = members.filter((m) => {
+        const memberRsvps = memberRSVPs[m.userId] || {};
+        if (typeof memberRsvps === 'string') return memberRsvps === 'going';
+        return memberRsvps[dateKey] === 'going';
+      }).length;
+      
+      if (goingCount >= rsvpSettings.attendanceLimit && getRSVPForDate(userId, eventDate) !== 'going') {
+        Alert.alert(
+          'Event Full',
+          `This event has reached its attendance limit of ${rsvpSettings.attendanceLimit}. You will be added to the waitlist.`
+        );
+      }
+    }
+
+    // Capture previous status and scroll position before optimistic update
+    const dateKey = getDateKey(eventDate);
+    const previousStatus = getRSVPForDate(userId, eventDate);
+    const savedScroll = scrollPositionRef.current;
+
+    // Optimistically update local state immediately
+    setMemberRSVPs(prev => {
+      const userRSVPs = prev[userId] || {};
+      const updatedUserRSVPs = typeof userRSVPs === 'string' 
+        ? { default: userRSVPs } 
+        : { ...userRSVPs };
+      updatedUserRSVPs[dateKey] = status;
+      return {
         ...prev,
-        [userId]: status,
-      }));
+        [userId]: updatedUserRSVPs,
+      };
+    });
+
+    // Restore scroll position after React has painted the update
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (scheduleScrollRef.current && savedScroll > 0) {
+          scheduleScrollRef.current.scrollTo({
+            y: savedScroll,
+            animated: false,
+          });
+        }
+      });
+    });
+
+    // Update context asynchronously
+    try {
+      await updateMemberRSVP(event.id, userId, status, eventDate);
     } catch (error) {
-      Alert.alert('Error', 'Failed to update RSVP. Please try again.');
+      // Revert optimistic update on error - restore previous status
+      setMemberRSVPs(prev => {
+        const userRSVPs = prev[userId] || {};
+        const updatedUserRSVPs = typeof userRSVPs === 'string' 
+          ? { default: userRSVPs } 
+          : { ...userRSVPs };
+        
+        if (previousStatus) {
+          updatedUserRSVPs[dateKey] = previousStatus;
+        } else {
+          delete updatedUserRSVPs[dateKey];
+        }
+        
+        // Clean up if no RSVPs remain
+        if (Object.keys(updatedUserRSVPs).length === 0) {
+          const { [userId]: _, ...rest } = prev;
+          return rest;
+        }
+        
+        return {
+          ...prev,
+          [userId]: updatedUserRSVPs,
+        };
+      });
+      Alert.alert('Error', error.message || 'Failed to update RSVP. Please try again.');
       console.error(error);
     }
   };
@@ -717,7 +867,9 @@ const EventHub = () => {
   };
 
   const rsvpCounts = getRSVPCounts();
-  const currentUserRSVP = memberRSVPs[userId] || null;
+  // For backward compatibility, get default RSVP
+  const userRsvps = memberRSVPs[userId] || {};
+  const currentUserRSVP = typeof userRsvps === 'string' ? userRsvps : (userRsvps.default || null);
 
   // Event Tab Component (combined Schedule and Members)
   const EventTab = () => {
@@ -736,6 +888,10 @@ const EventHub = () => {
         ref={scheduleScrollRef}
         style={styles.tabContent} 
         contentContainerStyle={styles.tabContentContainer}
+        onScroll={(event) => {
+          scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
       >
         {/* Members Section */}
         <View style={styles.section}>
@@ -747,7 +903,6 @@ const EventHub = () => {
           ) : (
             members.map((member) => {
               const displayName = memberNames[member.userId] || member.userId;
-              const rsvpStatus = memberRSVPs[member.userId] || null;
               const isCurrentUser = member.userId === userId;
               const avatarUrl = memberAvatars[member.userId];
               const hasValidAvatar = isValidAvatarUrl(avatarUrl);
@@ -777,11 +932,6 @@ const EventHub = () => {
                     <Text style={styles.memberRole}>
                       {member.role === 'organizer' ? 'Organizer' : 'Member'}
                     </Text>
-                    {rsvpStatus && (
-                      <Text style={styles.memberRSVP}>
-                        RSVP: {getRSVPStatusLabel(rsvpStatus)}
-                      </Text>
-                    )}
                   </View>
                   {isOrganizer && !isCurrentUser && member.role !== 'organizer' && (
                     <TouchableOpacity
@@ -820,16 +970,26 @@ const EventHub = () => {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Event Details</Text>
-          {event.scheduledFor && (
-            <Button
-              label="Export to Calendar"
-              onPress={handleExportToCalendar}
-              variant="outline"
-              style={styles.exportButton}
-            />
-          )}
-        </View>
+            <Text style={styles.sectionTitle}>Event Details & RSVP</Text>
+            <View style={styles.sectionHeaderActions}>
+              {isOrganizer && (
+                <Button
+                  label="Manage RSVPs"
+                  onPress={() => setShowRSVPManagement(true)}
+                  variant="outline"
+                  style={styles.manageRSVPButton}
+                />
+              )}
+              {event.scheduledFor && (
+                <Button
+                  label="Export to Calendar"
+                  onPress={handleExportToCalendar}
+                  variant="outline"
+                  style={styles.exportButton}
+                />
+              )}
+            </View>
+          </View>
         
         <View style={styles.scheduleInfo}>
           <Text style={styles.scheduleLabel}>Date & Time</Text>
@@ -853,89 +1013,244 @@ const EventHub = () => {
                 const location = ed.location || ed.generalLocation || event.generalLocation || '';
                 const exactLocation = ed.exactLocation || (isMember ? event.exactLocation : null);
                 const note = ed.note || '';
+                const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
+                const showRSVPForDate = isMember && rsvpSettings.enabled;
+                const dateRSVP = getRSVPForDate(userId, date);
                 
                 return (
                   <View
                     key={index}
+                    style={styles.dateEntryContainer}
                     onLayout={(event) => {
                       const { y } = event.nativeEvent.layout;
                       dateEntryPositions.current[index] = y;
                     }}
                   >
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.dateTimeEntry,
-                        pressed && styles.dateTimeEntryPressed,
-                        highlightedDateIndex === index && styles.dateTimeEntryHighlighted,
-                      ]}
-                      onPress={() => {
-                        setSelectedDateDetail({
-                          date,
-                          startTime,
-                          endTime,
-                          location,
-                          exactLocation,
-                          note,
-                          index,
-                        });
-                        setHighlightedDateIndex(index);
-                        // Scroll to this date entry
-                        setTimeout(() => {
-                          const position = dateEntryPositions.current[index];
-                          if (position !== undefined && scheduleScrollRef.current) {
-                            scheduleScrollRef.current.scrollTo({
-                              y: Math.max(0, position - 20), // Add some padding from top
-                              animated: true,
-                            });
-                          }
-                        }, 100);
-                        // Clear highlight after 3 seconds
-                        setTimeout(() => {
-                          setHighlightedDateIndex(null);
-                        }, 3000);
-                      }}
-                    >
-                      <Text style={styles.scheduleValue}>
-                        {dateStr}{timeStr ? ` (${timeStr})` : ''}
-                      </Text>
-                    </Pressable>
+                    <View style={styles.dateEntryContent}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.dateTimeEntry,
+                          pressed && styles.dateTimeEntryPressed,
+                          highlightedDateIndex === index && styles.dateTimeEntryHighlighted,
+                        ]}
+                        onPress={() => {
+                          setSelectedDateDetail({
+                            date,
+                            startTime,
+                            endTime,
+                            location,
+                            exactLocation,
+                            note,
+                            index,
+                          });
+                          setHighlightedDateIndex(index);
+                          // Scroll to this date entry
+                          setTimeout(() => {
+                            const position = dateEntryPositions.current[index];
+                            if (position !== undefined && scheduleScrollRef.current) {
+                              scheduleScrollRef.current.scrollTo({
+                                y: Math.max(0, position - 20), // Add some padding from top
+                                animated: true,
+                              });
+                            }
+                          }, 100);
+                          // Clear highlight after 3 seconds
+                          setTimeout(() => {
+                            setHighlightedDateIndex(null);
+                          }, 3000);
+                        }}
+                      >
+                        <Text style={styles.scheduleValue}>
+                          {dateStr}{timeStr ? ` (${timeStr})` : ''}
+                        </Text>
+                        {location && (
+                          <Text style={styles.scheduleLocation}>{location}</Text>
+                        )}
+                      </Pressable>
+                      
+                      {/* Show attending members for this date */}
+                      {(() => {
+                        const attendingMembers = getAttendingMembersForDate(date);
+                        if (attendingMembers.length === 0) return null;
+                        
+                        return (
+                          <View style={styles.attendingMembersContainer}>
+                            <Text style={styles.attendingMembersLabel}>
+                              {attendingMembers.length} {attendingMembers.length === 1 ? 'person' : 'people'} attending:
+                            </Text>
+                            <View style={styles.attendingMembersAvatars}>
+                              {attendingMembers.map((member) => {
+                                const displayName = memberNames[member.userId] || member.userId;
+                                const avatarUrl = memberAvatars[member.userId];
+                                const hasValidAvatar = isValidAvatarUrl(avatarUrl);
+                                const memberRsvps = memberRSVPs[member.userId] || {};
+                                const dateKey = getDateKey(date);
+                                const memberStatus = typeof memberRsvps === 'string' 
+                                  ? (date ? null : memberRsvps)
+                                  : (memberRsvps[dateKey] || null);
+                                
+                                return (
+                                  <View key={member.userId} style={styles.attendingMemberAvatar}>
+                                    {hasValidAvatar ? (
+                                      <Image
+                                        source={{ uri: avatarUrl }}
+                                        style={styles.attendingAvatarImage}
+                                        resizeMode="cover"
+                                      />
+                                    ) : (
+                                      <View style={styles.attendingAvatarPlaceholder}>
+                                        <Text style={styles.attendingAvatarInitial}>
+                                          {displayName.charAt(0).toUpperCase()}
+                                        </Text>
+                                      </View>
+                                    )}
+                                    {memberStatus === 'going' && (
+                                      <View style={styles.goingBadge}>
+                                        <Text style={styles.goingBadgeText}>✓</Text>
+                                      </View>
+                                    )}
+                                    {memberStatus === 'maybe' && (
+                                      <View style={styles.maybeBadge}>
+                                        <Text style={styles.maybeBadgeText}>?</Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        );
+                      })()}
+                      
+                      {showRSVPForDate && (
+                        <View style={styles.dateRSVPContainer}>
+                          <Text style={styles.dateRSVPLabel}>Your RSVP:</Text>
+                          <View style={styles.dateRSVPButtons}>
+                            <Button
+                              label="Going"
+                              onPress={(e) => {
+                                e?.preventDefault?.();
+                                e?.stopPropagation?.();
+                                handleRSVP('going', date, e);
+                              }}
+                              variant={dateRSVP === 'going' ? 'primary' : 'outline'}
+                              style={styles.dateRSVPButton}
+                            />
+                            {rsvpSettings.allowMaybe && (
+                              <Button
+                                label="Maybe"
+                                onPress={(e) => {
+                                  e?.preventDefault?.();
+                                  e?.stopPropagation?.();
+                                  handleRSVP('maybe', date, e);
+                                }}
+                                variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
+                                style={styles.dateRSVPButton}
+                              />
+                            )}
+                            <Button
+                              label="Can't Make It"
+                              onPress={(e) => {
+                                e?.preventDefault?.();
+                                e?.stopPropagation?.();
+                                handleRSVP('not-going', date, e);
+                              }}
+                              variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
+                              style={styles.dateRSVPButton}
+                            />
+                          </View>
+                          {dateRSVP && (
+                            <Text style={styles.dateRSVPStatus}>
+                              Status: {getRSVPStatusLabel(dateRSVP)}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
                   </View>
                 );
               })}
             </View>
           ) : event.scheduledFor ? (
-            <Pressable
-              style={({ pressed }) => [
-                pressed && styles.dateTimeEntryPressed,
-              ]}
-              onPress={() => {
-                const date = safeParseDate(event.scheduledFor);
-                if (date && !isNaN(date.getTime())) {
-                  const startTime = safeParseDate(event.scheduledFor);
-                  setSelectedDateDetail({
-                    date,
-                    startTime: startTime && !isNaN(startTime.getTime()) ? startTime : null,
-                    endTime: null,
-                    location: event.generalLocation || '',
-                    exactLocation: isMember ? (event.exactLocation || '') : null,
-                    note: '',
-                    index: 0,
-                  });
-                }
-              }}
-            >
-              <Text style={styles.scheduleValue}>
-                {(() => {
-                  const date = safeParseDate(event.scheduledFor);
-                  if (!date || isNaN(date.getTime())) {
-                    return 'Date and time to be announced';
-                  }
-                  const dateStr = formatDate(date.toISOString());
-                  const timeStr = formatTime(date.toISOString());
-                  return `${dateStr} (${timeStr})`;
-                })()}
-              </Text>
-            </Pressable>
+            (() => {
+              const date = safeParseDate(event.scheduledFor);
+              const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
+              const showRSVPForDate = isMember && rsvpSettings.enabled;
+              const dateRSVP = date ? getRSVPForDate(userId, date) : null;
+              
+              return (
+                <View style={styles.dateEntryContainer}>
+                  <View style={styles.dateEntryContent}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.dateTimeEntry,
+                        pressed && styles.dateTimeEntryPressed,
+                      ]}
+                      onPress={() => {
+                        if (date && !isNaN(date.getTime())) {
+                          const startTime = safeParseDate(event.scheduledFor);
+                          setSelectedDateDetail({
+                            date,
+                            startTime: startTime && !isNaN(startTime.getTime()) ? startTime : null,
+                            endTime: null,
+                            location: event.generalLocation || '',
+                            exactLocation: isMember ? (event.exactLocation || '') : null,
+                            note: '',
+                            index: 0,
+                          });
+                        }
+                      }}
+                    >
+                      <Text style={styles.scheduleValue}>
+                        {(() => {
+                          if (!date || isNaN(date.getTime())) {
+                            return 'Date and time to be announced';
+                          }
+                          const dateStr = formatDate(date.toISOString());
+                          const timeStr = formatTime(date.toISOString());
+                          return `${dateStr} (${timeStr})`;
+                        })()}
+                      </Text>
+                      {event.generalLocation && (
+                        <Text style={styles.scheduleLocation}>{event.generalLocation}</Text>
+                      )}
+                    </Pressable>
+                    {showRSVPForDate && date && (
+                      <View style={styles.dateRSVPContainer}>
+                        <Text style={styles.dateRSVPLabel}>Your RSVP:</Text>
+                        <View style={styles.dateRSVPButtons}>
+                          <Button
+                            label="Going"
+                            onPress={() => handleRSVP('going', date)}
+                            variant={dateRSVP === 'going' ? 'primary' : 'outline'}
+                            style={styles.dateRSVPButton}
+                          />
+                          {rsvpSettings.allowMaybe && (
+                            <Button
+                              label="Maybe"
+                              onPress={() => handleRSVP('maybe', date)}
+                              variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
+                              style={styles.dateRSVPButton}
+                            />
+                          )}
+                          <Button
+                            label="Can't Make It"
+                            onPress={() => handleRSVP('not-going', date)}
+                            variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
+                            style={styles.dateRSVPButton}
+                          />
+                        </View>
+                        {dateRSVP && (
+                          <Text style={styles.dateRSVPStatus}>
+                            Status: {getRSVPStatusLabel(dateRSVP)}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })()
           ) : (
             <Text style={styles.scheduleValue}>Date and time to be announced</Text>
           )}
@@ -989,35 +1304,68 @@ const EventHub = () => {
         </View>
       )}
 
-      {isMember && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>RSVP</Text>
-          <Text style={styles.sectionCopy}>
-            Your RSVP: <Text style={styles.bold}>{getRSVPStatusLabel(currentUserRSVP)}</Text>
-          </Text>
-          
-          <View style={styles.rsvpButtons}>
-            <Button
-              label="Going"
-              onPress={() => handleRSVP('going')}
-              variant={currentUserRSVP === 'going' ? 'primary' : 'outline'}
-              style={styles.rsvpButton}
-            />
-            <Button
-              label="Maybe"
-              onPress={() => handleRSVP('maybe')}
-              variant={currentUserRSVP === 'maybe' ? 'primary' : 'outline'}
-              style={styles.rsvpButton}
-            />
-            <Button
-              label="Can't Make It"
-              onPress={() => handleRSVP('not-going')}
-              variant={currentUserRSVP === 'not-going' ? 'primary' : 'outline'}
-              style={styles.rsvpButton}
-            />
+      {/* RSVP Summary - Only show if no event dates (backward compatibility) */}
+      {isMember && !event.eventDates && (() => {
+        const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
+        if (!rsvpSettings.enabled) return null;
+        
+        const defaultRSVP = getRSVPForDate(userId, null);
+        
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Your RSVP</Text>
+            <Text style={styles.sectionCopy}>
+              Status: <Text style={styles.bold}>{getRSVPStatusLabel(defaultRSVP)}</Text>
+            </Text>
+            
+            {rsvpSettings.attendanceLimit && (
+              <View style={styles.rsvpLimitInfo}>
+                <Text style={styles.rsvpLimitText}>
+                  Attendance: {rsvpCounts.going}/{rsvpSettings.attendanceLimit}
+                  {rsvpCounts.going >= rsvpSettings.attendanceLimit && defaultRSVP !== 'going' && (
+                    <Text style={styles.waitlistText}> (Waitlisted)</Text>
+                  )}
+                </Text>
+              </View>
+            )}
+            
+            <View style={styles.rsvpButtons}>
+              <Button
+                label="Going"
+                onPress={(e) => {
+                  e?.preventDefault?.();
+                  e?.stopPropagation?.();
+                  handleRSVP('going', null, e);
+                }}
+                variant={defaultRSVP === 'going' ? 'primary' : 'outline'}
+                style={styles.rsvpButton}
+              />
+              {rsvpSettings.allowMaybe && (
+                <Button
+                  label="Maybe"
+                  onPress={(e) => {
+                    e?.preventDefault?.();
+                    e?.stopPropagation?.();
+                    handleRSVP('maybe', null, e);
+                  }}
+                  variant={defaultRSVP === 'maybe' ? 'primary' : 'outline'}
+                  style={styles.rsvpButton}
+                />
+              )}
+              <Button
+                label="Can't Make It"
+                onPress={(e) => {
+                  e?.preventDefault?.();
+                  e?.stopPropagation?.();
+                  handleRSVP('not-going', null, e);
+                }}
+                variant={defaultRSVP === 'not-going' ? 'primary' : 'outline'}
+                style={styles.rsvpButton}
+              />
+            </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       </ScrollView>
     );
@@ -1121,6 +1469,7 @@ const EventHub = () => {
               parentCommentId: data.parentCommentId || null, // null for top-level, commentId for nested
               userId: data.userId,
               userName: data.userName || 'Unknown',
+              userAvatarUrl: data.userAvatarUrl || null,
               content: data.content,
               createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt || new Date().toISOString(),
               updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt || null,
@@ -1203,6 +1552,7 @@ const EventHub = () => {
         parentCommentId: type === 'comment' ? id : null, // null for post replies, commentId for comment replies
         userId,
         userName: user?.name || user?.email || 'Unknown',
+        userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
         content: replyText.trim(),
         createdAt: firebase.firestore.Timestamp.now(),
         updatedAt: firebase.firestore.Timestamp.now(),
@@ -1210,7 +1560,32 @@ const EventHub = () => {
         deleted: false,
       };
 
-      await commentsRef.add(commentData);
+      const commentDocRef = await commentsRef.add(commentData);
+      
+      // Get post author ID for notification
+      let postAuthorId = null;
+      let parentCommentAuthorId = null;
+      try {
+        const postRef = db.collection('gamingGroups').doc(event.id)
+          .collection('posts').doc(postId);
+        const postDoc = await postRef.get();
+        if (postDoc.exists) {
+          postAuthorId = postDoc.data().userId;
+        }
+        
+        // If replying to a comment, get the parent comment author
+        if (type === 'comment') {
+          const parentCommentRef = db.collection('gamingGroups').doc(event.id)
+            .collection('posts').doc(postId)
+            .collection('comments').doc(id);
+          const parentCommentDoc = await parentCommentRef.get();
+          if (parentCommentDoc.exists) {
+            parentCommentAuthorId = parentCommentDoc.data().userId;
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching post/comment data for notification:', error);
+      }
       
       // Update post comment count
       const postRef = db.collection('gamingGroups').doc(event.id)
@@ -1219,6 +1594,22 @@ const EventHub = () => {
         commentCount: firebase.firestore.FieldValue.increment(1),
         updatedAt: firebase.firestore.Timestamp.now(),
       });
+      
+      // Notify members about new comment
+      try {
+        await notifyDiscussionActivity(event.id, userId, {
+          type: 'new_comment',
+          postId: postId,
+          commentId: commentDocRef.id,
+          postAuthorId: postAuthorId,
+          parentCommentAuthorId: parentCommentAuthorId,
+          fromUserName: user?.name || user?.email || 'Unknown',
+          message: `${user?.name || 'Someone'} commented in the Discussion section`,
+        });
+      } catch (notifError) {
+        console.error('Error sending Discussion notification:', notifError);
+        // Don't fail the comment creation if notification fails
+      }
       
       setReplyText('');
       setReplyingTo(null);
@@ -1241,6 +1632,7 @@ const EventHub = () => {
       const postData = {
         userId,
         userName: user?.name || user?.email || 'Unknown',
+        userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
         content: newMessage.trim(),
         likeCount: 0,
         commentCount: 0,
@@ -1252,6 +1644,19 @@ const EventHub = () => {
       };
 
       const docRef = await postsRef.add(postData);
+      
+      // Notify members about new post
+      try {
+        await notifyDiscussionActivity(event.id, userId, {
+          type: 'new_post',
+          postId: docRef.id,
+          fromUserName: user?.name || user?.email || 'Unknown',
+          message: `${user?.name || 'Someone'} posted in the Discussion section`,
+        });
+      } catch (notifError) {
+        console.error('Error sending Discussion notification:', notifError);
+        // Don't fail the post creation if notification fails
+      }
       
       // Add to local state
       setDiscussionMessages(prev => [{
@@ -1483,13 +1888,28 @@ const EventHub = () => {
       <View key={comment.id} style={[styles.commentContainer, isNested && styles.nestedComment]}>
         <View style={[styles.commentCard, { marginLeft: depth * 16 }]}>
           <View style={styles.commentHeader}>
-            <Text style={styles.commentAuthor}>{comment.userName}</Text>
-            <Text style={styles.commentTime}>
-              {formatDate(comment.createdAt)}
-              {comment.edited && comment.updatedAt && (
-                <Text style={styles.editedLabel}> • edited {formatDate(comment.updatedAt)}</Text>
-              )}
-            </Text>
+            {comment.userAvatarUrl ? (
+              <Image 
+                source={{ uri: comment.userAvatarUrl }} 
+                style={styles.commentAvatar}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.commentAvatarPlaceholder}>
+                <Text style={styles.commentAvatarInitial}>
+                  {comment.userName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <View style={styles.commentHeaderText}>
+              <Text style={styles.commentAuthor}>{comment.userName}</Text>
+              <Text style={styles.commentTime}>
+                {formatDate(comment.createdAt)}
+                {comment.edited && comment.updatedAt && (
+                  <Text style={styles.editedLabel}> • edited {formatDate(comment.updatedAt)}</Text>
+                )}
+              </Text>
+            </View>
           </View>
           
           {isEditingThis ? (
@@ -1630,7 +2050,7 @@ const EventHub = () => {
               const commentTree = buildCommentTree(postComments);
               
               return (
-                <View key={message.id} style={styles.postContainer}>
+                <View key={`pinned-${message.id}`} style={styles.postContainer}>
                   <View style={[styles.messageCard, styles.pinnedMessageCard]}>
                     <View style={styles.messageHeader}>
                       <Text style={styles.messageAuthor}>{message.userName}</Text>
@@ -1758,7 +2178,7 @@ const EventHub = () => {
               const commentTree = buildCommentTree(postComments);
               
               return (
-                <View key={message.id} style={styles.postContainer}>
+                <View key={`regular-${message.id}`} style={styles.postContainer}>
                   <View style={styles.messageCard}>
                     <View style={styles.messageHeader}>
                       <Text style={styles.messageAuthor}>{message.userName}</Text>
@@ -2491,55 +2911,97 @@ const EventHub = () => {
       computeExpectedGames();
     }, [gameInterests, event?.id, members, collections, userId, user, memberNames]);
 
-    // Load nominations from Firestore
+    // Load proposals from Firestore
     useEffect(() => {
       if (!event?.id || !db || !isMember) return;
       
-      const loadNominations = async () => {
+      const loadProposals = async () => {
         try {
-          const nominationsSnapshot = await db.collection('gamingGroups').doc(event.id)
-            .collection('nominations').get();
+          const proposalsSnapshot = await db.collection('gamingGroups').doc(event.id)
+            .collection('nominations').get(); // Keep collection name as 'nominations' for backward compatibility
+            
+          const proposalsMap = new Map();
+          const userProps = new Set();
           
-          const nominationsMap = new Map();
-          const userNoms = new Set();
-          
-          nominationsSnapshot.forEach(doc => {
+          proposalsSnapshot.forEach(doc => {
             const data = doc.data();
             const gameId = data.gameId;
             
             if (!gameId) return;
             
-            // Track user's nominations
+            // Check if this is a proposal document (document ID is just the gameId, not gameId_userId)
+            const isProposalDoc = doc.id === gameId;
+            
+            // Track user's proposals - check both proposal documents and rating documents
             if (data.nominatedBy === userId) {
-              userNoms.add(gameId);
+              userProps.add(gameId);
             }
             
-            // Initialize or update nomination
-            if (!nominationsMap.has(gameId)) {
-              nominationsMap.set(gameId, {
+            // Initialize or update proposal
+            if (!proposalsMap.has(gameId)) {
+              // Create proposal entry - use data from proposal document if available
+              proposalsMap.set(gameId, {
                 gameId,
                 gameName: data.gameName || 'Unknown Game',
                 gameImage: data.gameImage || null,
-                nominatedBy: data.nominatedBy,
+                proposedBy: data.nominatedBy || null, // Keep field name for backward compatibility
                 ratings: {},
               });
+            } else {
+              // Update existing proposal with better data if this is the proposal document
+              // (proposal documents have more complete info than rating documents)
+              if (isProposalDoc && data.nominatedBy) {
+                const existing = proposalsMap.get(gameId);
+                proposalsMap.set(gameId, {
+                  ...existing,
+                  gameName: data.gameName || existing.gameName || 'Unknown Game',
+                  gameImage: data.gameImage || existing.gameImage || null,
+                  proposedBy: data.nominatedBy || existing.proposedBy,
+                });
+              }
             }
             
             // Add rating if this is a rating document (has userId and rating)
             if (data.userId && data.rating !== undefined) {
-              const nomination = nominationsMap.get(gameId);
-              nomination.ratings[data.userId] = data.rating;
+              const proposal = proposalsMap.get(gameId);
+              if (proposal) {
+                proposal.ratings[data.userId] = data.rating;
+                // Also ensure proposedBy is set from rating document if not already set
+                if (!proposal.proposedBy && data.nominatedBy) {
+                  proposal.proposedBy = data.nominatedBy;
+                }
+                // Update game info from rating document if missing
+                if (!proposal.gameName || proposal.gameName === 'Unknown Game') {
+                  proposal.gameName = data.gameName || proposal.gameName || 'Unknown Game';
+                }
+                if (!proposal.gameImage) {
+                  proposal.gameImage = data.gameImage || proposal.gameImage || null;
+                }
+              }
             }
           });
           
-          setNominatedGames(Array.from(nominationsMap.values()));
-          setUserNominations(userNoms);
+          // Filter out any proposals without a proposedBy (shouldn't happen, but safety check)
+          const allProposals = Array.from(proposalsMap.values());
+          const validProposals = allProposals.filter(p => p.proposedBy);
+          const invalidProposals = allProposals.filter(p => !p.proposedBy);
+          
+          if (invalidProposals.length > 0) {
+            console.warn(`[Gameplan] Found ${invalidProposals.length} proposals without proposedBy:`, invalidProposals);
+          }
+          
+          console.log(`[Gameplan] Loaded ${validProposals.length} proposed games (out of ${allProposals.length} total) for event ${event.id}, userId: ${userId}`);
+          setProposedGames(validProposals);
+          setUserProposals(userProps);
         } catch (error) {
-          console.error('Error loading nominations:', error);
+          console.error('Error loading proposals:', error);
+          // Set empty arrays on error to prevent stale data
+          setProposedGames([]);
+          setUserProposals(new Set());
         }
       };
-      
-      loadNominations();
+
+      loadProposals();
     }, [event?.id, db, isMember, userId]);
 
     const toggleGameSelection = (gameId) => {
@@ -2554,135 +3016,304 @@ const EventHub = () => {
       });
     };
 
+    // Get available event dates for date selector
+    const eventDates = useMemo(() => {
+      if (!event) return [];
+      
+      if (event.eventDates && Array.isArray(event.eventDates)) {
+        return event.eventDates.map((ed, index) => {
+          const date = safeParseDate(ed.date);
+          return {
+            index,
+            date: date && !isNaN(date.getTime()) ? date : null,
+            dateString: ed.date,
+            startTime: safeParseDate(ed.startTime),
+            endTime: safeParseDate(ed.endTime),
+            location: ed.location || ed.generalLocation || event.generalLocation || '',
+          };
+        }).filter(ed => ed.date !== null);
+      } else if (event.scheduledFor) {
+        const date = safeParseDate(event.scheduledFor);
+        if (date && !isNaN(date.getTime())) {
+          return [{
+            index: 0,
+            date,
+            dateString: event.scheduledFor,
+            startTime: date,
+            endTime: date,
+            location: event.generalLocation || event.location || '',
+          }];
+        }
+      }
+      
+      return [];
+    }, [event]);
+
+    // Auto-select first date if available and none selected
+    useEffect(() => {
+      if (eventDates.length > 0 && selectedGameNightDateIndex === null) {
+        setSelectedGameNightDateIndex(0);
+      }
+    }, [eventDates.length, selectedGameNightDateIndex]);
+
+    // Get confirmed attendees for selected date (those with rsvpStatus === 'going')
+    const confirmedAttendees = useMemo(() => {
+      if (selectedGameNightDateIndex === null) return [];
+      
+      return members.filter(member => {
+        const rsvpStatus = memberRSVPs[member.userId];
+        // Consider 'going' as confirmed. For now, RSVPs are global, not per-date
+        return rsvpStatus === 'going';
+      });
+    }, [members, memberRSVPs, selectedGameNightDateIndex]);
+
+    // Aggregate games from confirmed attendees with owner info
+    const aggregatedGames = useMemo(() => {
+      if (selectedGameNightDateIndex === null || confirmedAttendees.length === 0) return [];
+      
+      const gamesMap = new Map(); // Key: gameId (bggId or id), Value: { game, owners: [names] }
+      
+      confirmedAttendees.forEach(attendee => {
+        const attendeeId = attendee.userId;
+        const attendeeName = memberNames[attendeeId] || attendeeId;
+        const attendeeGames = collections[attendeeId] || [];
+        
+        attendeeGames.forEach(game => {
+          const gameId = game.bggId || game.id;
+          if (!gameId) return;
+          
+          const gameKey = String(gameId);
+          
+          if (gamesMap.has(gameKey)) {
+            // Game already exists, add owner
+            const existing = gamesMap.get(gameKey);
+            if (!existing.owners.includes(attendeeName)) {
+              existing.owners.push(attendeeName);
+            }
+          } else {
+            // New game, add with owner
+            gamesMap.set(gameKey, {
+              game: { ...game },
+              owners: [attendeeName],
+            });
+          }
+        });
+      });
+      
+      // Convert map to array
+      return Array.from(gamesMap.values()).map(item => ({
+        ...item.game,
+        _owners: item.owners, // Store owners as a special field
+      }));
+    }, [confirmedAttendees, collections, memberNames, selectedGameNightDateIndex]);
+
     return (
       <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
-        {/* Planning Games Section */}
+        {/* Browse and Propose Section */}
         {isMember && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Planning to Bring</Text>
+            <Text style={styles.sectionTitle}>Browse and Propose</Text>
             <Text style={styles.sectionCopy}>
-              Select games from your collection that you're planning to bring to this MeepleUp.
+              Select a game night date to see all games owned by confirmed attendees. Propose up to 5 games you'd like to play.
             </Text>
-                <TouchableOpacity
-              style={styles.planningGamesLink}
-              onPress={() => setShowPlanningGamesModal(true)}
-            >
-              <Text style={styles.planningGamesLinkText}>
-                Add games
-                                      </Text>
-                </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Browse and Nominate Section */}
-        {isMember && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Browse and Nominate</Text>
-            <Text style={styles.sectionCopy}>
-              Browse other attendee's collections and nominate up to 5 games you'd like to play at the next game night.
-            </Text>
-            <View style={styles.attendeesGrid}>
-              {members.map((member) => {
-                const memberId = member.userId;
-                const memberName = memberNames[memberId] || memberId;
-                const avatarUrl = memberAvatars[memberId] || null;
-                const memberGames = collections[memberId] || [];
-                const gameCount = memberGames.length;
-                const isCurrentUser = memberId === userId;
-                
-                // Skip current user
-                if (isCurrentUser) return null;
-                
-                return (
-                  <TouchableOpacity
-                    key={memberId}
-                    style={styles.attendeeCard}
-                    onPress={() => {
-                      setSelectedAttendeeForBrowse({
-                        userId: memberId,
-                        userName: memberName,
-                        avatarUrl: avatarUrl,
-                      });
-                      setAttendeeCollectionPage(1);
-                      setShowAttendeeCollectionModal(true);
-                    }}
-                  >
-                    {avatarUrl ? (
-                      <Image 
-                        source={{ uri: avatarUrl }} 
-                        style={styles.attendeeAvatar}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.attendeeAvatarPlaceholder}>
-                        <Text style={styles.attendeeAvatarInitial}>
-                          {memberName.charAt(0).toUpperCase()}
+            
+            {/* Date Selector */}
+            {eventDates.length > 0 ? (
+              <>
+                <Text style={styles.dateSelectorLabel}>Select Game Night Date:</Text>
+                <View style={styles.dateSelectorContainer}>
+                  {eventDates.map((ed, index) => {
+                    const isSelected = selectedGameNightDateIndex === index;
+                    return (
+                      <TouchableOpacity
+                        key={index}
+                        style={[
+                          styles.dateSelectorButton,
+                          isSelected && styles.dateSelectorButtonActive,
+                        ]}
+                        onPress={() => setSelectedGameNightDateIndex(index)}
+                      >
+                        <Text
+                          style={[
+                            styles.dateSelectorButtonText,
+                            isSelected && styles.dateSelectorButtonTextActive,
+                          ]}
+                        >
+                          {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
                         </Text>
-                      </View>
+                        {ed.startTime && (
+                          <Text
+                            style={[
+                              styles.dateSelectorButtonTime,
+                              isSelected && styles.dateSelectorButtonTimeActive,
+                            ]}
+                          >
+                            {formatTime(ed.startTime.toISOString())}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Aggregated Games Display */}
+                {selectedGameNightDateIndex !== null && (
+                  <>
+                    {confirmedAttendees.length === 0 ? (
+                      <Text style={styles.sectionCopy}>
+                        No confirmed attendees yet. Ask members to RSVP!
+                      </Text>
+                    ) : aggregatedGames.length === 0 ? (
+                      <Text style={styles.sectionCopy}>
+                        No games found from confirmed attendees for this date.
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={styles.aggregatedGamesHeader}>
+                          {aggregatedGames.length} {aggregatedGames.length === 1 ? 'game' : 'games'} from {confirmedAttendees.length} {confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
+                        </Text>
+                        <View style={styles.aggregatedGamesGrid}>
+                          {aggregatedGames.map((game, idx) => {
+                            const gameId = game.bggId || game.id;
+                            const isProposedByUser = userProposals.has(gameId);
+                            const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
+                            const canPropose = userProposals.size < 5 || isProposedByUser;
+                            const owners = game._owners || [];
+                            
+                            return (
+                              <View key={gameId || `game-${idx}`} style={styles.aggregatedGameCardWrapper}>
+                                <Pressable
+                                  onPress={() => {
+                                    handleOpenGameDetails(game);
+                                  }}
+                                  style={styles.selectableGameCardWrapper}
+                                  activeOpacity={0.7}
+                                >
+                                  <GameCard 
+                                    game={game} 
+                                    preloadedBggData={game._bggData}
+                                    disableModal={true}
+                                  />
+                                  {/* Owner Names */}
+                                  {owners.length > 0 && (
+                                    <View style={styles.gameOwnerNames}>
+                                      <Text style={styles.gameOwnerNamesText} numberOfLines={2}>
+                                        {owners.join(', ')}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </Pressable>
+                                {!isProposedByUser && canPropose && (
+                                  <TouchableOpacity
+                                    style={styles.proposeGameButton}
+                                    onPress={async () => {
+                                      if (!event?.id || !db || !userId) return;
+                                      
+                                      if (userProposals.size >= 5) {
+                                        Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
+                                        return;
+                                      }
+                                      
+                                      try {
+                                        const proposalDoc = {
+                                          gameId,
+                                          gameName: game.title || 'Unknown Game',
+                                          gameImage: game.image || game.thumbnail || null,
+                                          nominatedBy: userId,
+                                          createdAt: firebase.firestore.Timestamp.now(),
+                                        };
+                                        
+                                        await db.collection('gamingGroups').doc(event.id)
+                                          .collection('nominations')
+                                          .doc(gameId)
+                                          .set(proposalDoc, { merge: true });
+                                        
+                                        setUserProposals(prev => new Set([...prev, gameId]));
+                                        setProposedGames(prev => [...prev, {
+                                          gameId,
+                                          gameName: proposalDoc.gameName,
+                                          gameImage: proposalDoc.gameImage,
+                                          proposedBy: userId,
+                                          ratings: {},
+                                        }]);
+                                        
+                                        Alert.alert('Success', 'Game proposed successfully!');
+                                      } catch (error) {
+                                        console.error('Error proposing game:', error);
+                                        Alert.alert('Error', 'Failed to propose game. Please try again.');
+                                      }
+                                    }}
+                                  >
+                                    <Text style={styles.proposeGameButtonText}>Propose</Text>
+                                  </TouchableOpacity>
+                                )}
+                                {isProposedByUser && (
+                                  <View style={styles.proposedBadge}>
+                                    <Text style={styles.proposedBadgeText}>Proposed</Text>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </>
                     )}
-                    <Text style={styles.attendeeName} numberOfLines={1}>
-                      {memberName}
-                    </Text>
-                    <Text style={styles.attendeeGameCount}>
-                      {gameCount} {gameCount === 1 ? 'game' : 'games'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {members.filter(m => m.userId !== userId).length === 0 && (
+                  </>
+                )}
+              </>
+            ) : (
               <Text style={styles.sectionCopy}>
-                No other attendees yet. Invite people to join this MeepleUp!
+                No game night dates scheduled yet. Ask the organizer to add dates!
               </Text>
             )}
           </View>
         )}
 
-        {/* Nominated to Play Next Section */}
-        {isMember && nominatedGames.length > 0 && (
+        {/* Proposed to Play Next Section */}
+        {isMember && proposedGames.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Nominated to Play Next</Text>
+            <Text style={styles.sectionTitle}>Proposed to Play Next</Text>
             <Text style={styles.sectionCopy}>
-              Games nominated for the next game night. Rate each game to help decide what to play.
+              Games proposed for the next game night. Rate each game to help decide what to play.
             </Text>
-            {nominatedGames.map((nomination) => {
-              const gameId = nomination.gameId;
-              const userRating = nomination.ratings?.[userId] ?? null;
+            {proposedGames.map((proposal) => {
+              const gameId = proposal.gameId;
+              const userRating = proposal.ratings?.[userId] ?? null;
               
               return (
-                <View key={gameId} style={styles.nominatedGameItem}>
-                  <View style={styles.nominatedGameHeader}>
-                    {nomination.gameImage ? (
+                <View key={gameId} style={styles.proposedGameItem}>
+                  <View style={styles.proposedGameHeader}>
+                    {proposal.gameImage ? (
                       <Image 
-                        source={{ uri: nomination.gameImage }} 
-                        style={styles.nominatedGameThumbnail}
+                        source={{ uri: proposal.gameImage }} 
+                        style={styles.proposedGameThumbnail}
                         resizeMode="cover"
                       />
                     ) : (
-                      <View style={styles.nominatedGameThumbnailPlaceholder}>
-                        <Text style={styles.nominatedGameThumbnailText}>
-                          {(nomination.gameName || '?').charAt(0).toUpperCase()}
+                      <View style={styles.proposedGameThumbnailPlaceholder}>
+                        <Text style={styles.proposedGameThumbnailText}>
+                          {(proposal.gameName || '?').charAt(0).toUpperCase()}
                         </Text>
                       </View>
                     )}
-                    <View style={styles.nominatedGameInfo}>
-                      <Text style={styles.nominatedGameTitle}>{nomination.gameName}</Text>
-                      <Text style={styles.nominatedGameSubtext}>
-                        Nominated by {memberNames[nomination.nominatedBy] || nomination.nominatedBy}
-                      </Text>
-                    </View>
-                  </View>
+                    <View style={styles.proposedGameInfo}>
+                      <Text style={styles.proposedGameTitle}>{proposal.gameName}</Text>
+                      <Text style={styles.proposedGameSubtext}>
+                        Proposed by {memberNames[proposal.proposedBy] || proposal.proposedBy}
+                                    </Text>
+                                  </View>
+                              </View>
                   
                   {/* Rating Buttons */}
                   <View style={styles.ratingButtonsContainer}>
                     {[
-                      { value: 3, label: '⭐⭐⭐', text: 'Really want' },
-                      { value: 2, label: '⭐⭐', text: 'Want' },
-                      { value: 1, label: '⭐', text: 'Fine with it' },
-                      { value: 0, label: '⚪', text: 'Not sure' },
-                      { value: -1, label: '👎', text: 'Rather not' },
+                      { value: 3, label: '⭐⭐⭐', text: 'I really want to play this game' },
+                      { value: 2, label: '⭐⭐', text: 'I want to play this game' },
+                      { value: 1, label: '⭐', text: 'I am fine with playing this game' },
+                      { value: 0, label: '⚪', text: 'I am not sure about this game' },
+                      { value: -1, label: '👎', text: 'I would rather not play this game' },
                     ].map(({ value, label, text }) => (
-                      <TouchableOpacity
+                    <TouchableOpacity
                         key={value}
                         style={[
                           styles.ratingButton,
@@ -2691,51 +3322,78 @@ const EventHub = () => {
                         onPress={async () => {
                           if (!event?.id || !db || !userId) return;
                           
+                          // If clicking the same rating, allow clearing it by setting to null
+                          const newRating = userRating === value ? null : value;
+                          
                           try {
-                            const ratingDoc = {
-                              gameId,
-                              gameName: nomination.gameName,
-                              gameImage: nomination.gameImage,
-                              userId,
-                              rating: value,
-                              nominatedBy: nomination.nominatedBy,
-                              updatedAt: firebase.firestore.Timestamp.now(),
-                            };
-                            
-                            await db.collection('gamingGroups').doc(event.id)
-                              .collection('nominations')
-                              .doc(`${gameId}_${userId}`)
-                              .set(ratingDoc, { merge: true });
-                            
-                            // Update local state
-                            setNominatedGames(prev => prev.map(n => {
-                              if (n.gameId === gameId) {
-                                return {
-                                  ...n,
-                                  ratings: { ...n.ratings, [userId]: value }
-                                };
-                              }
-                              return n;
-                            }));
-                          } catch (error) {
+                            if (newRating === null) {
+                              // Clear the rating by deleting the document
+                              await db.collection('gamingGroups').doc(event.id)
+                                .collection('nominations')
+                                .doc(`${gameId}_${userId}`)
+                                .delete();
+                              
+                              // Update local state to remove rating
+                              setProposedGames(prev => prev.map(n => {
+                                if (n.gameId === gameId) {
+                                  const newRatings = { ...n.ratings };
+                                  delete newRatings[userId];
+                                  return {
+                                    ...n,
+                                    ratings: newRatings
+                                  };
+                                }
+                                return n;
+                              }));
+                            } else {
+                              // Set new rating
+                              const ratingDoc = {
+                                gameId,
+                                gameName: proposal.gameName,
+                                gameImage: proposal.gameImage,
+                                userId,
+                                rating: newRating,
+                                nominatedBy: proposal.proposedBy, // Keep field name for backward compatibility
+                                updatedAt: firebase.firestore.Timestamp.now(),
+                              };
+                              
+                              await db.collection('gamingGroups').doc(event.id)
+                                .collection('nominations')
+                                .doc(`${gameId}_${userId}`)
+                                .set(ratingDoc, { merge: true });
+                              
+                              // Update local state
+                              setProposedGames(prev => prev.map(n => {
+                                if (n.gameId === gameId) {
+                                  return {
+                                    ...n,
+                                    ratings: { ...n.ratings, [userId]: newRating }
+                                  };
+                                }
+                                return n;
+                              }));
+                            }
+                        } catch (error) {
                             console.error('Error saving rating:', error);
                             Alert.alert('Error', 'Failed to save rating. Please try again.');
                           }
                         }}
                       >
-                        <Text style={[
-                          styles.ratingButtonLabel,
-                          userRating === value && styles.ratingButtonLabelActive
-                        ]}>
-                          {label}
-                        </Text>
-                        <Text style={[
-                          styles.ratingButtonText,
-                          userRating === value && styles.ratingButtonTextActive
-                        ]}>
-                          {text}
-                        </Text>
-                      </TouchableOpacity>
+                        <View style={styles.ratingButtonContent}>
+                          <Text style={[
+                            styles.ratingButtonLabel,
+                            userRating === value && styles.ratingButtonLabelActive
+                          ]}>
+                            {label}
+                          </Text>
+                          <Text style={[
+                            styles.ratingButtonText,
+                            userRating === value && styles.ratingButtonTextActive
+                          ]}>
+                            {text}
+                          </Text>
+                        </View>
+                    </TouchableOpacity>
                     ))}
                   </View>
                 </View>
@@ -2744,108 +3402,6 @@ const EventHub = () => {
           </View>
         )}
 
-        {/* Expected Games Section */}
-        {isMember && expectedGames.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Expected Games</Text>
-            <Text style={styles.sectionCopy}>
-              Games that members are planning to bring to this MeepleUp.
-            </Text>
-            {expectedGames.map((game) => {
-              // Use BGG ID as primary identifier, fallback to game.id
-              const gameId = game.bggId || game.id;
-              const isUserBringing = game.bringingBy?.some(b => b.userId === userId) || false;
-              // Check multiple possible thumbnail fields
-              const thumbnail = game.bggThumbnail || game.thumbnail || game.image || null;
-              
-              return (
-                <View key={gameId} style={styles.expectedGameItem}>
-                  <TouchableOpacity
-                    onPress={() => handleOpenGameDetails(game)}
-                    style={styles.expectedGameContent}
-                    activeOpacity={0.7}
-                  >
-                    {/* Game Thumbnail */}
-                    {thumbnail ? (
-                      <Image 
-                        source={{ uri: thumbnail }} 
-                        style={styles.expectedGameThumbnail}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.expectedGameThumbnailPlaceholder}>
-                        <Text style={styles.expectedGameThumbnailPlaceholderText}>
-                          {(game.title || '?').charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                    
-                    {/* Game Title */}
-                    <Text style={styles.expectedGameTitle}>{game.title || 'Unknown Game'}</Text>
-                    
-                    {/* Bringing By */}
-                    {game.bringingBy && game.bringingBy.length > 0 && (
-                      <View style={styles.expectedGameBringingSection}>
-                        <Text style={styles.expectedGameBringingLabel}>Bringing:</Text>
-                        <View style={styles.expectedGameBringingAvatars}>
-                          {game.bringingBy.map((b) => {
-                            const avatarUrl = memberAvatars[b.userId] || null;
-                            return (
-                              <View key={b.userId} style={styles.expectedGameAvatarContainer}>
-                                {avatarUrl ? (
-                                  <Image 
-                                    source={{ uri: avatarUrl }} 
-                                    style={styles.expectedGameAvatar}
-                                  />
-                                ) : (
-                                  <View style={styles.expectedGameAvatarPlaceholder}>
-                                    <Text style={styles.expectedGameAvatarInitial}>
-                                      {(b.userName || b.userId).charAt(0).toUpperCase()}
-                                    </Text>
-                                  </View>
-                                )}
-                              </View>
-                            );
-                          })}
-                        </View>
-                        <Text style={styles.expectedGameBringingNames}>
-                          {game.bringingBy.map(b => b.userName).join(', ')}
-                        </Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                  {isUserBringing && (
-                    <TouchableOpacity
-                      onPress={async (e) => {
-                        e.stopPropagation();
-                        try {
-                          const gameStatusRef = db.collection('gamingGroups').doc(event.id)
-                            .collection('gameStatus').doc(`${gameId}_${userId}`);
-                          await gameStatusRef.delete();
-                        } catch (error) {
-                          console.error('Error removing game:', error);
-                          Alert.alert('Error', 'Failed to remove game. Please try again.');
-                        }
-                      }}
-                      style={styles.expectedGameDeleteButton}
-                    >
-                      <Text style={styles.expectedGameDeleteText}>×</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {isMember && expectedGames.length === 0 && (
-        <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Expected Games</Text>
-          <Text style={styles.sectionCopy}>
-              No games marked as "bringing" yet. Use the link above to mark games you're planning to bring.
-          </Text>
-          </View>
-        )}
 
         {/* Planning Games Modal */}
         <Modal
@@ -2941,7 +3497,7 @@ const EventHub = () => {
     );
     };
     return GamesTabComponent;
-  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, members, user, memberNames, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
+  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, event, members, user, memberNames, memberRSVPs, selectedGameNightDateIndex, proposedGames, userProposals, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
 
 
   return (
@@ -3037,6 +3593,7 @@ const EventHub = () => {
                     </Text>
                   </View>
                 )}
+                <View style={styles.attendeeModalInfo}>
                 <Text style={styles.attendeeModalName}>
                   {selectedAttendeeForBrowse.userName}'s Collection
                 </Text>
@@ -3044,8 +3601,9 @@ const EventHub = () => {
                   {attendeeGames.length} {attendeeGames.length === 1 ? 'game' : 'games'}
                 </Text>
                 <Text style={styles.attendeeModalHint}>
-                  Tap any game to view details. Use "Nominate Game" to nominate up to 5 games for the next game night.
+                    Tap any game to view details. Use "Propose Game" to propose up to 5 games for the next game night.
                 </Text>
+                </View>
               </View>
 
               {/* Games by Category */}
@@ -3096,89 +3654,89 @@ const EventHub = () => {
                           <View style={styles.categoryGamesGrid}>
                             {games.map((game, index) => {
                               const gameId = game.bggId || game.id;
-                              const isNominatedByUser = userNominations.has(gameId);
-                              const isNominatedByAnyone = nominatedGames.some(n => n.gameId === gameId);
-                              const canNominate = userNominations.size < 5 || isNominatedByUser;
+                              const isProposedByUser = userProposals.has(gameId);
+                              const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
+                              const canPropose = userProposals.size < 5 || isProposedByUser;
                               
                               return (
-                                <View key={game.bggId || game.id || `game-${index}`} style={styles.gameCardWithNominate}>
-                                  <Pressable
-                                    onPress={() => {
-                                      console.log('[EventHub] Opening game details for:', game.title);
-                                      // Add owner info to the game object so GameDetailsModal can identify the owner
-                                      const gameWithOwner = {
-                                        ...game,
-                                        _ownerId: selectedAttendeeForBrowse.userId,
-                                        _ownerName: selectedAttendeeForBrowse.userName,
-                                      };
-                                      handleOpenGameDetails(gameWithOwner);
-                                    }}
-                                    style={styles.selectableGameCardWrapper}
-                                    activeOpacity={0.7}
-                                  >
-                                    <GameCard 
-                                      game={game} 
-                                      preloadedBggData={game._bggData}
-                                      disableModal={true}
-                                    />
-                                  </Pressable>
-                                  {!isNominatedByUser && canNominate && (
+                                <View key={game.bggId || game.id || `game-${index}`} style={styles.gameCardWithPropose}>
+                              <Pressable
+                                onPress={() => {
+                                  console.log('[EventHub] Opening game details for:', game.title);
+                                  // Add owner info to the game object so GameDetailsModal can identify the owner
+                                  const gameWithOwner = {
+                                    ...game,
+                                    _ownerId: selectedAttendeeForBrowse.userId,
+                                    _ownerName: selectedAttendeeForBrowse.userName,
+                                  };
+                                  handleOpenGameDetails(gameWithOwner);
+                                }}
+                                style={styles.selectableGameCardWrapper}
+                                activeOpacity={0.7}
+                              >
+                                <GameCard 
+                                  game={game} 
+                                  preloadedBggData={game._bggData}
+                                  disableModal={true}
+                                />
+                              </Pressable>
+                                  {!isProposedByUser && canPropose && (
                                     <TouchableOpacity
-                                      style={styles.nominateGameButton}
+                                      style={styles.proposeGameButton}
                                       onPress={async () => {
                                         if (!event?.id || !db || !userId) return;
                                         
-                                        if (userNominations.size >= 5) {
-                                          Alert.alert('Limit Reached', 'You can only nominate up to 5 games. Remove a nomination first to nominate another game.');
+                                        if (userProposals.size >= 5) {
+                                          Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
                                           return;
                                         }
                                         
                                         try {
-                                          const nominationDoc = {
+                                          const proposalDoc = {
                                             gameId,
                                             gameName: game.title || 'Unknown Game',
                                             gameImage: game.image || game.thumbnail || null,
-                                            nominatedBy: userId,
+                                            nominatedBy: userId, // Keep field name for backward compatibility
                                             createdAt: firebase.firestore.Timestamp.now(),
                                           };
                                           
                                           await db.collection('gamingGroups').doc(event.id)
                                             .collection('nominations')
                                             .doc(gameId)
-                                            .set(nominationDoc, { merge: true });
+                                            .set(proposalDoc, { merge: true });
                                           
                                           // Update local state
-                                          setUserNominations(prev => new Set([...prev, gameId]));
-                                          setNominatedGames(prev => {
+                                          setUserProposals(prev => new Set([...prev, gameId]));
+                                          setProposedGames(prev => {
                                             const exists = prev.some(n => n.gameId === gameId);
                                             if (exists) return prev;
                                             return [...prev, {
                                               gameId,
                                               gameName: game.title || 'Unknown Game',
                                               gameImage: game.image || game.thumbnail || null,
-                                              nominatedBy: userId,
+                                              proposedBy: userId,
                                               ratings: {},
                                             }];
                                           });
                                           
-                                          Alert.alert('Game Nominated', `${game.title || 'Game'} has been nominated!`);
+                                          Alert.alert('Game Proposed', `${game.title || 'Game'} has been proposed!`);
                                         } catch (error) {
-                                          console.error('Error nominating game:', error);
-                                          Alert.alert('Error', 'Failed to nominate game. Please try again.');
+                                          console.error('Error proposing game:', error);
+                                          Alert.alert('Error', 'Failed to propose game. Please try again.');
                                         }
                                       }}
                                     >
-                                      <Text style={styles.nominateGameButtonText}>Nominate Game</Text>
+                                      <Text style={styles.proposeGameButtonText}>Propose Game</Text>
                                     </TouchableOpacity>
                                   )}
-                                  {isNominatedByUser && (
-                                    <View style={styles.nominatedBadge}>
-                                      <Text style={styles.nominatedBadgeText}>✓ You Nominated This</Text>
+                                  {isProposedByUser && (
+                                    <View style={styles.proposedBadge}>
+                                      <Text style={styles.proposedBadgeText}>✓ You Proposed This</Text>
                                     </View>
                                   )}
-                                  {isNominatedByAnyone && !isNominatedByUser && (
-                                    <View style={styles.nominatedByOthersBadge}>
-                                      <Text style={styles.nominatedByOthersBadgeText}>Already Nominated</Text>
+                                  {isProposedByAnyone && !isProposedByUser && (
+                                    <View style={styles.proposedByOthersBadge}>
+                                      <Text style={styles.proposedByOthersBadgeText}>Already Proposed</Text>
                                     </View>
                                   )}
                                 </View>
@@ -3199,6 +3757,36 @@ const EventHub = () => {
       </Modal>
 
       {/* Edit Schedule Modal */}
+      {/* RSVP Management Modal */}
+      {showRSVPManagement && (
+        <Modal
+          isOpen={showRSVPManagement}
+          onClose={() => setShowRSVPManagement(false)}
+          title="RSVP Management"
+          style={styles.fullScreenModal}
+        >
+          <RSVPManagementScreen
+            eventId={eventId}
+            onClose={() => setShowRSVPManagement(false)}
+          />
+        </Modal>
+      )}
+
+      {/* RSVP Management Modal */}
+      {showRSVPManagement && eventId && (
+        <Modal
+          isOpen={showRSVPManagement}
+          onClose={() => setShowRSVPManagement(false)}
+          title="RSVP Management"
+          fullScreen={true}
+        >
+          <RSVPManagementScreen
+            eventId={eventId}
+            onClose={() => setShowRSVPManagement(false)}
+          />
+        </Modal>
+      )}
+
       <Modal
         isOpen={showEditSchedule}
         onClose={() => setShowEditSchedule(false)}
@@ -3789,11 +4377,172 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionHeaderActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  manageRSVPButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minWidth: 120,
+  },
   exportButton: {
     marginLeft: 12,
     paddingHorizontal: 12,
     paddingVertical: 6,
     minWidth: 140,
+  },
+  scheduleLocation: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  dateEntryContainer: {
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    backgroundColor: '#fafafa',
+    overflow: 'hidden',
+  },
+  dateEntryContent: {
+    padding: 12,
+  },
+  attendingMembersContainer: {
+    marginTop: 12,
+    marginBottom: 8,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  attendingMembersLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  attendingMembersAvatars: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  attendingMemberAvatar: {
+    position: 'relative',
+  },
+  attendingAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  attendingAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#d45d5d',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  attendingAvatarInitial: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  goingBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#4caf50',
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  goingBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  maybeBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ff9800',
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  maybeBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  dateRSVPContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#d0e8ff',
+  },
+  dateRSVPLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  dateRSVPButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  dateRSVPButton: {
+    flex: 1,
+  },
+  dateRSVPStatus: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  rsvpLimitInfo: {
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#f0f7ff',
+    borderRadius: 8,
+  },
+  rsvpLimitText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  waitlistText: {
+    color: '#d45d5d',
+    fontWeight: '600',
+  },
+  fullScreenModal: {
+    height: '90%',
   },
   editButton: {
     marginTop: 12,
@@ -3931,9 +4680,32 @@ const styles = StyleSheet.create({
   },
   commentHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 6,
+    gap: 8,
+  },
+  commentAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  commentAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#d45d5d',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  commentAvatarInitial: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  commentHeaderText: {
+    flex: 1,
   },
   commentAuthor: {
     fontSize: 13,
@@ -4881,12 +5653,126 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
+  dateSelectorLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  dateSelectorContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  dateSelectorButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    minWidth: 120,
+  },
+  dateSelectorButtonActive: {
+    borderColor: '#4a90e2',
+    backgroundColor: '#e8f4fd',
+  },
+  dateSelectorButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+  },
+  dateSelectorButtonTextActive: {
+    color: '#4a90e2',
+    fontWeight: '600',
+  },
+  dateSelectorButtonTime: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
+  dateSelectorButtonTimeActive: {
+    color: '#4a90e2',
+  },
+  aggregatedGamesHeader: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  aggregatedGamesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  aggregatedGameCardWrapper: {
+    width: '31%',
+    position: 'relative',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  gameOwnerNames: {
+    paddingHorizontal: 8,
+    paddingTop: 4,
+    paddingBottom: 8,
+    backgroundColor: '#f8f9fa',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    marginTop: -4,
+  },
+  gameOwnerNamesText: {
+    fontSize: 10,
+    color: '#666',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  proposeGameButton: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: '#4a90e2',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    zIndex: 10,
+  },
+  proposeGameButtonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  proposedBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#4caf50',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 10,
+  },
+  proposedBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
   attendeeModalHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
     padding: 20,
+    paddingTop: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     backgroundColor: '#fff',
+  },
+  attendeeModalInfo: {
+    flex: 1,
+    marginLeft: 16,
   },
   attendeeModalAvatar: {
     width: 80,
@@ -4999,7 +5885,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
-  nominatedGameItem: {
+  proposedGameItem: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
@@ -5012,17 +5898,17 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  nominatedGameHeader: {
+  proposedGameHeader: {
     flexDirection: 'row',
     marginBottom: 16,
   },
-  nominatedGameThumbnail: {
+  proposedGameThumbnail: {
     width: 60,
     height: 60,
     borderRadius: 8,
     marginRight: 12,
   },
-  nominatedGameThumbnailPlaceholder: {
+  proposedGameThumbnailPlaceholder: {
     width: 60,
     height: 60,
     borderRadius: 8,
@@ -5031,67 +5917,71 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  nominatedGameThumbnailText: {
+  proposedGameThumbnailText: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#999',
   },
-  nominatedGameInfo: {
+  proposedGameInfo: {
     flex: 1,
     justifyContent: 'center',
   },
-  nominatedGameTitle: {
+  proposedGameTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
     marginBottom: 4,
   },
-  nominatedGameSubtext: {
+  proposedGameSubtext: {
     fontSize: 12,
     color: '#666',
   },
   ratingButtonsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
     gap: 8,
   },
   ratingButton: {
-    flex: 1,
-    minWidth: '18%',
+    width: '100%',
     padding: 12,
     borderRadius: 8,
     borderWidth: 2,
     borderColor: '#e0e0e0',
     backgroundColor: '#fff',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   ratingButtonActive: {
     borderColor: '#4a90e2',
     backgroundColor: '#e8f4fd',
   },
+  ratingButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   ratingButtonLabel: {
-    fontSize: 18,
-    marginBottom: 4,
+    fontSize: 20,
+    minWidth: 50,
   },
   ratingButtonLabelActive: {
     opacity: 1,
   },
   ratingButtonText: {
-    fontSize: 10,
+    flex: 1,
+    fontSize: 14,
     color: '#666',
     fontWeight: '500',
-    textAlign: 'center',
+    textAlign: 'left',
   },
   ratingButtonTextActive: {
     color: '#4a90e2',
     fontWeight: '600',
   },
-  gameCardWithNominate: {
+  gameCardWithPropose: {
     position: 'relative',
     marginBottom: 12,
   },
-  nominateGameButton: {
+  proposeGameButton: {
     backgroundColor: '#4a90e2',
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -5101,12 +5991,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     width: '100%',
   },
-  nominateGameButtonText: {
+  proposeGameButtonText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#fff',
   },
-  nominatedBadge: {
+  proposedBadge: {
     backgroundColor: '#28a745',
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -5116,12 +6006,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     width: '100%',
   },
-  nominatedBadgeText: {
+  proposedBadgeText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#fff',
   },
-  nominatedByOthersBadge: {
+  proposedByOthersBadge: {
     backgroundColor: '#6c757d',
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -5131,10 +6021,36 @@ const styles = StyleSheet.create({
     marginTop: 8,
     width: '100%',
   },
-  nominatedByOthersBadgeText: {
+  proposedByOthersBadgeText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#fff',
+  },
+  starRatingContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  starRatingLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 8,
+  },
+  starRatingStars: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  starButton: {
+    padding: 4,
+  },
+  starIcon: {
+    fontSize: 24,
+    color: '#ccc',
+  },
+  starIconFilled: {
+    color: '#FFA500',
   },
 });
 

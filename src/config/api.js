@@ -1,20 +1,20 @@
 // API Configuration
-// In production, these should be set via environment variables
+// All sensitive values must be set via environment variables for security
+// Use EXPO_PUBLIC_ prefix for Expo projects (accessible in client-side code)
 
 export const API_CONFIG = {
-  // ARCHIVED: RapidAPI barcode lookup is part of archived barcode scanning feature
-  // RAPIDAPI_KEY: process.env.REACT_APP_RAPIDAPI_KEY || 'ab5fb0b08dmsh801b30df51c049dp15ea7ejsn09d021675790',
-  // RAPIDAPI_HOST: 'barcodes-lookup.p.rapidapi.com',
-  RAPIDAPI_KEY: process.env.REACT_APP_RAPIDAPI_KEY || 'ab5fb0b08dmsh801b30df51c049dp15ea7ejsn09d021675790',
-  RAPIDAPI_HOST: 'barcodes-lookup.p.rapidapi.com', // Still used in archived code
+  // RapidAPI barcode lookup (archived feature, but kept for potential future use)
+  RAPIDAPI_KEY: process.env.EXPO_PUBLIC_RAPIDAPI_KEY || process.env.REACT_APP_RAPIDAPI_KEY || '',
+  RAPIDAPI_HOST: 'barcodes-lookup.p.rapidapi.com',
+  
   // BGG API Bearer Token (for authenticated requests)
-  // Note: In Expo, use EXPO_PUBLIC_ prefix for environment variables
   BGG_API_TOKEN:
     process.env.EXPO_PUBLIC_BGG_API_TOKEN ||
     process.env.EXPO_PUBLIC_BGGbearerToken ||
-    process.env.BGGbearerToken ||
     process.env.REACT_APP_BGG_API_TOKEN ||
     '',
+  
+  // Anthropic/Claude API configuration
   ANTHROPIC_API_KEY:
     process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ||
     process.env.REACT_APP_ANTHROPIC_API_KEY ||
@@ -25,8 +25,9 @@ export const API_CONFIG = {
 };
 
 // Email configuration (if needed later)
+// WARNING: Email credentials should NEVER be hardcoded in source code
 export const EMAIL_CONFIG = {
-  USER: process.env.REACT_APP_EMAIL_USER || 'game.lender.app@gmail.com',
-  PASS: process.env.REACT_APP_EMAIL_PASS || 'gddq sifd wibz uzuh',
+  USER: process.env.EXPO_PUBLIC_EMAIL_USER || process.env.REACT_APP_EMAIL_USER || '',
+  PASS: process.env.EXPO_PUBLIC_EMAIL_PASS || process.env.REACT_APP_EMAIL_PASS || '',
 };
 

@@ -33,12 +33,24 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
             style={[styles.content, fullScreen && styles.contentFullScreen]} 
             onPress={(e) => e.stopPropagation()}
           >
-            <View style={styles.header}>
-              {title && <Text style={styles.title}>{title}</Text>}
-              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <Text style={styles.closeText}>×</Text>
-              </TouchableOpacity>
-            </View>
+            {fullScreen ? (
+              <View style={styles.fullScreenHeader}>
+                <TouchableOpacity onPress={onClose} style={styles.backButton}>
+                  <Text style={styles.backButtonText}>← Back</Text>
+                </TouchableOpacity>
+                {title && <Text style={styles.fullScreenTitle}>{title}</Text>}
+                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                  <Text style={styles.closeText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.header}>
+                {title && <Text style={styles.title}>{title}</Text>}
+                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                  <Text style={styles.closeText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             {fullScreen ? (
               children
             ) : (
@@ -91,6 +103,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  fullScreenHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: Platform.OS === 'ios' ? 50 : 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    zIndex: 10,
+    position: 'relative',
+    width: '100%',
+  },
+  backButton: {
+    padding: 8,
+    minWidth: 60,
+    alignItems: 'flex-start',
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#4a90e2',
+    fontWeight: '500',
+  },
   title: {
     fontSize: 20,
     fontWeight: '600',
@@ -100,15 +136,25 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 10,
   },
+  fullScreenTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    marginHorizontal: 8,
+  },
   closeButton: {
-    padding: 4,
-    minWidth: 32,
+    padding: 8,
+    minWidth: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   closeText: {
     fontSize: 28,
     color: '#666',
     lineHeight: 28,
+    fontWeight: '300',
   },
 });
 

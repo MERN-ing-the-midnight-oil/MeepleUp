@@ -3,6 +3,16 @@ import { Platform } from 'react-native';
 import storage from '../utils/storage';
 import firebase, { auth, db } from '../config/firebase';
 
+// Helper to get the verification URL
+const getVerificationUrl = () => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  // For React Native or when window is not available, use authDomain
+  const authDomain = process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || process.env.REACT_APP_FIREBASE_AUTH_DOMAIN;
+  return authDomain ? `https://${authDomain}` : 'https://meepleup-951a1.firebaseapp.com';
+};
+
 const AuthContext = createContext();
 
 const PROFILE_STORAGE_KEY = (uid) => `meepleup_profile_${uid}`;
@@ -20,8 +30,9 @@ const parseProfile = (profile) => {
         meepleupChangesEmail: false,
         newPublicMeepleups: true,
         newPublicMeepleupsEmail: false,
-        gameMarking: true,
-        gameMarkingEmail: false,
+        discussion: true,
+        discussionEmail: false,
+        discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
         nearbyMeepleupDistance: 25, // Default 25 miles
       },
     };
@@ -38,8 +49,9 @@ const parseProfile = (profile) => {
       meepleupChangesEmail: false,
       newPublicMeepleups: true,
       newPublicMeepleupsEmail: false,
-      gameMarking: true,
-      gameMarkingEmail: false,
+      discussion: true,
+      discussionEmail: false,
+      discussionFrequency: 'all',
       nearbyMeepleupDistance: 25,
     },
   };
@@ -114,8 +126,9 @@ export const AuthProvider = ({ children }) => {
                   meepleupChangesEmail: false,
                   newPublicMeepleups: true,
                   newPublicMeepleupsEmail: false,
-                  gameMarking: true,
-                  gameMarkingEmail: false,
+                  discussion: true,
+                  discussionEmail: false,
+                  discussionFrequency: 'all',
                   nearbyMeepleupDistance: 25,
                 },
               };
@@ -143,6 +156,55 @@ export const AuthProvider = ({ children }) => {
       setUser(mapUser(firebaseUser));
     }
   };
+
+  // Handle email verification callback from email link
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleEmailVerification = async () => {
+      try {
+        // Check if URL contains email verification parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const mode = urlParams.get('mode');
+        const actionCode = urlParams.get('oobCode');
+
+        if (mode === 'verifyEmail' && actionCode) {
+          console.log('Processing email verification callback...');
+          
+          // Apply the verification code (works even if user is not logged in)
+          await auth.applyActionCode(actionCode);
+          
+          // Reload the current user to update emailVerified status if logged in
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            await currentUser.reload();
+            await loadUserProfile(currentUser);
+          }
+          
+          // Clean up URL by removing query parameters
+          window.history.replaceState({}, document.title, window.location.pathname);
+          
+          console.log('Email verification successful!');
+        }
+      } catch (error) {
+        console.error('Error processing email verification:', error);
+        // The error will be visible in console, and user can try resending from VerifyEmail screen
+        // If user is logged in, we can try to reload to check status
+        if (auth.currentUser) {
+          try {
+            await auth.currentUser.reload();
+            await loadUserProfile(auth.currentUser);
+          } catch (reloadError) {
+            console.error('Error reloading user after verification failure:', reloadError);
+          }
+        }
+      }
+    };
+
+    handleEmailVerification();
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -235,7 +297,13 @@ export const AuthProvider = ({ children }) => {
       await credential.user.updateProfile({ displayName: name.trim() });
     }
 
-    await credential.user.sendEmailVerification();
+    // Configure action code settings for email verification
+    const actionCodeSettings = {
+      url: getVerificationUrl(),
+      handleCodeInApp: false, // Set to false to use email link directly
+    };
+
+    await credential.user.sendEmailVerification(actionCodeSettings);
 
     const storedProfile = await saveProfile(credential.user.uid, {
       name: name || '',
@@ -495,7 +563,14 @@ export const AuthProvider = ({ children }) => {
     if (!auth.currentUser) {
       throw new Error('No authenticated user');
     }
-    await auth.currentUser.sendEmailVerification();
+    
+    // Configure action code settings for email verification
+    const actionCodeSettings = {
+      url: getVerificationUrl(),
+      handleCodeInApp: false, // Set to false to use email link directly
+    };
+    
+    await auth.currentUser.sendEmailVerification(actionCodeSettings);
   };
 
   const resetPassword = async (email) => {
@@ -606,8 +681,9 @@ export const AuthProvider = ({ children }) => {
       meepleupChangesEmail: false,
       newPublicMeepleups: true,
       newPublicMeepleupsEmail: false,
-      gameMarking: true,
-      gameMarkingEmail: false,
+      discussion: true,
+      discussionEmail: false,
+      discussionFrequency: 'all',
       nearbyMeepleupDistance: 25,
     };
 
