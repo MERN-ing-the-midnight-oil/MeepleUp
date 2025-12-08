@@ -18,7 +18,7 @@ import {
  * @param {Object} props.contentContainerStyle - ScrollView content container styles
  * @param {boolean} props.keyboardShouldPersistTaps - Whether taps should persist when keyboard is visible
  */
-const KeyboardAwareScrollView = ({
+const KeyboardAwareScrollView = React.forwardRef(({
   children,
   keyboardVerticalOffset,
   behavior,
@@ -26,7 +26,7 @@ const KeyboardAwareScrollView = ({
   contentContainerStyle,
   keyboardShouldPersistTaps = 'handled',
   ...scrollViewProps
-}) => {
+}, ref) => {
   // Use provided offset or default to 0
   // The offset is mainly needed when there's a fixed header/navigation
   // Setting to 0 lets the ScrollView handle scrolling naturally
@@ -43,17 +43,19 @@ const KeyboardAwareScrollView = ({
       keyboardVerticalOffset={offset}
     >
       <ScrollView
+        ref={ref}
         style={styles.scrollView}
         contentContainerStyle={[styles.contentContainer, contentContainerStyle]}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
         showsVerticalScrollIndicator={true}
+        scrollEventThrottle={16}
         {...scrollViewProps}
       >
         {children}
       </ScrollView>
     </KeyboardAvoidingView>
   );
-};
+});
 
 const styles = StyleSheet.create({
   keyboardAvoidingView: {
@@ -66,6 +68,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
 });
+
+KeyboardAwareScrollView.displayName = 'KeyboardAwareScrollView';
 
 export default KeyboardAwareScrollView;
 

@@ -139,10 +139,25 @@ const Auth = () => {
   };
 
   const lastInputRef = useRef(null);
+  const scrollViewRef = useRef(null);
+  const passwordInputRef = useRef(null);
+  const confirmPasswordInputRef = useRef(null);
+
+  const scrollToInput = (inputRef) => {
+    // Scroll to ensure the input and submit button are visible
+    // This helps when browser password manager appears
+    if (scrollViewRef?.current) {
+      setTimeout(() => {
+        // Scroll to end to ensure submit button is visible
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  };
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <KeyboardAwareScrollView
+        ref={scrollViewRef}
         style={styles.keyboardAvoidingView}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
@@ -201,6 +216,8 @@ const Auth = () => {
             style={styles.input}
             returnKeyType="next"
             blurOnSubmit={false}
+            autoComplete="email"
+            textContentType="emailAddress"
           />
 
           <View style={styles.passwordContainer}>
@@ -216,9 +233,10 @@ const Auth = () => {
               returnKeyType={mode === 'register' ? 'next' : 'done'}
               blurOnSubmit={mode === 'register' ? false : true}
               onSubmitEditing={mode === 'register' ? undefined : handleSubmit}
-              ref={mode === 'register' ? undefined : lastInputRef}
+              ref={mode === 'register' ? passwordInputRef : lastInputRef}
               autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
               textContentType={mode === 'register' ? 'newPassword' : 'password'}
+              onFocus={() => scrollToInput(passwordInputRef)}
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
@@ -281,7 +299,10 @@ const Auth = () => {
                 returnKeyType="done"
                 blurOnSubmit={true}
                 onSubmitEditing={handleSubmit}
-                ref={lastInputRef}
+                ref={confirmPasswordInputRef}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                onFocus={() => scrollToInput(confirmPasswordInputRef)}
               />
               <TouchableOpacity
                 onPress={() => setShowConfirmPassword(!showConfirmPassword)}
@@ -349,7 +370,7 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     backgroundColor: '#f5f5f5',
-    paddingBottom: 100,
+    paddingBottom: 200,
   },
   content: {
     padding: 20,
