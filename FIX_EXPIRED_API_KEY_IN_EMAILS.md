@@ -6,7 +6,7 @@ Email verification links contain an expired API key, causing errors when clicked
 API key expired. Please renew the API key.
 ```
 
-The link structure is correct, but the embedded API key (`AIzaSyAqbf2-S5W-O6zvdnb9zVPiobJXFHazLKU`) has expired.
+The link structure is correct, but the embedded API key has expired.
 
 ## Root Cause
 Firebase embeds the API key from your **project settings** into email verification links. Even if you update your `.env` file, Firebase will continue using the old key in emails until you update the project settings.
@@ -21,7 +21,7 @@ Firebase embeds the API key from your **project settings** into email verificati
 
 2. **Navigate to API Credentials**
    - Go to **APIs & Services** → **Credentials**
-   - Find your API key (search for `AIzaSyAqbf2-S5W-O6zvdnb9zVPiobJXFHazLKU` or look for "Browser key")
+   - Find your API key (look for "Browser key" or search for API keys in the credentials list)
    - Check its status:
      - If it shows "Expired" or "Restricted", you need to fix it
      - If it's deleted, you need to create a new one
@@ -117,7 +117,7 @@ After updating:
 ## Quick Check: Is Your Current API Key Valid?
 
 1. Check your `.env` file - what's the value of `EXPO_PUBLIC_FIREBASE_API_KEY`?
-2. Compare it to the API key in the verification link (`AIzaSyAqbf2-S5W-O6zvdnb9zVPiobJXFHazLKU`)
+2. Compare it to the API key in the verification link (extract it from the URL)
 3. If they're different, Firebase is using an old key from project settings
 4. If they're the same, the key itself needs to be renewed in Google Cloud Console
 

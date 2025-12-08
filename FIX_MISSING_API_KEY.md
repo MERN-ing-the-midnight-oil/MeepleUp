@@ -1,7 +1,7 @@
 # Fix: API Key Not Showing in Google Cloud Console
 
 ## Problem
-You created a new web app in Firebase Console and got an API key (`AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk`), but this key doesn't appear in Google Cloud Console. You only see an old API key (`AIzaSyC5YC920Ga3Ds14tXMmNGVw-5i3So9LIAM`).
+You created a new web app in Firebase Console and got an API key, but this key doesn't appear in Google Cloud Console. You only see an old API key.
 
 ## Solution: Use the Existing API Key
 
@@ -12,7 +12,7 @@ Since the new API key from Firebase Console isn't showing up in Google Cloud Con
 Change your `.env` file to use the existing API key:
 
 ```env
-EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSyC5YC920Ga3Ds14tXMmNGVw-5i3So9LIAM
+EXPO_PUBLIC_FIREBASE_API_KEY=YOUR_API_KEY_HERE
 EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=meepleup-951a1.firebaseapp.com
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=meepleup-951a1
 EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=meepleup-951a1.firebasestorage.app
@@ -37,7 +37,7 @@ EXPO_PUBLIC_FIREBASE_APP_ID=1:177622732549:web:734792a7d3d5b0a942716c
 ### Step 3: Configure the API Key
 
 1. **Go to APIs & Services → Credentials**
-2. **Click on the API key**: `AIzaSyC5YC920Ga3Ds14tXMmNGVw-5i3So9LIAM`
+2. **Click on the API key** (the one you see in Google Cloud Console)
 3. **Check API restrictions**:
    - Under **API restrictions**, you have two options:
      

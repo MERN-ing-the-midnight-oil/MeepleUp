@@ -10,7 +10,7 @@ Your `.env` file is already correctly configured with the new web app values. Ho
 
 2. **Navigate to API Credentials**
    - Go to **APIs & Services** → **Credentials**
-   - Find your API key: `AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk`
+   - Find your API key (it will start with `AIzaSy...`)
    - You can search for it or look for "Browser key" or "API key"
 
 3. **Check the Key Status**
@@ -28,7 +28,7 @@ The API key needs to have access to the Identity Toolkit API:
 
 2. **Check API Key Restrictions**
    - Go back to **APIs & Services → Credentials**
-   - Click on your API key: `AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk`
+   - Click on your API key (the one from your Firebase web app config)
    - Under **API restrictions**, you have two options:
      
      **Option A: Don't restrict key** (Easiest for development)

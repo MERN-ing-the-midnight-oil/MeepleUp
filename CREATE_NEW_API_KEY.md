@@ -90,7 +90,7 @@ EXPO_PUBLIC_FIREBASE_APP_ID=1:177622732549:web:734792a7d3d5b0a942716c
 
 ## About the Firebase Console Key
 
-The API key you got from Firebase Console (`AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk`) might:
+The API key you got from Firebase Console might:
 - Be a reference to a key that hasn't been created in Google Cloud Console yet
 - Be managed differently by Firebase
 - Take time to propagate

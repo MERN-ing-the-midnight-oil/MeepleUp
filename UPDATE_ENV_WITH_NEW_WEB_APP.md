@@ -5,7 +5,7 @@
 Based on your new web app registration, update your `.env` file with these values:
 
 ```env
-EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk
+EXPO_PUBLIC_FIREBASE_API_KEY=YOUR_NEW_API_KEY_HERE
 EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=meepleup-951a1.firebaseapp.com
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=meepleup-951a1
 EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=meepleup-951a1.firebasestorage.app
@@ -15,7 +15,7 @@ EXPO_PUBLIC_FIREBASE_APP_ID=1:177622732549:web:734792a7d3d5b0a942716c
 
 ## Important Notes
 
-1. **New API Key**: `AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk` (this is the one that will be used in email verification links)
+1. **New API Key**: Copy the API key from your Firebase web app config (this is the one that will be used in email verification links)
 
 2. **New App ID**: `1:177622732549:web:734792a7d3d5b0a942716c` (different from your old one)
 
@@ -51,7 +51,7 @@ EXPO_PUBLIC_FIREBASE_APP_ID=1:177622732549:web:734792a7d3d5b0a942716c
 5. **Test email verification**:
    - Create a new test account
    - Check the verification email link
-   - It should now have the new API key: `AIzaSyCRFcOxaLQGYPlXCC9kij_BETlpTLkYimk`
+   - It should now have the new API key from your Firebase web app config
    - The link should work without the "API key expired" error
 
 ## Verify It's Working
