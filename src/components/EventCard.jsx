@@ -1,6 +1,5 @@
 import React, { memo } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { formatDate } from '../utils/helpers';
+import { View, Text, StyleSheet, Pressable, Image, TouchableOpacity } from 'react-native';
 import RSVPButtons from './RSVPButtons';
 
 /**
@@ -11,13 +10,17 @@ import RSVPButtons from './RSVPButtons';
 const EventCard = memo(({
   event,
   onPress,
-  onLeave,
-  showLeaveButton = false,
   isOrganizer = false,
   style,
   currentUserId,
   onRSVP,
   memberRSVPs = {},
+  organizerName = null,
+  organizerAvatarUrl = null,
+  onOrganizerPress = null,
+  memberAvatars = {},
+  memberNames = {},
+  onMemberPress = null,
 }) => {
   const memberCount = (event.members || []).filter(
     (member) => member.status === 'member',
@@ -63,22 +66,92 @@ const EventCard = memo(({
             <Text style={styles.title}>
               {event.name || 'Untitled MeepleUp'}
             </Text>
-            <Text style={styles.meta}>
-              {event.generalLocation || event.exactLocation || 'Location TBD'}
-            </Text>
           </View>
         </View>
-        
-        {event.scheduledFor && (
-          <Text style={styles.date}>
-            {formatDate(event.scheduledFor) || event.scheduledFor}
-          </Text>
+
+        {/* Organizer/Host Info */}
+        {(organizerName || organizerAvatarUrl) && (
+          <View style={styles.organizerContainer}>
+            <Text style={styles.organizerLabel}>Organizer:</Text>
+            {onOrganizerPress ? (
+              <TouchableOpacity
+                style={styles.organizerInfo}
+                onPress={() => onOrganizerPress(event.organizerId, organizerName, organizerAvatarUrl)}
+              >
+                {organizerAvatarUrl ? (
+                  <Image
+                    source={{ uri: organizerAvatarUrl }}
+                    style={styles.organizerAvatar}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.organizerAvatarPlaceholder}>
+                    <Text style={styles.organizerAvatarInitial}>
+                      {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.organizerName}>{organizerName || 'Unknown Organizer'}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.organizerInfo}>
+                {organizerAvatarUrl ? (
+                  <Image
+                    source={{ uri: organizerAvatarUrl }}
+                    style={styles.organizerAvatar}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.organizerAvatarPlaceholder}>
+                    <Text style={styles.organizerAvatarInitial}>
+                      {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.organizerName}>{organizerName || 'Unknown Organizer'}</Text>
+              </View>
+            )}
+          </View>
         )}
         
-        {event.members && (
-          <Text style={styles.members}>
-            {memberCount} member{memberCount !== 1 ? 's' : ''}
-          </Text>
+        {/* Member Avatars */}
+        {event.members && event.members.length > 0 && (
+          <View style={styles.membersContainer}>
+            <Text style={styles.membersLabel}>Members:</Text>
+            <View style={styles.memberAvatars}>
+              {event.members
+                .filter((member) => member.status === 'member')
+                .map((member) => {
+                  const avatarUrl = memberAvatars[member.userId];
+                  const memberName = memberNames[member.userId] || member.userName || 'Unknown';
+                  const hasPressHandler = onMemberPress && member.userId;
+                  
+                  const AvatarComponent = hasPressHandler ? TouchableOpacity : View;
+                  
+                  return (
+                    <AvatarComponent
+                      key={member.userId}
+                      style={styles.memberAvatarContainer}
+                      onPress={hasPressHandler ? () => onMemberPress(member.userId, memberName, avatarUrl) : undefined}
+                    >
+                      {avatarUrl ? (
+                        <Image
+                          source={{ uri: avatarUrl }}
+                          style={styles.memberAvatar}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.memberAvatarPlaceholder}>
+                          <Text style={styles.memberAvatarInitial}>
+                            {memberName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                    </AvatarComponent>
+                  );
+                })}
+            </View>
+          </View>
         )}
 
         {/* RSVP Status and Counts */}
@@ -114,18 +187,6 @@ const EventCard = memo(({
           eventId={event.id}
         />
       )}
-      
-      {showLeaveButton && !isOrganizer && onLeave && (
-        <Pressable
-          style={styles.leaveButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            onLeave(event.id);
-          }}
-        >
-          <Text style={styles.leaveButtonText}>Leave</Text>
-        </Pressable>
-      )}
     </View>
   );
 }, (prevProps, nextProps) => {
@@ -146,8 +207,11 @@ const EventCard = memo(({
     prevProps.currentUserId === nextProps.currentUserId &&
     prevRSVP === nextRSVP &&
     prevProps.isOrganizer === nextProps.isOrganizer &&
-    prevProps.showLeaveButton === nextProps.showLeaveButton &&
-    prevProps.onRSVP === nextProps.onRSVP
+    prevProps.onRSVP === nextProps.onRSVP &&
+    prevProps.organizerName === nextProps.organizerName &&
+    prevProps.organizerAvatarUrl === nextProps.organizerAvatarUrl &&
+    JSON.stringify(prevProps.memberAvatars) === JSON.stringify(nextProps.memberAvatars) &&
+    JSON.stringify(prevProps.memberNames) === JSON.stringify(nextProps.memberNames)
   );
 });
 
@@ -187,27 +251,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  date: {
-    fontSize: 14,
-    color: '#333',
-    marginTop: 8,
-  },
-  members: {
-    fontSize: 14,
-    color: '#666',
+  locationInfo: {
     marginTop: 4,
   },
-  leaveButton: {
-    padding: 12,
+  locationLabel: {
+    fontWeight: '600',
+    color: '#333',
+  },
+  membersContainer: {
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
-    backgroundColor: '#fff5f5',
   },
-  leaveButtonText: {
-    color: '#d45d5d',
-    fontSize: 14,
+  membersLabel: {
+    fontSize: 12,
     fontWeight: '600',
-    textAlign: 'center',
+    color: '#666',
+    marginBottom: 8,
+  },
+  memberAvatars: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  memberAvatarContainer: {
+    marginRight: 4,
+  },
+  memberAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  memberAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#d45d5d',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  memberAvatarInitial: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
   },
   rsvpInfo: {
     marginTop: 8,
@@ -248,6 +349,50 @@ const styles = StyleSheet.create({
   },
   rsvpButton: {
     flex: 1,
+  },
+  organizerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  organizerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginRight: 8,
+  },
+  organizerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  organizerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  organizerAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#d45d5d',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  organizerAvatarInitial: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  organizerName: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
   },
 });
 

@@ -16,11 +16,10 @@ import { db } from '../config/firebase';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
-import ContactOrganizerForm from '../components/ContactOrganizerForm';
 import JoinForm from '../components/JoinForm';
 import CreateEventForm from '../components/CreateEventForm';
 import EventCard from '../components/EventCard';
-import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
+import UserProfileModal from '../components/UserProfileModal';
 
 const EventsScreen = () => {
   const navigate = useUnifiedNavigation();
@@ -31,33 +30,30 @@ const EventsScreen = () => {
     getUserArchivedEvents,
     createEvent,
     joinEventWithCode,
-    getMembershipStatus,
-    submitContactRequest,
     unarchiveEvent,
     leaveEvent,
     getEventById,
-    membershipStatus,
     updateMemberRSVP,
   } = useEvents();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showContactModal, setShowContactModal] = useState(false);
   const [joinCodeWord1, setJoinCodeWord1] = useState('');
   const [joinCodeWord2, setJoinCodeWord2] = useState('');
   const [joinCodeWord3, setJoinCodeWord3] = useState('');
   const [joinError, setJoinError] = useState('');
   const [joinLoading, setJoinLoading] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [contactLoading, setContactLoading] = useState(false);
-  const [infoMessage, setInfoMessage] = useState('');
   const [memberRSVPs, setMemberRSVPs] = useState({});
+  const [organizerData, setOrganizerData] = useState({}); // { eventId: { name, avatarUrl } }
+  const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
+  const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const scrollViewRef = useRef(null);
   const scrollPositionRef = useRef(0);
 
   // Event creation form state
   const [eventForm, setEventForm] = useState({
     name: '',
-    generalLocation: '',
+    location: '',
+    address: '',
     scheduledFor: '',
     description: '',
     rsvpSettings: {
@@ -67,15 +63,21 @@ const EventsScreen = () => {
     },
   });
 
-  // Fetch RSVP data for all user events
+  // Fetch RSVP data and organizer info for all user events
   useEffect(() => {
     if (!userIdentifier || !db || userEvents.length === 0) return;
 
-    const fetchRSVPs = async () => {
+    const fetchEventData = async () => {
       const rsvps = {};
+      const organizers = {};
+      const members = {}; // { eventId: { [userId]: { name, avatarUrl } } }
       try {
         for (const event of userEvents) {
           if (!event.id) continue;
+          
+          const eventMembers = {};
+          
+          // Fetch RSVPs and member data
           try {
             const membersSnapshot = await db
               .collection('gamingGroups')
@@ -89,19 +91,104 @@ const EventsScreen = () => {
               if (memberData.rsvpStatus) {
                 rsvps[`${event.id}_${memberId}`] = memberData.rsvpStatus;
               }
+              
+              // Store member data
+              eventMembers[memberId] = {
+                name: memberData.userName || null,
+                avatarUrl: memberData.userAvatarUrl || null,
+              };
             });
           } catch (error) {
             console.error(`Error fetching RSVPs for event ${event.id}:`, error);
           }
+
+          // Fetch missing member data from users collection
+          if (event.members && Array.isArray(event.members)) {
+            for (const member of event.members) {
+              if (!member.userId || eventMembers[member.userId]) continue;
+              
+              try {
+                // Check if member is current user first
+                if (member.userId === userIdentifier) {
+                  eventMembers[member.userId] = {
+                    name: user?.name || user?.email || 'You',
+                    avatarUrl: user?.photoURL || user?.avatarUrl || null,
+                  };
+                } else {
+                  // Try to get from users collection
+                  const userDoc = await db.collection('users').doc(member.userId).get();
+                  if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    eventMembers[member.userId] = {
+                      name: userData.name || userData.email || 'Unknown',
+                      avatarUrl: userData.avatarUrl || null,
+                    };
+                  } else if (member.userName) {
+                    // Fallback to member data from event
+                    eventMembers[member.userId] = {
+                      name: member.userName,
+                      avatarUrl: member.userAvatarUrl || null,
+                    };
+                  }
+                }
+              } catch (error) {
+                console.error(`Error fetching member data for ${member.userId}:`, error);
+              }
+            }
+          }
+          
+          members[event.id] = eventMembers;
+
+          // Fetch organizer info
+          if (event.organizerId) {
+            try {
+              // Check if organizer is current user first
+              if (event.organizerId === userIdentifier) {
+                organizers[event.id] = {
+                  name: user?.name || user?.email || 'You',
+                  avatarUrl: user?.photoURL || user?.avatarUrl || null,
+                };
+              } else {
+                // Fetch from Firestore
+                const organizerDoc = await db.collection('users').doc(event.organizerId).get();
+                if (organizerDoc.exists) {
+                  const organizerData = organizerDoc.data();
+                  organizers[event.id] = {
+                    name: organizerData.name || organizerData.email || 'Unknown Host',
+                    avatarUrl: organizerData.avatarUrl || null,
+                  };
+                } else {
+                  // Fallback: try to get from members collection
+                  const memberDoc = await db
+                    .collection('gamingGroups')
+                    .doc(event.id)
+                    .collection('members')
+                    .doc(event.organizerId)
+                    .get();
+                  if (memberDoc.exists) {
+                    const memberData = memberDoc.data();
+                    organizers[event.id] = {
+                      name: memberData.userName || 'Unknown Host',
+                      avatarUrl: memberData.userAvatarUrl || null,
+                    };
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Error fetching organizer for event ${event.id}:`, error);
+            }
+          }
         }
         setMemberRSVPs(rsvps);
+        setOrganizerData(organizers);
+        setMemberData(members);
       } catch (error) {
-        console.error('Error fetching RSVPs:', error);
+        console.error('Error fetching event data:', error);
       }
     };
 
-    fetchRSVPs();
-  }, [userIdentifier, userEvents.length]);
+    fetchEventData();
+  }, [userIdentifier, userEvents.length, user]);
 
   const handleRSVP = useCallback(async (eventId, status) => {
     if (!userIdentifier) {
@@ -147,15 +234,6 @@ const EventsScreen = () => {
   const userIdentifier = user?.uid || user?.id;
   const userEvents = userIdentifier ? getUserEvents(userIdentifier) : [];
   const archivedEvents = userIdentifier ? getUserArchivedEvents(userIdentifier) : [];
-
-  const publicEvents = useMemo(
-    () => events.filter((event) => 
-      event.allowStrangerMessages && 
-      !event.deletedAt && 
-      event.isActive !== false
-    ),
-    [events],
-  );
 
   // Memoize eventRSVPs mapping to prevent unnecessary re-renders
   // Only re-create when memberRSVPs or userEvents change
@@ -241,7 +319,7 @@ const EventsScreen = () => {
 
   const handleCreateEvent = async () => {
     if (!userIdentifier) {
-      Alert.alert('Error', 'Please sign in to host a MeepleUp.');
+      Alert.alert('Error', 'Please sign in to organize a MeepleUp.');
       return;
     }
 
@@ -253,7 +331,8 @@ const EventsScreen = () => {
     try {
       const newEvent = await createEvent({
         name: eventForm.name.trim(),
-        generalLocation: eventForm.generalLocation.trim() || 'Location TBD',
+        location: eventForm.location.trim() || '',
+        address: eventForm.address.trim() || '',
         scheduledFor: eventForm.scheduledFor.trim() || '',
         description: eventForm.description.trim() || '',
         visibility: 'private',
@@ -265,51 +344,14 @@ const EventsScreen = () => {
       });
 
       setShowCreateModal(false);
-      setEventForm({ name: '', generalLocation: '', scheduledFor: '', description: '' });
-      Alert.alert('MeepleUp Hosted', `Your MeepleUp "${newEvent.name}" has been hosted! Share join code: ${newEvent.joinCode}`);
+      setEventForm({ name: '', location: '', address: '', scheduledFor: '', description: '' });
+      Alert.alert('MeepleUp Organized', `Your MeepleUp "${newEvent.name}" has been organized! Share join code: ${newEvent.joinCode}`);
     } catch (error) {
       console.error('Error creating event:', error);
       Alert.alert('Error', 'Failed to create MeepleUp. Please try again.');
     }
   };
 
-  const handleOpenContact = (event) => {
-    setSelectedEvent(event);
-    setShowContactModal(true);
-  };
-
-  const handleCloseContactModal = () => {
-    setSelectedEvent(null);
-    setShowContactModal(false);
-  };
-
-  const handleContactSubmit = async ({ name, email, message }) => {
-    if (!selectedEvent) {
-      return;
-    }
-
-    setContactLoading(true);
-    try {
-      const request = submitContactRequest(selectedEvent.id, {
-        name,
-        email,
-        message,
-      });
-
-      if (!request) {
-        Alert.alert('Couldn\'t send request', 'Double-check your details and try again.');
-        return;
-      }
-
-      setInfoMessage('Request sent! The organizer will follow up soon.');
-      handleCloseContactModal();
-    } catch (error) {
-      Alert.alert('Something went wrong', 'We hit a snag while sending your message. Please try again.');
-      console.error(error);
-    } finally {
-      setContactLoading(false);
-    }
-  };
 
   const handleUnarchiveEvent = async (eventId) => {
     if (!userIdentifier) {
@@ -350,9 +392,6 @@ const EventsScreen = () => {
     );
   };
 
-  const handleLeaveEvent = async (eventId) => {
-    handleLeaveEventUtil(eventId, userIdentifier, leaveEvent, getEventById);
-  };
 
   // Memoize RSVP handlers to prevent unnecessary re-renders
   const rsvpHandlers = useMemo(() => {
@@ -382,13 +421,13 @@ const EventsScreen = () => {
         {/* Action Buttons */}
         <View style={styles.actions}>
           <Button
-            label="+ Host MeepleUp"
+            label="+ Organize MeepleUp"
             onPress={() => setShowCreateModal(true)}
             style={styles.actionButton}
           />
         </View>
 
-        {/* Join with Code Section */}
+        {/* Join an existing MeepleUp Section */}
         <View style={styles.joinSection}>
           <JoinForm
             joinCodeWord1={joinCodeWord1}
@@ -406,7 +445,7 @@ const EventsScreen = () => {
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No MeepleUps yet</Text>
             <Text style={styles.emptyText}>
-              Host a new MeepleUp or join one with a code.
+              Organize a new MeepleUp or join one with a code.
             </Text>
           </View>
         ) : (
@@ -415,106 +454,38 @@ const EventsScreen = () => {
             {userEvents.map((event) => {
               const isOrganizer = event.organizerId === userIdentifier;
               const eventRSVPs = eventRSVPsMap[event.id] || {};
+              const organizer = organizerData[event.id] || {};
+              const eventMemberData = memberData[event.id] || {};
+              
+              // Extract member avatars and names
+              const memberAvatars = {};
+              const memberNames = {};
+              Object.keys(eventMemberData).forEach((userId) => {
+                memberAvatars[userId] = eventMemberData[userId]?.avatarUrl || null;
+                memberNames[userId] = eventMemberData[userId]?.name || 'Unknown';
+              });
 
               return (
                 <EventCard
                   key={event.id}
                   event={event}
                   onPress={() => handleEventClick(event.id)}
-                  onLeave={handleLeaveEvent}
-                  showLeaveButton={!isOrganizer}
                   isOrganizer={isOrganizer}
                   style={styles.eventTile}
                   currentUserId={userIdentifier}
                   onRSVP={rsvpHandlers[event.id]}
                   memberRSVPs={eventRSVPs}
+                  organizerName={organizer.name}
+                  organizerAvatarUrl={organizer.avatarUrl}
+                  onOrganizerPress={(userId, userName, avatarUrl) => {
+                    setSelectedUserForProfile({ userId, userName, avatarUrl });
+                  }}
+                  memberAvatars={memberAvatars}
+                  memberNames={memberNames}
+                  onMemberPress={(userId, userName, avatarUrl) => {
+                    setSelectedUserForProfile({ userId, userName, avatarUrl });
+                  }}
                 />
-              );
-            })}
-          </View>
-        )}
-
-        {/* Public Events */}
-        {publicEvents.length > 0 && (
-          <View style={styles.eventsSection}>
-            <Text style={styles.sectionTitle}>Discover MeepleUps</Text>
-            {infoMessage ? (
-              <View style={styles.infoMessage}>
-                <Text style={styles.infoText}>{infoMessage}</Text>
-              </View>
-            ) : null}
-            {publicEvents.map((event) => {
-              const status = userIdentifier
-                ? getMembershipStatus(event.id, userIdentifier)
-                : membershipStatus.STRANGER;
-              const isMember = status === membershipStatus.MEMBER;
-              const locationDisplay = isMember
-                ? event.exactLocation || event.generalLocation
-                : event.generalLocation;
-
-              return (
-                <View key={event.id} style={styles.eventCard}>
-                  <View style={styles.eventHeader}>
-                    <Text style={styles.eventTitle}>
-                      {event.name || 'Untitled MeepleUp'}
-                    </Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        isMember ? styles.memberBadge : styles.strangerBadge,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusBadgeText,
-                          isMember && styles.memberBadgeText,
-                        ]}
-                      >
-                        {isMember ? 'Member' : 'Public'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {event.scheduledFor ? (
-                    <Text style={styles.meta}>
-                      {formatDate(event.scheduledFor) || event.scheduledFor}
-                    </Text>
-                  ) : null}
-
-                  <Text style={styles.meta}>
-                    {isMember ? 'Location' : 'Area'}: {locationDisplay || 'Details coming soon'}
-                  </Text>
-
-                  {event.description ? (
-                    <Text style={styles.description}>{event.description}</Text>
-                  ) : null}
-
-                  <View style={styles.cardActions}>
-                    {isMember ? (
-                      <Button
-                        label="View MeepleUp"
-                        onPress={() => handleEventClick(event.id)}
-                        style={styles.cardButton}
-                      />
-                    ) : (
-                      <>
-                        <Pressable
-                          style={styles.secondaryAction}
-                          onPress={() => handleEventClick(event.id)}
-                        >
-                          <Text style={styles.secondaryActionText}>
-                            View Details
-                          </Text>
-                        </Pressable>
-                        <Button
-                          label="Contact Organizer"
-                          onPress={() => handleOpenContact(event)}
-                          style={styles.cardButton}
-                        />
-                      </>
-                    )}
-                  </View>
-                </View>
               );
             })}
           </View>
@@ -525,7 +496,7 @@ const EventsScreen = () => {
           <View style={styles.eventsSection}>
             <Text style={styles.sectionTitle}>Your Archived MeepleUps</Text>
             <Text style={styles.sectionSubtitle}>
-              MeepleUps you've hosted and archived. Only you can see and restore these.
+              MeepleUps you've organized and archived. Only you can see and restore these.
             </Text>
             {archivedEvents.map((event) => {
               const memberCount = (event.members || []).filter(
@@ -540,7 +511,7 @@ const EventsScreen = () => {
                         {event.name || 'Untitled MeepleUp'}
                       </Text>
                       <Text style={styles.eventMeta}>
-                        {event.generalLocation || event.exactLocation || 'Location TBD'}
+                        {event.location || event.address || (event.generalLocation || event.exactLocation) || 'Location TBD'}
                       </Text>
                     </View>
                     <View style={styles.archivedBadge}>
@@ -572,14 +543,15 @@ const EventsScreen = () => {
         )}
       </ScrollView>
 
-      {/* Host Event Modal */}
+      {/* Organize Event Modal */}
       <Modal
         isOpen={showCreateModal}
         onClose={() => {
           setShowCreateModal(false);
           setEventForm({
             name: '',
-            generalLocation: '',
+            location: '',
+            address: '',
             scheduledFor: '',
             description: '',
             rsvpSettings: {
@@ -589,7 +561,7 @@ const EventsScreen = () => {
             },
           });
         }}
-        title="Host MeepleUp"
+        title="Organize MeepleUp"
       >
         <CreateEventForm
           eventForm={eventForm}
@@ -599,7 +571,8 @@ const EventsScreen = () => {
             setShowCreateModal(false);
             setEventForm({
               name: '',
-              generalLocation: '',
+              location: '',
+              address: '',
               scheduledFor: '',
               description: '',
               rsvpSettings: {
@@ -613,24 +586,17 @@ const EventsScreen = () => {
         />
       </Modal>
 
-      {/* Contact Organizer Modal */}
-      <Modal
-        isOpen={showContactModal}
-        onClose={handleCloseContactModal}
-        title={
-          selectedEvent
-            ? `Contact ${selectedEvent.name || 'the organizer'}`
-            : 'Contact Organizer'
-        }
-      >
-        <ContactOrganizerForm
-          onSubmit={handleContactSubmit}
-          onCancel={handleCloseContactModal}
-          initialName={user?.name || ''}
-          initialEmail={user?.email || ''}
-          loading={contactLoading}
+      {/* User Profile Modal */}
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
         />
-      </Modal>
+      )}
+
     </>
   );
 };

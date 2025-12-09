@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, Text, StyleSheet } from 'react-native';
 
-const Button = ({ label, onPress, style, disabled, title, variant = 'primary' }) => {
+const Button = ({ label, onPress, style, disabled, title, variant = 'primary', textStyle }) => {
     return (
     <Pressable
       onPress={onPress}
@@ -19,6 +19,7 @@ const Button = ({ label, onPress, style, disabled, title, variant = 'primary' })
           styles.label,
           variant === 'outline' && styles.outlineLabel,
           variant === 'danger' && styles.dangerLabel,
+          textStyle,
         ]}
       >
             {label}

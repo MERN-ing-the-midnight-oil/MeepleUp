@@ -28,12 +28,11 @@ const parseProfile = (profile) => {
       notificationPreferences: {
         meepleupChanges: true,
         meepleupChangesEmail: false,
-        newPublicMeepleups: true,
-        newPublicMeepleupsEmail: false,
+        eventReminders: true,
+        eventReminderHours: 24, // Default: 24 hours before
         discussion: true,
         discussionEmail: false,
         discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
-        nearbyMeepleupDistance: 25, // Default 25 miles
       },
     };
   }
@@ -47,12 +46,11 @@ const parseProfile = (profile) => {
     notificationPreferences: profile.notificationPreferences || {
       meepleupChanges: true,
       meepleupChangesEmail: false,
-      newPublicMeepleups: true,
-      newPublicMeepleupsEmail: false,
+      eventReminders: true,
+      eventReminderHours: 24,
       discussion: true,
       discussionEmail: false,
       discussionFrequency: 'all',
-      nearbyMeepleupDistance: 25,
     },
   };
 };
@@ -124,12 +122,11 @@ export const AuthProvider = ({ children }) => {
                 notificationPreferences: userData.preferences?.notifications || userData.notificationPreferences || {
                   meepleupChanges: true,
                   meepleupChangesEmail: false,
-                  newPublicMeepleups: true,
-                  newPublicMeepleupsEmail: false,
+                  eventReminders: true,
+                  eventReminderHours: 24,
                   discussion: true,
                   discussionEmail: false,
                   discussionFrequency: 'all',
-                  nearbyMeepleupDistance: 25,
                 },
               };
             }
@@ -314,11 +311,10 @@ export const AuthProvider = ({ children }) => {
       notificationPreferences: {
         meepleupChanges: true,
         meepleupChangesEmail: false,
-        newPublicMeepleups: true,
-        newPublicMeepleupsEmail: false,
+        eventReminders: true,
+        eventReminderHours: 24,
         gameMarking: true,
         gameMarkingEmail: false,
-        nearbyMeepleupDistance: 25,
       },
     });
 
@@ -338,9 +334,9 @@ export const AuthProvider = ({ children }) => {
           updatedAt: firebase.firestore.Timestamp.now(),
           notificationPreferences: {
             meepleupChanges: true,
-            newPublicMeepleups: true,
+            eventReminders: true,
+            eventReminderHours: 24,
             gameMarking: true,
-            nearbyMeepleupDistance: 25,
           },
         });
       } catch (error) {
@@ -371,11 +367,10 @@ export const AuthProvider = ({ children }) => {
             notificationPreferences: userData.notificationPreferences || {
               meepleupChanges: true,
               meepleupChangesEmail: false,
-              newPublicMeepleups: true,
-              newPublicMeepleupsEmail: false,
+              eventReminders: true,
+              eventReminderHours: 24,
               gameMarking: true,
               gameMarkingEmail: false,
-              nearbyMeepleupDistance: 25,
             },
           };
           // Save to local storage as backup
@@ -488,11 +483,8 @@ export const AuthProvider = ({ children }) => {
               notificationPreferences: userData.notificationPreferences || {
                 meepleupChanges: true,
                 meepleupChangesEmail: false,
-                newPublicMeepleups: true,
-                newPublicMeepleupsEmail: false,
                 gameMarking: true,
                 gameMarkingEmail: false,
-                nearbyMeepleupDistance: 25,
               },
             };
             // Save to local storage as backup
@@ -519,9 +511,9 @@ export const AuthProvider = ({ children }) => {
             updatedAt: firebase.firestore.Timestamp.now(),
             notificationPreferences: {
               meepleupChanges: true,
-              newPublicMeepleups: true,
+              eventReminders: true,
+              eventReminderHours: 24,
               gameMarking: true,
-              nearbyMeepleupDistance: 25,
             },
           };
           await userRef.set(defaultProfile);
@@ -679,12 +671,11 @@ export const AuthProvider = ({ children }) => {
     const currentPreferences = currentProfile.notificationPreferences || {
       meepleupChanges: true,
       meepleupChangesEmail: false,
-      newPublicMeepleups: true,
-      newPublicMeepleupsEmail: false,
+      eventReminders: true,
+      eventReminderHours: 24,
       discussion: true,
       discussionEmail: false,
       discussionFrequency: 'all',
-      nearbyMeepleupDistance: 25,
     };
 
     const updatedPreferences = {

@@ -1,0 +1,481 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  TouchableOpacity,
+  ActivityIndicator,
+} from 'react-native';
+import { useAuth } from '../context/AuthContext';
+import { useCollections } from '../context/CollectionsContext';
+import { db } from '../config/firebase';
+import Modal from './common/Modal';
+import GameCard from './GameCard';
+
+// All game categories in order
+const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
+
+const UserProfileModal = ({ 
+  isOpen, 
+  onClose, 
+  userId, 
+  userName: initialUserName,
+  avatarUrl: initialAvatarUrl 
+}) => {
+  const { user: currentUser } = useAuth();
+  const { getUserCollection } = useCollections();
+  const [userProfile, setUserProfile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [view, setView] = useState('profile'); // 'profile', 'library', 'message'
+  const [userGames, setUserGames] = useState([]);
+  const [messageText, setMessageText] = useState('');
+
+  useEffect(() => {
+    if (isOpen && userId) {
+      fetchUserProfile();
+      fetchUserGames();
+      setView('profile');
+      setMessageText('');
+    }
+  }, [isOpen, userId]);
+
+  const fetchUserProfile = async () => {
+    if (!userId) return;
+    
+    setLoading(true);
+    try {
+      const userDoc = await db.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        setUserProfile({
+          name: userData.name || initialUserName || 'Unknown User',
+          bio: userData.bio || '',
+          bggUsername: userData.bggUsername || '',
+          location: userData.location || '',
+          zipcode: userData.zipcode || '',
+          avatarUrl: userData.avatarUrl || initialAvatarUrl || null,
+          email: userData.email || '',
+        });
+      } else {
+        // Fallback to initial values if user doc doesn't exist
+        setUserProfile({
+          name: initialUserName || 'Unknown User',
+          bio: '',
+          bggUsername: '',
+          location: '',
+          zipcode: '',
+          avatarUrl: initialAvatarUrl || null,
+          email: '',
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      // Fallback to initial values on error
+      setUserProfile({
+        name: initialUserName || 'Unknown User',
+        bio: '',
+        bggUsername: '',
+        location: '',
+        zipcode: '',
+        avatarUrl: initialAvatarUrl || null,
+        email: '',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchUserGames = () => {
+    if (!userId) return;
+    const games = getUserCollection(userId) || [];
+    setUserGames(games);
+  };
+
+  const handleSendMessage = () => {
+    // TODO: Implement messaging functionality
+    // For now, show an alert
+    alert('Messaging feature coming soon!');
+  };
+
+  const isCurrentUser = currentUser?.uid === userId || currentUser?.id === userId;
+
+  const renderProfileView = () => {
+    if (loading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#d45d5d" />
+        </View>
+      );
+    }
+
+    if (!userProfile) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>User not found</Text>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <View style={styles.profileHeader}>
+          {userProfile.avatarUrl ? (
+            <Image 
+              source={{ uri: userProfile.avatarUrl }} 
+              style={styles.avatar}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarInitial}>
+                {userProfile.name.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          <Text style={styles.name}>{userProfile.name}</Text>
+          {userProfile.bggUsername && (
+            <Text style={styles.bggUsername}>BGG: {userProfile.bggUsername}</Text>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          {userProfile.bio && (
+            <View style={styles.infoRow}>
+              <Text style={styles.label}>Bio:</Text>
+              <Text style={styles.value}>{userProfile.bio}</Text>
+            </View>
+          )}
+          {userProfile.location && (
+            <View style={styles.infoRow}>
+              <Text style={styles.label}>Location:</Text>
+              <Text style={styles.value}>{userProfile.location}</Text>
+            </View>
+          )}
+          {userProfile.zipcode && (
+            <View style={styles.infoRow}>
+              <Text style={styles.label}>Zipcode:</Text>
+              <Text style={styles.value}>{userProfile.zipcode}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.actionsContainer}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => setView('library')}
+          >
+            <Text style={styles.actionButtonText}>📚 Browse Game Library</Text>
+            <Text style={styles.actionButtonSubtext}>
+              {userGames.length} {userGames.length === 1 ? 'game' : 'games'}
+            </Text>
+          </TouchableOpacity>
+
+          {!isCurrentUser && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.messageButton]}
+              onPress={() => setView('message')}
+            >
+              <Text style={styles.actionButtonText}>💬 Send Message</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ScrollView>
+    );
+  };
+
+  const renderLibraryView = () => {
+    const gamesByCategory = userGames.reduce((acc, game) => {
+      const category = game.category || 'Other';
+      if (!acc[category]) {
+        acc[category] = [];
+      }
+      acc[category].push(game);
+      return acc;
+    }, {});
+
+    return (
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <View style={styles.libraryHeader}>
+          <Text style={styles.libraryTitle}>
+            {userProfile?.name || 'User'}'s Collection
+          </Text>
+          <Text style={styles.librarySubtitle}>
+            {userGames.length} {userGames.length === 1 ? 'game' : 'games'}
+          </Text>
+        </View>
+
+        {userGames.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No games in collection yet</Text>
+          </View>
+        ) : (
+          <View style={styles.gamesContainer}>
+            {ALL_CATEGORIES.map((category) => {
+              const games = gamesByCategory[category] || [];
+              if (games.length === 0) return null;
+
+              return (
+                <View key={category} style={styles.categorySection}>
+                  <Text style={styles.categoryTitle}>
+                    {category} ({games.length})
+                  </Text>
+                  <View style={styles.gamesGrid}>
+                    {games.map((game) => (
+                      <GameCard
+                        key={game.id}
+                        game={game}
+                        disableModal={false}
+                      />
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    );
+  };
+
+  const renderMessageView = () => {
+    return (
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        <View style={styles.messageHeader}>
+          <Text style={styles.messageTitle}>Send Message</Text>
+          <Text style={styles.messageSubtitle}>To: {userProfile?.name || 'User'}</Text>
+        </View>
+
+        <View style={styles.messageForm}>
+          <Text style={styles.messageLabel}>Message:</Text>
+          <View style={styles.messageInputContainer}>
+            <Text style={styles.messageInputPlaceholder}>
+              Messaging feature coming soon! This will allow you to send direct messages to other users.
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.actionButton, styles.sendButton]}
+            onPress={handleSendMessage}
+          >
+            <Text style={styles.actionButtonText}>Send Message</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    );
+  };
+
+  const getModalTitle = () => {
+    if (view === 'library') {
+      return `${userProfile?.name || 'User'}'s Collection`;
+    }
+    if (view === 'message') {
+      return 'Send Message';
+    }
+    return userProfile?.name || 'User Profile';
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={getModalTitle()}
+      fullScreen={view === 'library'}
+    >
+      {view === 'profile' && renderProfileView()}
+      {view === 'library' && renderLibraryView()}
+      {view === 'message' && renderMessageView()}
+      
+      {view !== 'profile' && (
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setView('profile')}
+        >
+          <Text style={styles.backButtonText}>← Back to Profile</Text>
+        </TouchableOpacity>
+      )}
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  profileHeader: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 12,
+  },
+  avatarPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#d45d5d',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  avatarInitial: {
+    fontSize: 40,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  name: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  bggUsername: {
+    fontSize: 14,
+    color: '#666',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  infoRow: {
+    marginBottom: 12,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  value: {
+    fontSize: 14,
+    color: '#666',
+  },
+  actionsContainer: {
+    marginTop: 24,
+  },
+  actionButton: {
+    backgroundColor: '#d45d5d',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  messageButton: {
+    backgroundColor: '#4a90e2',
+  },
+  sendButton: {
+    marginTop: 16,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionButtonSubtext: {
+    color: '#fff',
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.9,
+  },
+  libraryHeader: {
+    marginBottom: 20,
+  },
+  libraryTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  librarySubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  gamesContainer: {
+    marginTop: 16,
+  },
+  categorySection: {
+    marginBottom: 24,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  gamesGrid: {
+    gap: 12,
+  },
+  messageHeader: {
+    marginBottom: 20,
+  },
+  messageTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  messageSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  messageForm: {
+    marginTop: 16,
+  },
+  messageLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  messageInputContainer: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 120,
+    marginBottom: 16,
+  },
+  messageInputPlaceholder: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  backButton: {
+    padding: 16,
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#f9f9f9',
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#4a90e2',
+    fontWeight: '500',
+  },
+});
+
+export default UserProfileModal;
+

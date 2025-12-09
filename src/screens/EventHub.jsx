@@ -33,6 +33,9 @@ import { Linking } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { notifyDiscussionActivity } from '../utils/notifications';
 import RSVPManagementScreen from '../components/RSVPManagementScreen';
+import UserProfileModal from '../components/UserProfileModal';
+import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
+import PrivateMessaging from '../components/PrivateMessaging';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -120,19 +123,21 @@ const EventHub = () => {
   const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [showEditSchedule, setShowEditSchedule] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
-    selectedDates: [], // Array of { date: Date, startTime: Date, endTime: Date, location: string, exactLocation: string, note: string }
+    selectedDates: [], // Array of { date: Date, startTime: Date, endTime: Date, location: string, address: string, note: string }
     usualStartTime: new Date(new Date().setHours(18, 0, 0, 0)), // Default 6 PM
     usualEndTime: new Date(new Date().setHours(22, 0, 0, 0)), // Default 10 PM
-    generalLocation: '', // Default location for all dates
-    exactLocation: '', // Default exact location for all dates
+    location: '', // Default location for all dates
+    address: '', // Default address for all dates
   });
   const [editingDateIndex, setEditingDateIndex] = useState(null);
   const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'start' | 'end' | 'usualStart' | 'usualEnd', dateIndex: number }
-  const [selectedDateDetail, setSelectedDateDetail] = useState(null); // { date, startTime, endTime, location, exactLocation, note, index }
+  const [selectedDateDetail, setSelectedDateDetail] = useState(null); // { date, startTime, endTime, location, address, note, index }
   const [highlightedDateIndex, setHighlightedDateIndex] = useState(null); // Index of date to highlight
   const scheduleScrollRef = useRef(null);
   const dateEntryPositions = useRef({}); // Map of index to Y position
   const scrollPositionRef = useRef(0); // Track scroll position to prevent jumps
+  const editScheduleScrollRef = useRef(null); // Ref for Edit Schedule modal ScrollView
+  const editScheduleDatePositions = useRef({}); // Map of index to Y position in Edit Schedule modal
   const [memberNames, setMemberNames] = useState({});
   const [memberRSVPs, setMemberRSVPs] = useState({}); // { [userId]: { [dateKey]: status } }
   const [memberAvatars, setMemberAvatars] = useState({});
@@ -145,6 +150,7 @@ const EventHub = () => {
   const [replyText, setReplyText] = useState('');
   const [editing, setEditing] = useState(null); // { type: 'post' | 'comment', id: string, postId: string, content: string }
   const [editText, setEditText] = useState('');
+  const [showPrivateMessaging, setShowPrivateMessaging] = useState(false);
   // GamesTab state
   const [selectedGame, setSelectedGame] = useState(null);
   const [selectedGameBggData, setSelectedGameBggData] = useState(null);
@@ -158,9 +164,22 @@ const EventHub = () => {
   const [userProposals, setUserProposals] = useState(new Set()); // Set of gameIds user has proposed
   // Browse and Request state
   const [selectedAttendeeForBrowse, setSelectedAttendeeForBrowse] = useState(null); // { userId, userName, avatarUrl }
+  const [selectedUserForProfile, setSelectedUserForProfile] = useState(null); // { userId, userName, avatarUrl }
   // RSVP Management
   const [showRSVPManagement, setShowRSVPManagement] = useState(false);
   const [showAttendeeCollectionModal, setShowAttendeeCollectionModal] = useState(false);
+  // Default time and location editing
+  const [editingDefaultTime, setEditingDefaultTime] = useState(false);
+  const [editingDefaultLocation, setEditingDefaultLocation] = useState(false);
+  const [defaultTimeForm, setDefaultTimeForm] = useState({
+    usualStartTime: new Date(new Date().setHours(18, 0, 0, 0)),
+    usualEndTime: new Date(new Date().setHours(22, 0, 0, 0)),
+  });
+  const [defaultLocationForm, setDefaultLocationForm] = useState({
+    location: '',
+    address: '',
+  });
+  const [showDefaultTimePicker, setShowDefaultTimePicker] = useState({ type: null });
   const [attendeeCollectionPage, setAttendeeCollectionPage] = useState(1);
   const [attendeeCategorySortPreference, setAttendeeCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
   const [enrichedAttendeeGames, setEnrichedAttendeeGames] = useState([]);
@@ -211,8 +230,8 @@ const EventHub = () => {
             date: date && !isNaN(date.getTime()) ? date : new Date(),
             startTime: startTime && !isNaN(startTime.getTime()) ? startTime : defaultStartTime,
             endTime: endTime && !isNaN(endTime.getTime()) ? endTime : defaultEndTime,
-            location: ed.location || ed.generalLocation || event.generalLocation || '',
-            exactLocation: ed.exactLocation || (event.exactLocation || ''),
+            location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
+            address: ed.address || ed.exactLocation || (event.address || event.exactLocation || ''),
             note: ed.note || '',
           };
         });
@@ -225,8 +244,8 @@ const EventHub = () => {
               date: date,
               startTime: date,
               endTime: new Date(date.getTime() + 4 * 60 * 60 * 1000), // 4 hours later
-              location: event.generalLocation || '',
-              exactLocation: event.exactLocation || '',
+              location: event.location || event.generalLocation || '',
+              address: event.address || event.exactLocation || '',
               note: '',
             }];
           }
@@ -239,10 +258,22 @@ const EventHub = () => {
         selectedDates,
         usualStartTime: event.usualStartTime ? new Date(event.usualStartTime) : defaultStartTime,
         usualEndTime: event.usualEndTime ? new Date(event.usualEndTime) : defaultEndTime,
-        generalLocation: event.generalLocation || '',
-        exactLocation: event.exactLocation || '',
+        location: event.location || event.generalLocation || '',
+        address: event.address || event.exactLocation || '',
       });
       setPinnedNotes(event.description || '');
+      
+      // Initialize default time and location forms
+      const defaultStart = event.usualStartTime ? new Date(event.usualStartTime) : defaultStartTime;
+      const defaultEnd = event.usualEndTime ? new Date(event.usualEndTime) : defaultEndTime;
+      setDefaultTimeForm({
+        usualStartTime: defaultStart,
+        usualEndTime: defaultEnd,
+      });
+      setDefaultLocationForm({
+        location: event.location || event.generalLocation || '',
+        address: event.address || event.exactLocation || '',
+      });
     }
   }, [event]);
 
@@ -253,12 +284,21 @@ const EventHub = () => {
     if (!memberIdsKey || !db || !event?.id) return;
 
     const fetchMemberData = async () => {
+      console.log('[EventHub] fetchMemberData starting', {
+        memberCount: members.length,
+        eventId: event?.id,
+        currentUserId: user?.uid || user?.id,
+        isAuthenticated: !!user,
+      });
+      
       const names = {};
       const rsvps = {};
       const avatars = {};
       
       for (const member of members) {
         if (!member.userId || names[member.userId]) continue;
+        
+        console.log(`[EventHub] Processing member: ${member.userId}`);
         
         // First check if this is the current user - use Auth context data
         if (user && member.userId === (user.uid || user.id)) {
@@ -292,57 +332,142 @@ const EventHub = () => {
           
           // Get from members subcollection (has denormalized userName and rsvpStatus)
           if (event.id) {
-            const memberDoc = await db.collection('gamingGroups').doc(event.id)
-              .collection('members').doc(member.userId).get();
-            
-            if (memberDoc.exists) {
-              const memberData = memberDoc.data();
-              if (memberData.userName) {
-                names[member.userId] = memberData.userName;
+            console.log(`[EventHub] Fetching member document: gamingGroups/${event.id}/members/${member.userId}`);
+            try {
+              const memberDoc = await db.collection('gamingGroups').doc(event.id)
+                .collection('members').doc(member.userId).get();
+              
+              console.log(`[EventHub] Member document fetch result for ${member.userId}:`, {
+                exists: memberDoc.exists,
+                hasData: !!memberDoc.data(),
+              });
+              
+              if (memberDoc.exists) {
+                const memberData = memberDoc.data();
+                console.log(`[EventHub] Member document data for ${member.userId}:`, {
+                  hasUserName: !!memberData.userName,
+                  hasUserAvatarUrl: !!memberData.userAvatarUrl,
+                  hasRsvpStatus: !!memberData.rsvpStatus,
+                  hasRsvpStatuses: !!memberData.rsvpStatuses,
+                  userName: memberData.userName,
+                  userAvatarUrl: memberData.userAvatarUrl ? memberData.userAvatarUrl.substring(0, 50) + '...' : null,
+                });
+                
+                if (memberData.userName) {
+                  names[member.userId] = memberData.userName;
+                  console.log(`[EventHub] Set name from member doc for ${member.userId}: ${memberData.userName}`);
+                }
+                // Support both old format (rsvpStatus) and new format (rsvpStatuses)
+                if (memberData.rsvpStatuses) {
+                  rsvps[member.userId] = memberData.rsvpStatuses;
+                  console.log(`[EventHub] Set RSVP statuses for ${member.userId}:`, memberData.rsvpStatuses);
+                } else if (memberData.rsvpStatus) {
+                  // Backward compatibility: convert single status to date-specific
+                  rsvps[member.userId] = { default: memberData.rsvpStatus };
+                  console.log(`[EventHub] Set RSVP status (legacy) for ${member.userId}: ${memberData.rsvpStatus}`);
+                }
+                if (memberData.userAvatarUrl && memberData.userAvatarUrl.trim() !== '') {
+                  avatars[member.userId] = memberData.userAvatarUrl;
+                  avatarFound = true;
+                  console.log(`[EventHub] Found avatar in member doc for ${member.userId}`);
+                } else {
+                  console.log(`[EventHub] No avatar URL in member doc for ${member.userId}`);
+                }
+              } else {
+                console.warn(`[EventHub] Member document does not exist for ${member.userId} in group ${event.id}`);
               }
-              // Support both old format (rsvpStatus) and new format (rsvpStatuses)
-              if (memberData.rsvpStatuses) {
-                rsvps[member.userId] = memberData.rsvpStatuses;
-              } else if (memberData.rsvpStatus) {
-                // Backward compatibility: convert single status to date-specific
-                rsvps[member.userId] = { default: memberData.rsvpStatus };
-              }
-              if (memberData.userAvatarUrl && memberData.userAvatarUrl.trim() !== '') {
-                avatars[member.userId] = memberData.userAvatarUrl;
-                avatarFound = true;
-              }
+            } catch (memberDocError) {
+              console.error(`[EventHub] Error fetching member document for ${member.userId}:`, {
+                error: memberDocError.message,
+                code: memberDocError.code,
+                isPermissionError: memberDocError.code === 'permission-denied' || memberDocError.message?.includes('permission'),
+              });
             }
+          } else {
+            console.warn(`[EventHub] No event.id, cannot fetch member document for ${member.userId}`);
           }
           
           // Fallback to users collection if we didn't find avatar in member doc
           if (!avatarFound || !names[member.userId]) {
-            const userDoc = await db.collection('users').doc(member.userId).get();
-            if (userDoc.exists) {
-              const userData = userDoc.data();
-              if (!names[member.userId]) {
-                names[member.userId] = userData.name || userData.email || member.userId;
+            console.log(`[EventHub] Attempting to fetch user document for ${member.userId}`, {
+              needsName: !names[member.userId],
+              needsAvatar: !avatarFound,
+              currentUser: user?.uid || user?.id,
+              isAuthenticated: !!user,
+            });
+            
+            try {
+              // Check authentication state before fetching
+              if (!user || (!user.uid && !user.id)) {
+                console.warn(`[EventHub] User not authenticated, cannot fetch user document for ${member.userId}`);
               }
-              if (!avatarFound) {
-                if (userData.avatarUrl && userData.avatarUrl.trim() !== '') {
-                  avatars[member.userId] = userData.avatarUrl;
-                  // Update member document to cache the avatar URL for future fetches
-                  if (event.id) {
-                    try {
-                      const memberDocRef = db.collection('gamingGroups').doc(event.id)
-                        .collection('members').doc(member.userId);
-                      await memberDocRef.set({
-                        userAvatarUrl: userData.avatarUrl,
-                      }, { merge: true });
-                    } catch (updateError) {
-                      // Silently fail - this is just a cache optimization
-                      console.error('Error updating member avatar cache:', updateError);
+              
+              console.log(`[EventHub] Fetching from users collection: users/${member.userId}`);
+              const userDoc = await db.collection('users').doc(member.userId).get();
+              
+              console.log(`[EventHub] User document fetch result for ${member.userId}:`, {
+                exists: userDoc.exists,
+                hasData: !!userDoc.data(),
+                error: null,
+              });
+              
+              if (userDoc.exists) {
+                const userData = userDoc.data();
+                console.log(`[EventHub] User document data for ${member.userId}:`, {
+                  hasName: !!userData.name,
+                  hasEmail: !!userData.email,
+                  hasAvatarUrl: !!userData.avatarUrl,
+                  avatarUrlLength: userData.avatarUrl?.length || 0,
+                });
+                
+                if (!names[member.userId]) {
+                  names[member.userId] = userData.name || userData.email || member.userId;
+                  console.log(`[EventHub] Set name for ${member.userId}: ${names[member.userId]}`);
+                }
+                if (!avatarFound) {
+                  if (userData.avatarUrl && userData.avatarUrl.trim() !== '') {
+                    avatars[member.userId] = userData.avatarUrl;
+                    console.log(`[EventHub] Found avatar URL for ${member.userId}: ${userData.avatarUrl.substring(0, 50)}...`);
+                    
+                    // Update member document to cache the avatar URL for future fetches
+                    if (event.id) {
+                      try {
+                        const memberDocRef = db.collection('gamingGroups').doc(event.id)
+                          .collection('members').doc(member.userId);
+                        await memberDocRef.set({
+                          userAvatarUrl: userData.avatarUrl,
+                        }, { merge: true });
+                        console.log(`[EventHub] Cached avatar URL in member document for ${member.userId}`);
+                      } catch (updateError) {
+                        // Silently fail - this is just a cache optimization
+                        console.error(`[EventHub] Error updating member avatar cache for ${member.userId}:`, updateError);
+                      }
                     }
+                  } else {
+                    avatars[member.userId] = null;
+                    console.log(`[EventHub] No avatar URL found in user document for ${member.userId}`);
                   }
-                } else {
+                }
+              } else {
+                // Document doesn't exist - use fallback values
+                console.warn(`[EventHub] User document does not exist for ${member.userId}`);
+                if (!names[member.userId]) {
+                  names[member.userId] = member.userId;
+                }
+                if (!avatarFound) {
                   avatars[member.userId] = null;
                 }
               }
-            } else {
+            } catch (userFetchError) {
+              // Handle permission errors or other issues when fetching user document
+              console.error(`[EventHub] Error fetching user document for ${member.userId}:`, {
+                error: userFetchError.message,
+                code: userFetchError.code,
+                stack: userFetchError.stack,
+                isPermissionError: userFetchError.code === 'permission-denied' || userFetchError.message?.includes('permission'),
+              });
+              
+              // Use fallback values
               if (!names[member.userId]) {
                 names[member.userId] = member.userId;
               }
@@ -350,6 +475,8 @@ const EventHub = () => {
                 avatars[member.userId] = null;
               }
             }
+          } else {
+            console.log(`[EventHub] Skipping users collection fetch for ${member.userId} - already have name and avatar`);
           }
         } catch (error) {
           console.error(`Error fetching data for user ${member.userId}:`, error);
@@ -363,10 +490,12 @@ const EventHub = () => {
         rsvpsCount: Object.keys(rsvps).length,
         avatarsCount: Object.keys(avatars).length,
         userIds: Object.keys(names),
+        names: names,
         avatars: Object.keys(avatars).reduce((acc, userId) => {
-          acc[userId] = avatars[userId] ? 'found' : 'not found';
+          acc[userId] = avatars[userId] ? `found (${avatars[userId].substring(0, 30)}...)` : 'not found';
           return acc;
         }, {}),
+        rsvps: rsvps,
       });
       setMemberNames(names);
       setMemberRSVPs(prev => {
@@ -453,16 +582,29 @@ const EventHub = () => {
 
   // Helper to get members who are "going" or "maybe" for a specific date
   const getAttendingMembersForDate = (eventDate) => {
-    const dateKey = getDateKey(eventDate);
-    return members.filter((member) => {
-      const memberRsvps = memberRSVPs[member.userId] || {};
-      if (typeof memberRsvps === 'string') {
-        // Backward compatibility: old format
-        return eventDate ? false : (memberRsvps === 'going' || memberRsvps === 'maybe');
-      }
-      const status = memberRsvps[dateKey];
-      return status === 'going' || status === 'maybe';
-    });
+    if (!eventDate) return [];
+    try {
+      const dateKey = getDateKey(eventDate);
+      const attending = members.filter((member) => {
+        if (!member || !member.userId) return false;
+        try {
+          const memberRsvps = memberRSVPs[member.userId] || {};
+          if (typeof memberRsvps === 'string') {
+            // Backward compatibility: old format
+            return eventDate ? false : (memberRsvps === 'going' || memberRsvps === 'maybe');
+          }
+          const status = memberRsvps[dateKey];
+          return status === 'going' || status === 'maybe';
+        } catch (err) {
+          console.error('Error checking member RSVP:', err, member);
+          return false;
+        }
+      });
+      return attending;
+    } catch (err) {
+      console.error('Error in getAttendingMembersForDate:', err, eventDate);
+      return [];
+    }
   };
 
   const handleRSVP = async (status, eventDate = null, e = null) => {
@@ -582,8 +724,8 @@ const EventHub = () => {
         date: d.date.toISOString(),
         startTime: d.startTime.toISOString(),
         endTime: d.endTime.toISOString(),
-        location: d.location || scheduleForm.generalLocation || '',
-        exactLocation: d.exactLocation || scheduleForm.exactLocation || '',
+        location: d.location || scheduleForm.location || '',
+        address: d.address || d.exactLocation || scheduleForm.address || scheduleForm.exactLocation || '',
         note: d.note || '',
       }));
 
@@ -591,8 +733,6 @@ const EventHub = () => {
         eventDates,
         usualStartTime: scheduleForm.usualStartTime.toISOString(),
         usualEndTime: scheduleForm.usualEndTime.toISOString(),
-        generalLocation: scheduleForm.generalLocation,
-        exactLocation: scheduleForm.exactLocation,
         // Keep scheduledFor for backward compatibility (use first date)
         scheduledFor: scheduleForm.selectedDates[0]?.date.toISOString() || '',
       };
@@ -606,13 +746,75 @@ const EventHub = () => {
     }
   };
 
+  const handleSaveDefaultTime = async () => {
+    if (!isOrganizer) {
+      Alert.alert('Error', 'Only the organizer can edit the default time.');
+      return;
+    }
+
+    try {
+      const updateData = {
+        usualStartTime: defaultTimeForm.usualStartTime.toISOString(),
+        usualEndTime: defaultTimeForm.usualEndTime.toISOString(),
+      };
+
+      await updateEventSchedule(event.id, userId, updateData);
+      setEditingDefaultTime(false);
+      Alert.alert('Success', 'Default time updated successfully.');
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to update default time. Please try again.');
+      console.error(error);
+    }
+  };
+
+  const handleSaveDefaultLocation = async () => {
+    if (!isOrganizer) {
+      Alert.alert('Error', 'Only the organizer can edit the default location.');
+      return;
+    }
+
+    try {
+      const updateData = {
+        location: defaultLocationForm.location,
+        address: defaultLocationForm.address,
+      };
+
+      await updateEventSchedule(event.id, userId, updateData);
+      setEditingDefaultLocation(false);
+      Alert.alert('Success', 'Default location updated successfully.');
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to update default location. Please try again.');
+      console.error(error);
+    }
+  };
+
+  const handleDefaultTimeChange = (event, date, type) => {
+    if (Platform.OS === 'android') {
+      setShowDefaultTimePicker({ type: null });
+      if (event.type === 'dismissed') {
+        return;
+      }
+    }
+    
+    if (!date) return;
+    
+    setDefaultTimeForm({
+      ...defaultTimeForm,
+      [type === 'usualStart' ? 'usualStartTime' : 'usualEndTime']: date,
+    });
+    
+    if (Platform.OS === 'ios') {
+      // On iOS, we keep the picker open until user clicks Done
+    }
+  };
+
   const handleDatesChange = (dates) => {
-    // Dates are now objects with { date, startTime, endTime, location, exactLocation, note } structure
+    // Dates are now objects with { date, startTime, endTime, location, address, note } structure
     // Ensure new dates get default location values if not set
     const datesWithLocations = dates.map(d => ({
       ...d,
-      location: d.location !== undefined ? d.location : scheduleForm.generalLocation,
-      exactLocation: d.exactLocation !== undefined ? d.exactLocation : scheduleForm.exactLocation,
+      location: d.location !== undefined ? d.location : scheduleForm.location,
+      address: d.address !== undefined ? d.address : (d.exactLocation !== undefined ? d.exactLocation : scheduleForm.address),
       note: d.note !== undefined ? d.note : '',
     }));
     setScheduleForm({ ...scheduleForm, selectedDates: datesWithLocations });
@@ -893,6 +1095,29 @@ const EventHub = () => {
         }}
         scrollEventThrottle={16}
       >
+        {/* Invite Guests Section */}
+        {isOrganizer && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Invite Guests</Text>
+            <View style={styles.inviteBlock}>
+              <Text style={styles.inviteLabel}>Current join code</Text>
+              <Text style={styles.inviteCode}>{event.joinCode}</Text>
+              <Button
+                label="Share invite code"
+                onPress={handleShareInvite}
+                style={styles.primaryAction}
+              />
+              <Button
+                label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
+                onPress={handleRegenerateJoinCode}
+                style={styles.primaryAction}
+                disabled={regenerateBusy}
+                variant="outline"
+              />
+            </View>
+          </View>
+        )}
+
         {/* Members Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Members ({members.length})</Text>
@@ -909,7 +1134,14 @@ const EventHub = () => {
 
               return (
                 <View key={member.userId} style={styles.memberCard}>
-                  <View style={styles.memberAvatarContainer}>
+                  <TouchableOpacity
+                    style={styles.memberAvatarContainer}
+                    onPress={() => setSelectedUserForProfile({
+                      userId: member.userId,
+                      userName: displayName,
+                      avatarUrl: avatarUrl
+                    })}
+                  >
                     {hasValidAvatar ? (
                       <Image 
                         source={{ uri: avatarUrl }} 
@@ -923,7 +1155,7 @@ const EventHub = () => {
                         </Text>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
                   <View style={styles.memberInfo}>
                     <Text style={styles.memberName}>
                       {member.role === 'organizer' ? '👑 ' : ''}{displayName}
@@ -968,6 +1200,150 @@ const EventHub = () => {
           )}
         </View>
 
+        {/* Default Time and Location Section - Only for Organizers */}
+        {isOrganizer && (
+          <View style={styles.section}>
+            {/* Default Time */}
+            <View style={styles.defaultSettingRow}>
+              <Text style={styles.defaultSettingLabel}>Default Time</Text>
+              {editingDefaultTime ? (
+                <View style={styles.defaultSettingEdit}>
+                  <View style={styles.timeRow}>
+                    <View style={styles.timeInputContainer}>
+                      <Text style={styles.timeLabel}>Start</Text>
+                      <TouchableOpacity
+                        style={styles.timeButton}
+                        onPress={() => setShowDefaultTimePicker({ type: 'usualStart' })}
+                      >
+                        <Text style={styles.timeButtonText}>
+                          {defaultTimeForm.usualStartTime.toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true,
+                          })}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.timeInputContainer}>
+                      <Text style={styles.timeLabel}>End</Text>
+                      <TouchableOpacity
+                        style={styles.timeButton}
+                        onPress={() => setShowDefaultTimePicker({ type: 'usualEnd' })}
+                      >
+                        <Text style={styles.timeButtonText}>
+                          {defaultTimeForm.usualEndTime.toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true,
+                          })}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <View style={styles.defaultSettingActions}>
+                    <Button
+                      label="Save"
+                      onPress={handleSaveDefaultTime}
+                      style={styles.defaultSettingButton}
+                    />
+                    <Button
+                      label="Cancel"
+                      onPress={() => {
+                        setEditingDefaultTime(false);
+                        // Reset to current values
+                        const defaultStart = event.usualStartTime ? new Date(event.usualStartTime) : new Date(new Date().setHours(18, 0, 0, 0));
+                        const defaultEnd = event.usualEndTime ? new Date(event.usualEndTime) : new Date(new Date().setHours(22, 0, 0, 0));
+                        setDefaultTimeForm({
+                          usualStartTime: defaultStart,
+                          usualEndTime: defaultEnd,
+                        });
+                      }}
+                      variant="outline"
+                      style={styles.defaultSettingButton}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.defaultSettingDisplay}>
+                  <Text style={styles.defaultSettingValue}>
+                    {(() => {
+                      const start = event.usualStartTime ? new Date(event.usualStartTime) : new Date(new Date().setHours(18, 0, 0, 0));
+                      const end = event.usualEndTime ? new Date(event.usualEndTime) : new Date(new Date().setHours(22, 0, 0, 0));
+                      return `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })} - ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+                    })()}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setEditingDefaultTime(true)}
+                    style={styles.editIconButton}
+                  >
+                    <Text style={styles.editIconText}>✏️</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Default Location */}
+            <View style={styles.defaultSettingRow}>
+              <Text style={styles.defaultSettingLabel}>Default Location</Text>
+              {editingDefaultLocation ? (
+                <View style={styles.defaultSettingEdit}>
+                  <Input
+                    value={defaultLocationForm.location}
+                    onChangeText={(text) => setDefaultLocationForm({ ...defaultLocationForm, location: text })}
+                    placeholder="e.g., Jason's house"
+                    style={styles.defaultSettingInput}
+                  />
+                  <Input
+                    value={defaultLocationForm.address}
+                    onChangeText={(text) => setDefaultLocationForm({ ...defaultLocationForm, address: text })}
+                    placeholder="e.g., 123 Tolkien Dr."
+                    style={styles.defaultSettingInput}
+                  />
+                  <View style={styles.defaultSettingActions}>
+                    <Button
+                      label="Save"
+                      onPress={handleSaveDefaultLocation}
+                      style={styles.defaultSettingButton}
+                    />
+                    <Button
+                      label="Cancel"
+                      onPress={() => {
+                        setEditingDefaultLocation(false);
+                        // Reset to current values
+                        setDefaultLocationForm({
+                          location: event.location || event.generalLocation || '',
+                          address: event.address || event.exactLocation || '',
+                        });
+                      }}
+                      variant="outline"
+                      style={styles.defaultSettingButton}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.defaultSettingDisplay}>
+                  <View style={styles.defaultSettingValueContainer}>
+                    <Text style={styles.defaultSettingValue}>
+                      {event.location || event.generalLocation || 'Not set'}
+                    </Text>
+                    {(event.address || event.exactLocation) && (
+                      <Text style={styles.defaultSettingSubValue}>
+                        {event.address || event.exactLocation}
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setEditingDefaultLocation(true)}
+                    style={styles.editIconButton}
+                  >
+                    <Text style={styles.editIconText}>✏️</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Event Details & RSVP</Text>
@@ -991,6 +1367,17 @@ const EventHub = () => {
             </View>
           </View>
         
+        {isOrganizer && (
+          <View style={styles.editScheduleButtonContainer}>
+            <Button
+              label="Edit Schedule"
+              onPress={() => setShowEditSchedule(true)}
+              variant="outline"
+              style={styles.editButton}
+            />
+          </View>
+        )}
+        
         <View style={styles.scheduleInfo}>
           <Text style={styles.scheduleLabel}>Date & Time</Text>
           {event.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0 ? (
@@ -1010,8 +1397,8 @@ const EventHub = () => {
                   timeStr = formatTime(startTime.toISOString());
                 }
                 
-                const location = ed.location || ed.generalLocation || event.generalLocation || '';
-                const exactLocation = ed.exactLocation || (isMember ? event.exactLocation : null);
+                const location = ed.location || ed.generalLocation || event.location || event.generalLocation || '';
+                const address = ed.address || ed.exactLocation || (isMember ? (event.address || event.exactLocation) : null);
                 const note = ed.note || '';
                 const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
                 const showRSVPForDate = isMember && rsvpSettings.enabled;
@@ -1039,7 +1426,7 @@ const EventHub = () => {
                             startTime,
                             endTime,
                             location,
-                            exactLocation,
+                            address,
                             note,
                             index,
                           });
@@ -1070,56 +1457,75 @@ const EventHub = () => {
                       
                       {/* Show attending members for this date */}
                       {(() => {
-                        const attendingMembers = getAttendingMembersForDate(date);
-                        if (attendingMembers.length === 0) return null;
-                        
-                        return (
-                          <View style={styles.attendingMembersContainer}>
-                            <Text style={styles.attendingMembersLabel}>
-                              {attendingMembers.length} {attendingMembers.length === 1 ? 'person' : 'people'} attending:
-                            </Text>
-                            <View style={styles.attendingMembersAvatars}>
-                              {attendingMembers.map((member) => {
-                                const displayName = memberNames[member.userId] || member.userId;
-                                const avatarUrl = memberAvatars[member.userId];
-                                const hasValidAvatar = isValidAvatarUrl(avatarUrl);
-                                const memberRsvps = memberRSVPs[member.userId] || {};
-                                const dateKey = getDateKey(date);
-                                const memberStatus = typeof memberRsvps === 'string' 
-                                  ? (date ? null : memberRsvps)
-                                  : (memberRsvps[dateKey] || null);
-                                
-                                return (
-                                  <View key={member.userId} style={styles.attendingMemberAvatar}>
-                                    {hasValidAvatar ? (
-                                      <Image
-                                        source={{ uri: avatarUrl }}
-                                        style={styles.attendingAvatarImage}
-                                        resizeMode="cover"
-                                      />
-                                    ) : (
-                                      <View style={styles.attendingAvatarPlaceholder}>
-                                        <Text style={styles.attendingAvatarInitial}>
-                                          {displayName.charAt(0).toUpperCase()}
-                                        </Text>
-                                      </View>
-                                    )}
-                                    {memberStatus === 'going' && (
-                                      <View style={styles.goingBadge}>
-                                        <Text style={styles.goingBadgeText}>✓</Text>
-                                      </View>
-                                    )}
-                                    {memberStatus === 'maybe' && (
-                                      <View style={styles.maybeBadge}>
-                                        <Text style={styles.maybeBadgeText}>?</Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                );
-                              })}
+                        try {
+                          const attendingMembers = getAttendingMembersForDate(date);
+                          if (!attendingMembers || attendingMembers.length === 0) return null;
+                          
+                          return (
+                            <View style={styles.attendingMembersContainer}>
+                              <Text style={styles.attendingMembersLabel}>
+                                {attendingMembers.length} {attendingMembers.length === 1 ? 'person' : 'people'} attending:
+                              </Text>
+                              <View style={styles.attendingMembersAvatars}>
+                                {attendingMembers.map((member) => {
+                                  if (!member || !member.userId) return null;
+                                  try {
+                                    const displayName = memberNames[member.userId] || member.userId;
+                                    const avatarUrl = memberAvatars[member.userId];
+                                    const hasValidAvatar = isValidAvatarUrl(avatarUrl);
+                                    const memberRsvps = memberRSVPs[member.userId] || {};
+                                    const dateKey = getDateKey(date);
+                                    const memberStatus = typeof memberRsvps === 'string' 
+                                      ? (date ? null : memberRsvps)
+                                      : (memberRsvps[dateKey] || null);
+                                    
+                                    return (
+                                      <TouchableOpacity
+                                        key={member.userId}
+                                        style={styles.attendingMemberAvatar}
+                                        onPress={() => setSelectedUserForProfile({
+                                          userId: member.userId,
+                                          userName: displayName,
+                                          avatarUrl: avatarUrl
+                                        })}
+                                      >
+                                        {hasValidAvatar ? (
+                                          <Image
+                                            source={{ uri: avatarUrl }}
+                                            style={styles.attendingAvatarImage}
+                                            resizeMode="cover"
+                                          />
+                                        ) : (
+                                          <View style={styles.attendingAvatarPlaceholder}>
+                                            <Text style={styles.attendingAvatarInitial}>
+                                              {displayName.charAt(0).toUpperCase()}
+                                            </Text>
+                                          </View>
+                                        )}
+                                        {memberStatus === 'going' && (
+                                          <View style={styles.goingBadge}>
+                                            <Text style={styles.goingBadgeText}>✓</Text>
+                                          </View>
+                                        )}
+                                        {memberStatus === 'maybe' && (
+                                          <View style={styles.maybeBadge}>
+                                            <Text style={styles.maybeBadgeText}>?</Text>
+                                          </View>
+                                        )}
+                                      </TouchableOpacity>
+                                    );
+                                  } catch (err) {
+                                    console.error('Error rendering attending member:', err, member);
+                                    return null;
+                                  }
+                                })}
+                              </View>
                             </View>
-                          </View>
-                        );
+                          );
+                        } catch (err) {
+                          console.error('Error rendering attending members:', err, date);
+                          return null;
+                        }
                       })()}
                       
                       {showRSVPForDate && (
@@ -1135,6 +1541,7 @@ const EventHub = () => {
                               }}
                               variant={dateRSVP === 'going' ? 'primary' : 'outline'}
                               style={styles.dateRSVPButton}
+                              textStyle={styles.dateRSVPButtonText}
                             />
                             {rsvpSettings.allowMaybe && (
                               <Button
@@ -1146,6 +1553,7 @@ const EventHub = () => {
                                 }}
                                 variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
                                 style={styles.dateRSVPButton}
+                                textStyle={styles.dateRSVPButtonText}
                               />
                             )}
                             <Button
@@ -1157,6 +1565,7 @@ const EventHub = () => {
                               }}
                               variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
                               style={styles.dateRSVPButton}
+                              textStyle={styles.dateRSVPButtonText}
                             />
                           </View>
                           {dateRSVP && (
@@ -1193,8 +1602,8 @@ const EventHub = () => {
                             date,
                             startTime: startTime && !isNaN(startTime.getTime()) ? startTime : null,
                             endTime: null,
-                            location: event.generalLocation || '',
-                            exactLocation: isMember ? (event.exactLocation || '') : null,
+                            location: event.location || event.generalLocation || '',
+                            address: isMember ? (event.address || event.exactLocation || '') : null,
                             note: '',
                             index: 0,
                           });
@@ -1211,8 +1620,8 @@ const EventHub = () => {
                           return `${dateStr} (${timeStr})`;
                         })()}
                       </Text>
-                      {event.generalLocation && (
-                        <Text style={styles.scheduleLocation}>{event.generalLocation}</Text>
+                      {(event.location || event.generalLocation) && (
+                        <Text style={styles.scheduleLocation}>{event.location || event.generalLocation}</Text>
                       )}
                     </Pressable>
                     {showRSVPForDate && date && (
@@ -1224,6 +1633,7 @@ const EventHub = () => {
                             onPress={() => handleRSVP('going', date)}
                             variant={dateRSVP === 'going' ? 'primary' : 'outline'}
                             style={styles.dateRSVPButton}
+                            textStyle={styles.dateRSVPButtonText}
                           />
                           {rsvpSettings.allowMaybe && (
                             <Button
@@ -1231,6 +1641,7 @@ const EventHub = () => {
                               onPress={() => handleRSVP('maybe', date)}
                               variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
                               style={styles.dateRSVPButton}
+                              textStyle={styles.dateRSVPButtonText}
                             />
                           )}
                           <Button
@@ -1238,6 +1649,7 @@ const EventHub = () => {
                             onPress={() => handleRSVP('not-going', date)}
                             variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
                             style={styles.dateRSVPButton}
+                            textStyle={styles.dateRSVPButtonText}
                           />
                         </View>
                         {dateRSVP && (
@@ -1265,29 +1677,6 @@ const EventHub = () => {
           />
         )}
       </View>
-
-      {/* Invite Guests Section - Combined with Event Details */}
-      {isOrganizer && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Invite Guests</Text>
-          <View style={styles.inviteBlock}>
-            <Text style={styles.inviteLabel}>Current join code</Text>
-            <Text style={styles.inviteCode}>{event.joinCode}</Text>
-            <Button
-              label="Share invite code"
-              onPress={handleShareInvite}
-              style={styles.primaryAction}
-            />
-            <Button
-              label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
-              onPress={handleRegenerateJoinCode}
-              style={styles.primaryAction}
-              disabled={regenerateBusy}
-              variant="outline"
-            />
-          </View>
-        </View>
-      )}
 
       {/* Archive Section - Combined with Event Details */}
       {isOrganizer && (
@@ -1339,6 +1728,7 @@ const EventHub = () => {
                 }}
                 variant={defaultRSVP === 'going' ? 'primary' : 'outline'}
                 style={styles.rsvpButton}
+                textStyle={styles.rsvpButtonText}
               />
               {rsvpSettings.allowMaybe && (
                 <Button
@@ -1350,6 +1740,7 @@ const EventHub = () => {
                   }}
                   variant={defaultRSVP === 'maybe' ? 'primary' : 'outline'}
                   style={styles.rsvpButton}
+                  textStyle={styles.rsvpButtonText}
                 />
               )}
               <Button
@@ -1361,11 +1752,27 @@ const EventHub = () => {
                 }}
                 variant={defaultRSVP === 'not-going' ? 'primary' : 'outline'}
                 style={styles.rsvpButton}
+                textStyle={styles.rsvpButtonText}
               />
             </View>
           </View>
         );
       })()}
+
+      {/* Leave MeepleUp Section - Only for non-organizer members */}
+      {isMember && !isOrganizer && (
+        <View style={styles.section}>
+          <Button
+            label="Leave MeepleUp"
+            onPress={() => handleLeaveEventUtil(event.id, userId, leaveEvent, getEventById)}
+            variant="outline"
+            style={styles.dangerAction}
+          />
+          <Text style={styles.sectionHint}>
+            You will need to get a new invitation to rejoin this MeepleUp.
+          </Text>
+        </View>
+      )}
 
       </ScrollView>
     );
@@ -1888,19 +2295,27 @@ const EventHub = () => {
       <View key={comment.id} style={[styles.commentContainer, isNested && styles.nestedComment]}>
         <View style={[styles.commentCard, { marginLeft: depth * 16 }]}>
           <View style={styles.commentHeader}>
-            {comment.userAvatarUrl ? (
-              <Image 
-                source={{ uri: comment.userAvatarUrl }} 
-                style={styles.commentAvatar}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={styles.commentAvatarPlaceholder}>
-                <Text style={styles.commentAvatarInitial}>
-                  {comment.userName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
+            <TouchableOpacity
+              onPress={() => setSelectedUserForProfile({
+                userId: comment.userId,
+                userName: comment.userName,
+                avatarUrl: comment.userAvatarUrl
+              })}
+            >
+              {comment.userAvatarUrl ? (
+                <Image 
+                  source={{ uri: comment.userAvatarUrl }} 
+                  style={styles.commentAvatar}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.commentAvatarPlaceholder}>
+                  <Text style={styles.commentAvatarInitial}>
+                    {comment.userName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
             <View style={styles.commentHeaderText}>
               <Text style={styles.commentAuthor}>{comment.userName}</Text>
               <Text style={styles.commentTime}>
@@ -2013,6 +2428,15 @@ const EventHub = () => {
 
   // Discussion Tab Component - memoized to prevent re-creation on every render
   const DiscussionTab = useMemo(() => {
+    // Show private messaging if toggled
+    if (showPrivateMessaging && isMember) {
+      return (
+        <View style={styles.tabContent}>
+          <PrivateMessaging eventId={event?.id} members={members} />
+        </View>
+      );
+    }
+
     // Separate pinned and regular messages
     const pinnedMessages = discussionMessages.filter(m => m.pinned);
     const regularMessages = discussionMessages.filter(m => !m.pinned);
@@ -2167,7 +2591,19 @@ const EventHub = () => {
 
         {/* Discussion Messages */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Discussion</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Discussion</Text>
+            {isMember && (
+              <TouchableOpacity
+                onPress={() => setShowPrivateMessaging(!showPrivateMessaging)}
+                style={styles.privateMessageButton}
+              >
+                <Text style={styles.privateMessageButtonText}>
+                  {showPrivateMessaging ? 'Public Discussion' : 'Private Messages'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {regularMessages.length === 0 && pinnedMessages.length === 0 ? (
             <Text style={styles.sectionCopy}>
               No messages yet. Start the conversation!
@@ -2314,10 +2750,13 @@ const EventHub = () => {
       </ScrollView>
     );
   }, [
+    showPrivateMessaging,
+    isMember,
+    event?.id,
+    members,
     discussionMessages,
     pinnedNotes,
     isOrganizer,
-    isMember,
     newMessage,
     handlePostMessage,
     commentsByPost,
@@ -3029,7 +3468,7 @@ const EventHub = () => {
             dateString: ed.date,
             startTime: safeParseDate(ed.startTime),
             endTime: safeParseDate(ed.endTime),
-            location: ed.location || ed.generalLocation || event.generalLocation || '',
+            location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
           };
         }).filter(ed => ed.date !== null);
       } else if (event.scheduledFor) {
@@ -3041,7 +3480,7 @@ const EventHub = () => {
             dateString: event.scheduledFor,
             startTime: date,
             endTime: date,
-            location: event.generalLocation || event.location || '',
+            location: event.location || event.generalLocation || '',
           }];
         }
       }
@@ -3756,6 +4195,17 @@ const EventHub = () => {
         })()}
       </Modal>
 
+      {/* User Profile Modal */}
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
+      )}
+
       {/* Edit Schedule Modal */}
       {/* RSVP Management Modal */}
       {showRSVPManagement && (
@@ -3793,49 +4243,11 @@ const EventHub = () => {
         title="Edit Schedule"
         fullScreen={true}
       >
-        <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent}>
-          {/* Usual Time Section */}
-          <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Usual Time</Text>
-            <Text style={styles.fieldHint}>
-              Set the default start and end times. These will be used for all selected dates unless you edit individual dates.
-            </Text>
-            
-            <View style={styles.timeRow}>
-              <View style={styles.timeInputContainer}>
-                <Text style={styles.timeLabel}>Start Time</Text>
-                <TouchableOpacity
-                  style={styles.timeButton}
-                  onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
-                >
-                  <Text style={styles.timeButtonText}>
-                    {scheduleForm.usualStartTime.toLocaleTimeString('en-US', {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.timeInputContainer}>
-                <Text style={styles.timeLabel}>End Time</Text>
-                <TouchableOpacity
-                  style={styles.timeButton}
-                  onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
-                >
-                  <Text style={styles.timeButtonText}>
-                    {scheduleForm.usualEndTime.toLocaleTimeString('en-US', {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
+        <ScrollView 
+          ref={editScheduleScrollRef}
+          style={styles.modalContent} 
+          contentContainerStyle={styles.modalScrollContent}
+        >
           {/* Calendar Date Picker */}
           <View style={styles.modalFieldContainer}>
             <Text style={styles.fieldLabel}>Select Event Dates</Text>
@@ -3853,56 +4265,20 @@ const EventHub = () => {
                 setShowTimePicker({ type: timeType || 'start', dateIndex });
               }}
               onDatePress={(dateIndex, dateInfo) => {
-                // When user taps a selected date in the calendar, scroll to it in the main view
-                // First, find the corresponding index in event.eventDates
-                if (event && event.eventDates && Array.isArray(event.eventDates)) {
+                // When user taps a selected date in the calendar, scroll to its details in the Edit Schedule modal
+                if (scheduleForm.selectedDates && scheduleForm.selectedDates[dateIndex]) {
                   const dateItem = scheduleForm.selectedDates[dateIndex];
-                  if (dateItem && dateInfo) {
-                    const calendarDate = dateInfo.date || dateItem.date;
-                    const matchingIndex = event.eventDates.findIndex(ed => {
-                      const edDate = safeParseDate(ed.date);
-                      return edDate && calendarDate && 
-                        edDate.getFullYear() === calendarDate.getFullYear() &&
-                        edDate.getMonth() === calendarDate.getMonth() &&
-                        edDate.getDate() === calendarDate.getDate();
-                    });
-                    
-                    if (matchingIndex !== -1) {
-                      const ed = event.eventDates[matchingIndex];
-                      const date = safeParseDate(ed.date);
-                      const startTime = safeParseDate(ed.startTime);
-                      const endTime = safeParseDate(ed.endTime);
-                      const location = ed.location || ed.generalLocation || event.generalLocation || '';
-                      const exactLocation = ed.exactLocation || (isMember ? event.exactLocation : null);
-                      const note = ed.note || '';
-                      
-                      setSelectedDateDetail({
-                        date,
-                        startTime,
-                        endTime,
-                        location,
-                        exactLocation,
-                        note,
-                        index: matchingIndex,
+                  
+                  // Scroll to this date's details section in the modal
+                  setTimeout(() => {
+                    const position = editScheduleDatePositions.current[dateIndex];
+                    if (position !== undefined && editScheduleScrollRef.current) {
+                      editScheduleScrollRef.current.scrollTo({
+                        y: Math.max(0, position - 20), // Add some padding from top
+                        animated: true,
                       });
-                      setHighlightedDateIndex(matchingIndex);
-                      
-                      // Scroll to this date entry
-                      setTimeout(() => {
-                        const position = dateEntryPositions.current[matchingIndex];
-                        if (position !== undefined && scheduleScrollRef.current) {
-                          scheduleScrollRef.current.scrollTo({
-                            y: Math.max(0, position - 20), // Add some padding from top
-                            animated: true,
-                          });
-                        }
-                      }, 100);
-                      // Clear highlight after 3 seconds
-                      setTimeout(() => {
-                        setHighlightedDateIndex(null);
-                      }, 3000);
                     }
-                  }
+                  }, 100);
                 }
               }}
             />
@@ -3913,7 +4289,7 @@ const EventHub = () => {
             <View style={styles.modalFieldContainer}>
               <Text style={styles.fieldLabel}>Location for Each Date</Text>
               <Text style={styles.fieldHint}>
-                You can specify different locations for each date, or leave blank to use the default location below.
+                You can specify different locations for each date, or leave blank to use the default location.
               </Text>
               {scheduleForm.selectedDates.map((dateItem, index) => {
                 const dateStr = dateItem.date.toLocaleDateString('en-US', {
@@ -3923,7 +4299,14 @@ const EventHub = () => {
                   year: 'numeric',
                 });
                 return (
-                  <View key={index} style={styles.dateLocationContainer}>
+                  <View 
+                    key={index} 
+                    style={styles.dateLocationContainer}
+                    onLayout={(event) => {
+                      const { y } = event.nativeEvent.layout;
+                      editScheduleDatePositions.current[index] = y;
+                    }}
+                  >
                     <Text style={styles.dateLocationLabel}>{dateStr}</Text>
                     <Input
                       value={dateItem.location || ''}
@@ -3932,17 +4315,17 @@ const EventHub = () => {
                         updatedDates[index] = { ...updatedDates[index], location: text };
                         setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
                       }}
-                      placeholder={`Location (default: ${scheduleForm.generalLocation || 'not set'})`}
+                      placeholder={`Location (default: ${scheduleForm.location || 'not set'})`}
                       style={styles.modalInput}
                     />
                     <Input
-                      value={dateItem.exactLocation || ''}
+                      value={dateItem.address || dateItem.exactLocation || ''}
                       onChangeText={(text) => {
                         const updatedDates = [...scheduleForm.selectedDates];
-                        updatedDates[index] = { ...updatedDates[index], exactLocation: text };
+                        updatedDates[index] = { ...updatedDates[index], address: text, exactLocation: text };
                         setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
                       }}
-                      placeholder={`Exact address (default: ${scheduleForm.exactLocation || 'not set'})`}
+                      placeholder={`Address (default: ${scheduleForm.address || scheduleForm.exactLocation || 'not set'})`}
                       style={styles.modalInput}
                     />
                     <Input
@@ -3961,30 +4344,6 @@ const EventHub = () => {
               })}
             </View>
           )}
-
-          {/* Default Location Fields */}
-          <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Default Location</Text>
-            <Text style={styles.fieldHint}>
-              This location will be used for dates that don't have a specific location set above.
-            </Text>
-            <Input
-              value={scheduleForm.generalLocation}
-              onChangeText={(text) => setScheduleForm({ ...scheduleForm, generalLocation: text })}
-              placeholder="e.g., Seattle, WA"
-              style={styles.modalInput}
-            />
-          </View>
-
-          <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Default Exact Location</Text>
-            <Input
-              value={scheduleForm.exactLocation}
-              onChangeText={(text) => setScheduleForm({ ...scheduleForm, exactLocation: text })}
-              placeholder="e.g., 123 Main St, Seattle, WA"
-              style={styles.modalInput}
-            />
-          </View>
 
           <View style={styles.modalActions}>
             <Button
@@ -4068,6 +4427,62 @@ const EventHub = () => {
         )}
       </Modal>
 
+      {/* Default Time Picker Modal */}
+      {showDefaultTimePicker.type && (
+        Platform.OS === 'ios' ? (
+          <Modal
+            isOpen={true}
+            onClose={() => setShowDefaultTimePicker({ type: null })}
+            title={
+              showDefaultTimePicker.type === 'usualStart' ? 'Default Start Time' :
+              'Default End Time'
+            }
+          >
+            <View style={styles.timePickerModalContent}>
+              <DateTimePicker
+                value={
+                  showDefaultTimePicker.type === 'usualStart' 
+                    ? defaultTimeForm.usualStartTime
+                    : defaultTimeForm.usualEndTime
+                }
+                mode="time"
+                display="spinner"
+                is24Hour={false}
+                onChange={(event, date) => {
+                  if (date) {
+                    handleDefaultTimeChange(event, date, showDefaultTimePicker.type);
+                  }
+                }}
+                style={{ width: '100%', height: 200 }}
+              />
+              <View style={styles.iosPickerActions}>
+                <Button
+                  label="Done"
+                  onPress={() => setShowDefaultTimePicker({ type: null })}
+                  style={styles.modalButton}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          showDefaultTimePicker.type && (
+            <DateTimePicker
+              value={
+                showDefaultTimePicker.type === 'usualStart' 
+                  ? defaultTimeForm.usualStartTime
+                  : defaultTimeForm.usualEndTime
+              }
+              mode="time"
+              display="default"
+              is24Hour={false}
+              onChange={(event, date) => {
+                handleDefaultTimeChange(event, date, showDefaultTimePicker.type);
+              }}
+            />
+          )
+        )
+      )}
+
       {/* Date Detail Modal */}
       <Modal
         isOpen={selectedDateDetail !== null}
@@ -4110,16 +4525,16 @@ const EventHub = () => {
               </View>
             )}
 
-            {isMember && selectedDateDetail.exactLocation && (
+            {isMember && (selectedDateDetail.address || selectedDateDetail.exactLocation) && (
               <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailLabel}>Exact Location</Text>
+                <Text style={styles.dateDetailLabel}>Address</Text>
                 <Text style={styles.dateDetailValue}>
-                  {selectedDateDetail.exactLocation}
+                  {selectedDateDetail.address || selectedDateDetail.exactLocation}
                 </Text>
               </View>
             )}
 
-            {!selectedDateDetail.location && !selectedDateDetail.exactLocation && (
+            {!selectedDateDetail.location && !selectedDateDetail.address && !selectedDateDetail.exactLocation && (
               <View style={styles.dateDetailSection}>
                 <Text style={styles.dateDetailValue}>
                   Location to be announced
@@ -4284,21 +4699,83 @@ const styles = StyleSheet.create({
     color: '#2f2f2f',
     flex: 1,
   },
+  privateMessageButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+  },
+  privateMessageButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   sectionCopy: {
     fontSize: 14,
     color: '#444',
     lineHeight: 20,
     marginBottom: 6,
   },
+  defaultSettingRow: {
+    marginBottom: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  defaultSettingLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  defaultSettingDisplay: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  defaultSettingValueContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  defaultSettingValue: {
+    fontSize: 16,
+    color: '#2f2f2f',
+    marginBottom: 4,
+  },
+  defaultSettingSubValue: {
+    fontSize: 14,
+    color: '#666',
+  },
+  editIconButton: {
+    padding: 8,
+  },
+  editIconText: {
+    fontSize: 18,
+  },
+  defaultSettingEdit: {
+    marginTop: 8,
+  },
+  defaultSettingInput: {
+    marginBottom: 12,
+  },
+  defaultSettingActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  defaultSettingButton: {
+    flex: 1,
+  },
   scheduleInfo: {
     marginBottom: 16,
   },
   scheduleLabel: {
-    fontSize: 12,
+    fontSize: 18,
     textTransform: 'uppercase',
     color: '#666',
     letterSpacing: 1,
     marginBottom: 4,
+    fontWeight: '600',
   },
   scheduleValue: {
     fontSize: 16,
@@ -4399,9 +4876,10 @@ const styles = StyleSheet.create({
     minWidth: 140,
   },
   scheduleLocation: {
-    fontSize: 14,
+    fontSize: 18,
     color: '#666',
     marginTop: 4,
+    fontWeight: '600',
   },
   dateEntryContainer: {
     marginBottom: 16,
@@ -4519,6 +4997,11 @@ const styles = StyleSheet.create({
   },
   dateRSVPButton: {
     flex: 1,
+    padding: 8,
+    minHeight: 36,
+  },
+  dateRSVPButtonText: {
+    fontSize: 14,
   },
   dateRSVPStatus: {
     fontSize: 12,
@@ -4547,6 +5030,9 @@ const styles = StyleSheet.create({
   editButton: {
     marginTop: 12,
   },
+  editScheduleButtonContainer: {
+    marginBottom: 16,
+  },
   rsvpButtons: {
     flexDirection: 'row',
     gap: 12,
@@ -4555,6 +5041,11 @@ const styles = StyleSheet.create({
   },
   rsvpButton: {
     flex: 1,
+    padding: 8,
+    minHeight: 36,
+  },
+  rsvpButtonText: {
+    fontSize: 14,
   },
   rsvpSummary: {
     marginTop: 16,

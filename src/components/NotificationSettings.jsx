@@ -4,47 +4,45 @@ import { useAuth } from '../context/AuthContext';
 import Input from './common/Input';
 import Button from './common/Button';
 
-const NotificationSettings = () => {
+const NotificationSettings = ({ inModal = false }) => {
   const { user, updateNotificationPreferences } = useAuth();
   const [preferences, setPreferences] = useState({
     meepleupChanges: true,
     meepleupChangesEmail: false,
-    newPublicMeepleups: true,
-    newPublicMeepleupsEmail: false,
+    eventReminders: true,
+    eventReminderHours: 24, // Default: 24 hours before
     discussion: true,
     discussionEmail: false,
     discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
-    nearbyMeepleupDistance: 25,
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
-  const [distanceError, setDistanceError] = useState('');
+  const [hoursError, setHoursError] = useState('');
 
   useEffect(() => {
     if (user?.notificationPreferences) {
       setPreferences({
         meepleupChanges: user.notificationPreferences.meepleupChanges !== false,
         meepleupChangesEmail: user.notificationPreferences.meepleupChangesEmail === true,
-        newPublicMeepleups: user.notificationPreferences.newPublicMeepleups !== false,
-        newPublicMeepleupsEmail: user.notificationPreferences.newPublicMeepleupsEmail === true,
+        eventReminders: user.notificationPreferences.eventReminders !== false,
+        eventReminderHours: user.notificationPreferences.eventReminderHours || 24,
         discussion: user.notificationPreferences.discussion !== false && user.notificationPreferences.gameMarking !== false,
         discussionEmail: user.notificationPreferences.discussionEmail === true || user.notificationPreferences.gameMarkingEmail === true,
         discussionFrequency: user.notificationPreferences.discussionFrequency || user.notificationPreferences.gameMarkingFrequency || 'all',
-        nearbyMeepleupDistance: user.notificationPreferences.nearbyMeepleupDistance || 25,
       });
     }
   }, [user]);
 
-  const validateDistance = (value) => {
+  const validateHours = (value) => {
     if (!value || value.trim() === '') {
-      return 'Please enter a distance';
+      return 'Please enter hours';
     }
     const numValue = parseFloat(value);
     if (isNaN(numValue) || numValue <= 0) {
-      return 'Distance must be a positive number';
+      return 'Hours must be a positive number';
     }
-    if (numValue > 500) {
-      return 'Distance cannot exceed 500 miles';
+    if (numValue > 168) {
+      return 'Hours cannot exceed 168 (1 week)';
     }
     return '';
   };
@@ -55,50 +53,50 @@ const NotificationSettings = () => {
       [key]: value,
     }));
     setMessage('');
-    if (key === 'nearbyMeepleupDistance') {
-      const error = validateDistance(value.toString());
-      setDistanceError(error);
+    if (key === 'eventReminderHours') {
+      const error = validateHours(value.toString());
+      setHoursError(error);
     }
   };
 
-  const handleDistanceChange = (value) => {
+  const handleHoursChange = (value) => {
     setMessage('');
     
     // Allow empty value while typing
     if (!value || value.trim() === '') {
-      setDistanceError('');
+      setHoursError('');
       setPreferences((prev) => ({
         ...prev,
-        nearbyMeepleupDistance: value,
+        eventReminderHours: value,
       }));
       return;
     }
 
-    const error = validateDistance(value);
-    setDistanceError(error);
+    const error = validateHours(value);
+    setHoursError(error);
     
     if (!error) {
       const numValue = parseFloat(value);
-      if (!isNaN(numValue) && numValue > 0 && numValue <= 500) {
-        handlePreferenceChange('nearbyMeepleupDistance', numValue);
+      if (!isNaN(numValue) && numValue > 0 && numValue <= 168) {
+        handlePreferenceChange('eventReminderHours', numValue);
       }
     } else {
       // Still update the value so user can see what they're typing
       setPreferences((prev) => ({
         ...prev,
-        nearbyMeepleupDistance: value,
+        eventReminderHours: value,
       }));
     }
   };
 
   const handleSave = async () => {
-    // Validate distance before saving (only if newPublicMeepleups is enabled)
-    if (preferences.newPublicMeepleups) {
-      const distanceValue = preferences.nearbyMeepleupDistance;
-      const distanceStr = distanceValue ? distanceValue.toString() : '';
-      const distanceValidationError = validateDistance(distanceStr);
-      if (distanceValidationError) {
-        setDistanceError(distanceValidationError);
+    // Validate hours before saving (only if eventReminders is enabled)
+    if (preferences.eventReminders) {
+      const hoursValue = preferences.eventReminderHours;
+      const hoursStr = hoursValue ? hoursValue.toString() : '';
+      const hoursValidationError = validateHours(hoursStr);
+      if (hoursValidationError) {
+        setHoursError(hoursValidationError);
         setMessage('');
         return;
       }
@@ -106,22 +104,21 @@ const NotificationSettings = () => {
 
     setSaving(true);
     setMessage('');
-    setDistanceError('');
+    setHoursError('');
 
     try {
-      const distance = preferences.newPublicMeepleups && preferences.nearbyMeepleupDistance
-        ? parseFloat(preferences.nearbyMeepleupDistance)
-        : (preferences.nearbyMeepleupDistance || 25);
+      const hours = preferences.eventReminders && preferences.eventReminderHours
+        ? parseFloat(preferences.eventReminderHours)
+        : (preferences.eventReminderHours || 24);
 
       await updateNotificationPreferences({
         meepleupChanges: preferences.meepleupChanges,
         meepleupChangesEmail: preferences.meepleupChangesEmail,
-        newPublicMeepleups: preferences.newPublicMeepleups,
-        newPublicMeepleupsEmail: preferences.newPublicMeepleupsEmail,
+        eventReminders: preferences.eventReminders,
+        eventReminderHours: hours,
         discussion: preferences.discussion,
         discussionEmail: preferences.discussionEmail,
         discussionFrequency: preferences.discussionFrequency,
-        nearbyMeepleupDistance: distance,
       });
       setMessage('Notification preferences saved successfully!');
     } catch (error) {
@@ -133,8 +130,8 @@ const NotificationSettings = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.sectionTitle}>Notification Settings</Text>
+    <View style={[styles.container, inModal && styles.containerModal]}>
+      {!inModal && <Text style={styles.sectionTitle}>Notification Settings</Text>}
       <Text style={styles.sectionDescription}>
         Choose what types of notifications you want to receive
       </Text>
@@ -144,7 +141,7 @@ const NotificationSettings = () => {
         <View style={styles.settingContent}>
           <Text style={styles.settingLabel}>MeepleUp Changes</Text>
           <Text style={styles.settingDescription}>
-            Get notified when there are changes to MeepleUp's you are part of
+            Get notified when event details change
           </Text>
         </View>
         <Switch
@@ -168,56 +165,41 @@ const NotificationSettings = () => {
         </View>
       )}
 
-      {/* New Public MeepleUp's Near You */}
+      {/* Event Reminders */}
       <View style={styles.settingItem}>
         <View style={styles.settingContent}>
-          <Text style={styles.settingLabel}>New Public MeepleUp's Near You</Text>
+          <Text style={styles.settingLabel}>Event Reminders</Text>
           <Text style={styles.settingDescription}>
-            Get notified when new public MeepleUp's are created near your zip code
+            Get reminded before upcoming MeepleUp events you're attending
           </Text>
         </View>
         <Switch
-          value={preferences.newPublicMeepleups}
-          onValueChange={(value) => handlePreferenceChange('newPublicMeepleups', value)}
+          value={preferences.eventReminders}
+          onValueChange={(value) => handlePreferenceChange('eventReminders', value)}
           trackColor={{ false: '#ddd', true: '#d45d5d' }}
           thumbColor="#fff"
         />
       </View>
-      {preferences.newPublicMeepleups && (
-        <View style={styles.emailSettingItem}>
-          <View style={styles.settingContent}>
-            <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
-          </View>
-          <Switch
-            value={preferences.newPublicMeepleupsEmail}
-            onValueChange={(value) => handlePreferenceChange('newPublicMeepleupsEmail', value)}
-            trackColor={{ false: '#ddd', true: '#d45d5d' }}
-            thumbColor="#fff"
-          />
-        </View>
-      )}
-
-      {/* Distance Setting (only show when newPublicMeepleups is enabled) */}
-      {preferences.newPublicMeepleups && (
-        <View style={styles.distanceContainer}>
-          <Text style={styles.distanceLabel}>
-            Notification radius: {preferences.nearbyMeepleupDistance || 25} miles
+      {preferences.eventReminders && (
+        <View style={styles.hoursContainer}>
+          <Text style={styles.hoursLabel}>
+            Remind me {preferences.eventReminderHours || 24} hours before upcoming meetings
           </Text>
-          <View style={styles.distanceInputContainer}>
+          <View style={styles.hoursInputContainer}>
             <Input
-              value={preferences.nearbyMeepleupDistance ? preferences.nearbyMeepleupDistance.toString() : ''}
-              onChangeText={handleDistanceChange}
-              placeholder="Enter distance in miles"
+              value={preferences.eventReminderHours ? preferences.eventReminderHours.toString() : ''}
+              onChangeText={handleHoursChange}
+              placeholder="Enter hours"
               keyboardType="numeric"
-              style={styles.distanceInput}
+              style={styles.hoursInput}
             />
-            <Text style={styles.distanceUnit}>miles</Text>
+            <Text style={styles.hoursUnit}>hours</Text>
           </View>
-          {distanceError ? (
-            <Text style={[styles.helpText, styles.errorText]}>{distanceError}</Text>
+          {hoursError ? (
+            <Text style={[styles.helpText, styles.errorText]}>{hoursError}</Text>
           ) : (
             <Text style={styles.helpText}>
-              Set the distance in miles to define "near" your zip code (1-500 miles)
+              Set how many hours before an event you want to be reminded (1-168 hours / 1 week)
             </Text>
           )}
         </View>
@@ -252,7 +234,6 @@ const NotificationSettings = () => {
             />
           </View>
           <View style={styles.frequencyContainer}>
-            <Text style={styles.frequencyLabel}>Notification frequency:</Text>
             <View style={styles.frequencyOptions}>
               <TouchableOpacity
                 style={[
@@ -332,7 +313,7 @@ const NotificationSettings = () => {
       <Button
         label={saving ? 'Saving...' : 'Save Notification Settings'}
         onPress={handleSave}
-        disabled={saving || !!distanceError}
+        disabled={saving || !!hoursError}
         style={styles.saveButton}
       />
     </View>
@@ -342,6 +323,9 @@ const NotificationSettings = () => {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
+  },
+  containerModal: {
+    padding: 0,
   },
   sectionTitle: {
     fontSize: 20,
@@ -379,29 +363,29 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 18,
   },
-  distanceContainer: {
+  hoursContainer: {
     marginTop: 8,
     marginBottom: 16,
     paddingLeft: 0,
     paddingRight: 0,
   },
-  distanceLabel: {
+  hoursLabel: {
     fontSize: 14,
     fontWeight: '500',
     color: '#333',
     marginBottom: 8,
   },
-  distanceInputContainer: {
+  hoursInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 4,
   },
-  distanceInput: {
+  hoursInput: {
     flex: 1,
     marginRight: 8,
     marginBottom: 0,
   },
-  distanceUnit: {
+  hoursUnit: {
     fontSize: 16,
     color: '#666',
     minWidth: 50,

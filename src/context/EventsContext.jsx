@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { wordList1, wordList2, wordList3 } from '../utils/wordlist';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
-import { notifyNearbyUsersOfNewPublicMeepleUp, notifyMeepleUpMembers } from '../utils/notifications';
+import { notifyMeepleUpMembers } from '../utils/notifications';
 
 const EventsContext = createContext();
 
@@ -97,8 +97,9 @@ const normalizeEvent = (event) => {
       }))
     : [];
 
-  const generalLocation = event.generalLocation || event.location || 'Details shared after you join';
-  const exactLocation = event.exactLocation || event.location || '';
+  // Support both new (location/address) and old (generalLocation/exactLocation) field names
+  const location = event.location || event.generalLocation || '';
+  const address = event.address || event.exactLocation || '';
 
   // Check if event is archived (from Firestore)
   const deletedAt = event.deletedAt?.toDate?.()?.toISOString() || event.deletedAt || null;
@@ -115,10 +116,12 @@ const normalizeEvent = (event) => {
     usualEndTime: event.usualEndTime || undefined,
     createdAt,
     joinCode: event.joinCode || generateJoinCode(),
-    generalLocation,
-    exactLocation,
-    location: exactLocation || generalLocation,
-    visibility: event.visibility || 'private',
+    location,
+    address,
+    // Backward compatibility: also include old field names
+    generalLocation: location,
+    exactLocation: address,
+    visibility: 'private', // All meepleups are private (public feature removed)
     members: normalizedMembers,
     contactRequests,
     lastUpdatedAt: event.lastUpdatedAt || new Date().toISOString(),
@@ -229,33 +232,68 @@ export const EventsProvider = ({ children }) => {
           return;
         }
 
-        // Query Firestore for gamingGroups where user is in memberIds array
-        // This uses array-contains which doesn't require a composite index
-        const groupsRef = db.collection('gamingGroups')
-          .where('memberIds', 'array-contains', userId)
-          .where('isActive', '==', true);
+        // Query Firestore for gamingGroups where user is in memberIds array OR is the organizer
+        // Try multiple queries and combine results
+        let allGroupDocs = [];
+        const seenGroupIds = new Set();
         
-        let groupsSnapshot;
+        // Query 1: Groups where user is in memberIds
         try {
-          groupsSnapshot = await groupsRef.get();
-        } catch (indexError) {
-          // If index doesn't exist, fall back to querying all active groups and filtering
-          console.warn('Index not found, using fallback query:', indexError);
-          const allGroupsSnapshot = await db.collection('gamingGroups')
-            .where('isActive', '==', true)
-            .limit(100)
-            .get();
-          
-          // Filter in memory for groups where user is a member
-          groupsSnapshot = {
-            docs: allGroupsSnapshot.docs.filter(doc => {
-              const data = doc.data();
-              const memberIds = data.memberIds || [];
-              return memberIds.includes(userId);
-            }),
-            empty: false
-          };
+          const memberGroupsRef = db.collection('gamingGroups')
+            .where('memberIds', 'array-contains', userId)
+            .where('isActive', '==', true);
+          const memberGroupsSnapshot = await memberGroupsRef.get();
+          memberGroupsSnapshot.docs.forEach(doc => {
+            if (!seenGroupIds.has(doc.id)) {
+              allGroupDocs.push(doc);
+              seenGroupIds.add(doc.id);
+            }
+          });
+          console.log(`[EventsContext] Found ${memberGroupsSnapshot.docs.length} groups via memberIds query`);
+        } catch (memberQueryError) {
+          // Check if it's a permission error or index error
+          const isPermissionError = memberQueryError.code === 'permission-denied' || 
+                                    memberQueryError.message?.includes('permission') ||
+                                    memberQueryError.message?.includes('Missing or insufficient permissions');
+          if (isPermissionError) {
+            console.warn('[EventsContext] Permission error querying groups by memberIds (user may not be in memberIds):', memberQueryError.message);
+          } else {
+            console.warn('[EventsContext] Error querying groups by memberIds (may need index):', memberQueryError.message);
+          }
         }
+        
+        // Query 2: Groups where user is the organizer
+        try {
+          const organizerGroupsRef = db.collection('gamingGroups')
+            .where('organizerId', '==', userId)
+            .where('isActive', '==', true);
+          const organizerGroupsSnapshot = await organizerGroupsRef.get();
+          organizerGroupsSnapshot.docs.forEach(doc => {
+            if (!seenGroupIds.has(doc.id)) {
+              allGroupDocs.push(doc);
+              seenGroupIds.add(doc.id);
+            }
+          });
+          console.log(`[EventsContext] Found ${organizerGroupsSnapshot.docs.length} groups via organizerId query`);
+        } catch (organizerQueryError) {
+          // Check if it's a permission error or index error
+          const isPermissionError = organizerQueryError.code === 'permission-denied' || 
+                                    organizerQueryError.message?.includes('permission') ||
+                                    organizerQueryError.message?.includes('Missing or insufficient permissions');
+          if (isPermissionError) {
+            console.warn('[EventsContext] Permission error querying groups by organizerId:', organizerQueryError.message);
+          } else {
+            console.warn('[EventsContext] Error querying groups by organizerId (may need index):', organizerQueryError.message);
+          }
+        }
+        
+        console.log(`[EventsContext] Total groups found: ${allGroupDocs.length}`);
+        
+        // Create a snapshot-like object from the combined results
+        const groupsSnapshot = {
+          docs: allGroupDocs,
+          empty: allGroupDocs.length === 0
+        };
         
         if (groupsSnapshot.empty) {
           return;
@@ -267,23 +305,40 @@ export const EventsProvider = ({ children }) => {
             const firestoreData = groupDoc.data();
             
             // Get members from subcollection
-            const membersSnapshot = await db.collection('gamingGroups')
-              .doc(groupDoc.id)
-              .collection('members')
-              .get();
-            
-            const members = membersSnapshot.docs.map(memberDoc => {
-              const memberData = memberDoc.data();
-              return {
-                userId: memberData.userId || memberDoc.id,
+            let members = [];
+            try {
+              const membersSnapshot = await db.collection('gamingGroups')
+                .doc(groupDoc.id)
+                .collection('members')
+                .get();
+              
+              members = membersSnapshot.docs.map(memberDoc => {
+                const memberData = memberDoc.data();
+                return {
+                  userId: memberData.userId || memberDoc.id,
+                  status: MEMBERSHIP_STATUS.MEMBER,
+                  role: memberData.role || MEMBER_ROLES.MEMBER,
+                  joinedAt: memberData.joinedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                  rsvpStatus: memberData.rsvpStatus || null, // Backward compatibility
+                  rsvpStatuses: memberData.rsvpStatuses || {}, // Date-specific RSVPs
+                  rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || null,
+                };
+              });
+            } catch (memberError) {
+              // Permission errors can occur if user isn't a member yet
+              // Fall back to using memberIds from the group document
+              console.warn(`Error fetching members for group ${groupDoc.id}, using memberIds fallback:`, memberError);
+              const memberIds = firestoreData.memberIds || [];
+              members = memberIds.map((memberId, index) => ({
+                userId: memberId,
                 status: MEMBERSHIP_STATUS.MEMBER,
-                role: memberData.role || MEMBER_ROLES.MEMBER,
-                joinedAt: memberData.joinedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                rsvpStatus: memberData.rsvpStatus || null, // Backward compatibility
-                rsvpStatuses: memberData.rsvpStatuses || {}, // Date-specific RSVPs
-                rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || null,
-              };
-            });
+                role: memberId === firestoreData.organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
+                joinedAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                rsvpStatus: null,
+                rsvpStatuses: {},
+                rsvpUpdatedAt: null,
+              }));
+            }
 
             // Convert Firestore event format to local event format
             return {
@@ -304,9 +359,12 @@ export const EventsProvider = ({ children }) => {
               usualEndTime: firestoreData.usualEndTime?.toDate?.()?.toISOString() || firestoreData.usualEndTime,
               createdAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
               joinCode: firestoreData.joinCode || '',
+              location: firestoreData.location?.name || '',
+              address: firestoreData.location?.address || '',
+              // Backward compatibility
               generalLocation: firestoreData.location?.name || '',
               exactLocation: firestoreData.location?.address || '',
-              visibility: firestoreData.privacy === 'public' ? 'public' : 'private',
+              visibility: 'private', // All meepleups are private (public feature removed)
               members: members,
               isActive: firestoreData.isActive !== false,
               deletedAt: firestoreData.deletedAt?.toDate?.()?.toISOString() || firestoreData.deletedAt || null,
@@ -417,10 +475,10 @@ export const EventsProvider = ({ children }) => {
             organizerId: baseEvent.organizerId,
             organizerName: user?.name || user?.email || '',
             joinCode: normalizedJoinCode,
-            privacy: baseEvent.visibility === 'public' ? 'public' : 'private',
+            privacy: 'private', // All meepleups are private (public feature removed)
             location: {
-              name: baseEvent.generalLocation || '',
-              address: baseEvent.exactLocation || '',
+              name: baseEvent.location || baseEvent.generalLocation || '',
+              address: baseEvent.address || baseEvent.exactLocation || '',
             },
             scheduledFor: baseEvent.scheduledFor || null,
             eventDates: eventData.eventDates ? eventData.eventDates.map(ed => ({
@@ -467,26 +525,7 @@ export const EventsProvider = ({ children }) => {
             });
           }
 
-          // Notify nearby users if this is a public MeepleUp
-          if (baseEvent.visibility === 'public' || firestoreData.privacy === 'public') {
-            // Extract zipcode from location if available
-            // Location format: generalLocation might contain zipcode or address
-            const locationZipcode = extractZipcodeFromLocation(baseEvent.generalLocation || '');
-            const organizerZipcode = user?.zipcode || locationZipcode || '';
-            
-            if (organizerZipcode) {
-              // Fire and forget - don't wait for notification completion
-              notifyNearbyUsersOfNewPublicMeepleUp(
-                baseEvent.id,
-                baseEvent.name,
-                organizerZipcode,
-                user?.name || user?.email || 'Someone',
-                organizerId
-              ).catch(error => {
-                console.error('Error sending notifications for new public MeepleUp:', error);
-              });
-            }
-          }
+          // Public meepleups feature removed - no notifications needed
         } catch (error) {
           console.error('[createEvent] ❌ Error saving event to Firestore:', error);
           // Continue with local creation even if Firestore save fails
@@ -748,9 +787,12 @@ export const EventsProvider = ({ children }) => {
                 scheduledFor: firestoreEvent.scheduledFor || firestoreEvent.nextEventDate || '',
                 createdAt: firestoreEvent.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
                 joinCode: firestoreEvent.joinCode || '',
+                location: firestoreEvent.location?.name || '',
+                address: firestoreEvent.location?.address || '',
+                // Backward compatibility
                 generalLocation: firestoreEvent.location?.name || '',
                 exactLocation: firestoreEvent.location?.address || '',
-                visibility: firestoreEvent.privacy === 'public' ? 'public' : 'private',
+                visibility: 'private', // All meepleups are private (public feature removed)
                 members: firestoreEvent.memberIds ? firestoreEvent.memberIds.map((memberId, index) => ({
                   userId: memberId,
                   status: MEMBERSHIP_STATUS.MEMBER,
@@ -1442,11 +1484,20 @@ export const EventsProvider = ({ children }) => {
       if (scheduleUpdates.usualEndTime !== undefined) {
         updates.usualEndTime = scheduleUpdates.usualEndTime;
       }
-      if (scheduleUpdates.generalLocation !== undefined) {
-        updates.generalLocation = scheduleUpdates.generalLocation;
+      // Support both new (location/address) and old (generalLocation/exactLocation) field names
+      if (scheduleUpdates.location !== undefined || scheduleUpdates.generalLocation !== undefined) {
+        const newLocation = scheduleUpdates.location !== undefined 
+          ? scheduleUpdates.location 
+          : scheduleUpdates.generalLocation;
+        updates.location = newLocation;
+        updates.generalLocation = newLocation; // Backward compatibility
       }
-      if (scheduleUpdates.exactLocation !== undefined) {
-        updates.exactLocation = scheduleUpdates.exactLocation;
+      if (scheduleUpdates.address !== undefined || scheduleUpdates.exactLocation !== undefined) {
+        const newAddress = scheduleUpdates.address !== undefined 
+          ? scheduleUpdates.address 
+          : scheduleUpdates.exactLocation;
+        updates.address = newAddress;
+        updates.exactLocation = newAddress; // Backward compatibility
       }
 
       // Update in Firestore if available
@@ -1490,17 +1541,34 @@ export const EventsProvider = ({ children }) => {
             firestoreUpdates.usualEndTime = scheduleUpdates.usualEndTime;
           }
 
-          if (scheduleUpdates.generalLocation !== undefined || scheduleUpdates.exactLocation !== undefined) {
-            const currentData = (await groupRef.get()).data();
-            const currentLocation = currentData?.location || {};
+          // Support both new (location/address) and old (generalLocation/exactLocation) field names
+          if (scheduleUpdates.location !== undefined || scheduleUpdates.generalLocation !== undefined ||
+              scheduleUpdates.address !== undefined || scheduleUpdates.exactLocation !== undefined) {
+            // Try to get current data, but don't fail if we can't read it
+            let currentLocation = {};
+            try {
+              const currentData = (await groupRef.get()).data();
+              currentLocation = currentData?.location || {};
+            } catch (readError) {
+              // If we can't read the document, that's okay - we'll just use the new values
+              console.log('Could not read current location data, using new values only:', readError);
+            }
+            
             firestoreUpdates.location = {
-              name: scheduleUpdates.generalLocation !== undefined
+              name: scheduleUpdates.location !== undefined
+                ? scheduleUpdates.location
+                : scheduleUpdates.generalLocation !== undefined
                 ? scheduleUpdates.generalLocation
                 : currentLocation.name || '',
-              address: scheduleUpdates.exactLocation !== undefined
+              address: scheduleUpdates.address !== undefined
+                ? scheduleUpdates.address
+                : scheduleUpdates.exactLocation !== undefined
                 ? scheduleUpdates.exactLocation
                 : currentLocation.address || '',
             };
+            // Also set the old field names for backward compatibility
+            firestoreUpdates.generalLocation = firestoreUpdates.location.name;
+            firestoreUpdates.exactLocation = firestoreUpdates.location.address;
           }
 
           await groupRef.update(firestoreUpdates);

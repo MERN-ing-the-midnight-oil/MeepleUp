@@ -15,6 +15,7 @@ import { db } from '../config/firebase';
 import Button from './common/Button';
 import Input from './common/Input';
 import Modal from './common/Modal';
+import UserProfileModal from './UserProfileModal';
 
 const RSVPManagementScreen = ({ eventId, onClose }) => {
   const { user } = useAuth();
@@ -41,6 +42,7 @@ const RSVPManagementScreen = ({ eventId, onClose }) => {
   const [attendanceLimitInput, setAttendanceLimitInput] = useState('');
   const [editingMember, setEditingMember] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [selectedUserForProfile, setSelectedUserForProfile] = useState(null); // { userId, userName, avatarUrl }
 
   useEffect(() => {
     if (event) {
@@ -350,18 +352,26 @@ const RSVPManagementScreen = ({ eventId, onClose }) => {
                 return (
                   <View key={member.userId} style={styles.memberRow}>
                     <View style={styles.memberInfo}>
-                      {hasValidAvatar ? (
-                        <Image
-                          source={{ uri: avatarUrl }}
-                          style={styles.avatar}
-                        />
-                      ) : (
-                        <View style={styles.avatarPlaceholder}>
-                          <Text style={styles.avatarInitial}>
-                            {displayName.charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
+                      <TouchableOpacity
+                        onPress={() => setSelectedUserForProfile({
+                          userId: member.userId,
+                          userName: displayName,
+                          avatarUrl: avatarUrl
+                        })}
+                      >
+                        {hasValidAvatar ? (
+                          <Image
+                            source={{ uri: avatarUrl }}
+                            style={styles.avatar}
+                          />
+                        ) : (
+                          <View style={styles.avatarPlaceholder}>
+                            <Text style={styles.avatarInitial}>
+                              {displayName.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
                       <Text style={styles.memberName}>
                         {member.role === 'organizer' ? '👑 ' : ''}
                         {displayName}
@@ -396,18 +406,26 @@ const RSVPManagementScreen = ({ eventId, onClose }) => {
               return (
                 <View key={member.userId} style={styles.memberRow}>
                   <View style={styles.memberInfo}>
-                    {hasValidAvatar ? (
-                      <Image
-                        source={{ uri: avatarUrl }}
-                        style={styles.avatar}
-                      />
-                    ) : (
-                      <View style={styles.avatarPlaceholder}>
-                        <Text style={styles.avatarInitial}>
-                          {displayName.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
+                    <TouchableOpacity
+                      onPress={() => setSelectedUserForProfile({
+                        userId: member.userId,
+                        userName: displayName,
+                        avatarUrl: avatarUrl
+                      })}
+                    >
+                      {hasValidAvatar ? (
+                        <Image
+                          source={{ uri: avatarUrl }}
+                          style={styles.avatar}
+                        />
+                      ) : (
+                        <View style={styles.avatarPlaceholder}>
+                          <Text style={styles.avatarInitial}>
+                            {displayName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
                     <Text style={styles.memberName}>
                       {member.role === 'organizer' ? '👑 ' : ''}
                       {displayName}
@@ -441,18 +459,26 @@ const RSVPManagementScreen = ({ eventId, onClose }) => {
               return (
                 <View key={member.userId} style={styles.memberRow}>
                   <View style={styles.memberInfo}>
-                    {hasValidAvatar ? (
-                      <Image
-                        source={{ uri: avatarUrl }}
-                        style={styles.avatar}
-                      />
-                    ) : (
-                      <View style={styles.avatarPlaceholder}>
-                        <Text style={styles.avatarInitial}>
-                          {displayName.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
+                    <TouchableOpacity
+                      onPress={() => setSelectedUserForProfile({
+                        userId: member.userId,
+                        userName: displayName,
+                        avatarUrl: avatarUrl
+                      })}
+                    >
+                      {hasValidAvatar ? (
+                        <Image
+                          source={{ uri: avatarUrl }}
+                          style={styles.avatar}
+                        />
+                      ) : (
+                        <View style={styles.avatarPlaceholder}>
+                          <Text style={styles.avatarInitial}>
+                            {displayName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
                     <Text style={styles.memberName}>
                       {member.role === 'organizer' ? '👑 ' : ''}
                       {displayName}
@@ -579,6 +605,17 @@ const RSVPManagementScreen = ({ eventId, onClose }) => {
             />
           </View>
         </Modal>
+      )}
+
+      {/* User Profile Modal */}
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
       )}
     </View>
   );

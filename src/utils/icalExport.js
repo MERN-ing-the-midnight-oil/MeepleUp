@@ -95,16 +95,19 @@ export const generateIcalEvent = (event, options = {}) => {
     let description = event.description || '';
     
     // Add location info to description if available
-    if (event.generalLocation || event.exactLocation) {
+    // Support both new (location/address) and old (generalLocation/exactLocation) field names
+    const location = event.location || event.generalLocation;
+    const address = event.address || event.exactLocation;
+    if (location || address) {
       if (description) description += '\\n\\n';
       description += 'Location: ';
-      if (event.exactLocation) {
-        description += event.exactLocation;
-        if (event.generalLocation) {
-          description += ` (${event.generalLocation})`;
+      if (address) {
+        description += address;
+        if (location) {
+          description += ` (${location})`;
         }
       } else {
-        description += event.generalLocation || 'TBD';
+        description += location || 'TBD';
       }
     }
     
@@ -121,7 +124,8 @@ export const generateIcalEvent = (event, options = {}) => {
   
   // Location
   if (includeLocation) {
-    const location = event.exactLocation || event.generalLocation || '';
+    // Support both new (location/address) and old (generalLocation/exactLocation) field names
+    const location = event.address || event.exactLocation || event.location || event.generalLocation || '';
     if (location) {
       lines.push(`LOCATION:${escapeIcalText(location)}`);
     }
@@ -383,7 +387,8 @@ export const generateGoogleCalendarUrl = (event) => {
   }
   
   // Location
-  const location = event.exactLocation || event.generalLocation || '';
+  // Support both new (location/address) and old (generalLocation/exactLocation) field names
+  const location = event.address || event.exactLocation || event.location || event.generalLocation || '';
   if (location) {
     params.append('location', location);
   }

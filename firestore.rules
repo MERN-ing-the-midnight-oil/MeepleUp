@@ -27,7 +27,7 @@ service cloud.firestore {
     // Check membership using get() - use carefully to avoid circular dependencies
     function isGroupMember(groupId) {
       return isAuthenticated() && 
-        request.auth.uid in get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds;
+        request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
     }
     
     function isGroupOrganizer(groupId) {
@@ -36,18 +36,27 @@ service cloud.firestore {
     }
     
     // Users can read/write their own profile
+    // Allow any authenticated user to read any user profile (for displaying member info in groups)
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      // Allow read for any authenticated user - needed for displaying member profiles in groups
+      allow read: if request.auth != null;
       allow write: if isOwner(userId);
+      
+      // Notifications subcollection
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if isAuthenticated(); // Anyone can create notifications for a user
+        allow update, delete: if isOwner(userId);
+      }
     }
     
     // Gaming Groups
     match /gamingGroups/{groupId} {
-      // Allow reading if authenticated AND (public OR user is in memberIds)
-      // Use resource.data to check memberIds without needing get()
+      // Allow reading if authenticated AND (user is in memberIds OR user is the organizer)
+      // This handles cases where memberIds might not be properly set
       allow read: if isAuthenticated() && (
-        resource.data.privacy == 'public' ||
-        request.auth.uid in (resource.data.memberIds || [])
+        request.auth.uid in (resource.data.memberIds || []) ||
+        request.auth.uid == resource.data.organizerId
       );
       allow create: if isAuthenticated();
       allow update, delete: if isAuthenticated() && (
@@ -58,12 +67,16 @@ service cloud.firestore {
       match /members/{userId} {
         // Allow reading if user is authenticated and either:
         // - They are reading their own member document, OR
-        // - The parent group is public, OR
-        // - They are a member of the group (check parent group's memberIds)
+        // - They are a member of the group (in memberIds) OR the organizer
+        // Note: Using get() here reads the group document
+        function canReadGroup() {
+          let groupDoc = get(/databases/$(database)/documents/gamingGroups/$(groupId));
+          return request.auth.uid in (groupDoc.data.memberIds || []) ||
+                 request.auth.uid == groupDoc.data.organizerId;
+        }
         allow read: if isAuthenticated() && (
           isOwner(userId) ||
-          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public' ||
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
+          canReadGroup()
         );
         allow create: if isAuthenticated() && (
           isOwner(userId) ||
@@ -84,8 +97,7 @@ service cloud.firestore {
       // Discussion Forum Posts
       match /posts/{postId} {
         allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
-          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
         );
         allow create: if isAuthenticated() && 
           request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
@@ -97,8 +109,7 @@ service cloud.firestore {
         // Post Comments
         match /comments/{commentId} {
           allow read: if isAuthenticated() && (
-            request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
-            get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+            request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
           );
           allow create: if isAuthenticated() && 
             request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
@@ -112,8 +123,7 @@ service cloud.firestore {
       // Game Interests
       match /gameInterests/{interestId} {
         allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
-          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
         );
         allow create: if isAuthenticated() && 
           request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
@@ -131,8 +141,7 @@ service cloud.firestore {
       // Game Proposals/Nominations
       match /nominations/{proposalId} {
         allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
-          get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.privacy == 'public'
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
         );
         allow create: if isAuthenticated() && 
           request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);

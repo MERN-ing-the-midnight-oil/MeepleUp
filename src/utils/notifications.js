@@ -25,7 +25,7 @@ try {
 
 /**
  * Notification types based on schema
- * 'new_post' | 'new_comment' | 'game_interest' | 'group_invite' | 'rsvp_update' | 'meepleup_changes' | 'new_public_meepleup'
+ * 'new_post' | 'new_comment' | 'game_interest' | 'group_invite' | 'rsvp_update' | 'meepleup_changes'
  */
 
 /**
@@ -91,11 +91,8 @@ export const getUserNotificationPreferences = async (userId) => {
     return userData.notificationPreferences || {
       meepleupChanges: true,
       meepleupChangesEmail: false,
-      newPublicMeepleups: true,
-      newPublicMeepleupsEmail: false,
       gameMarking: true,
       gameMarkingEmail: false,
-      nearbyMeepleupDistance: 25,
     };
   } catch (error) {
     console.error('Error fetching notification preferences:', error);
@@ -106,7 +103,7 @@ export const getUserNotificationPreferences = async (userId) => {
 /**
  * Check if user has a specific notification type enabled
  * @param {object} preferences - User notification preferences
- * @param {string} notificationType - Type of notification ('meepleupChanges', 'newPublicMeepleups', 'gameMarking')
+ * @param {string} notificationType - Type of notification ('meepleupChanges', 'gameMarking')
  * @returns {boolean}
  */
 export const isNotificationEnabled = (preferences, notificationType) => {
@@ -117,8 +114,6 @@ export const isNotificationEnabled = (preferences, notificationType) => {
   switch (notificationType) {
     case 'meepleupChanges':
       return preferences.meepleupChanges !== false;
-    case 'newPublicMeepleups':
-      return preferences.newPublicMeepleups !== false;
     case 'gameMarking':
       // Legacy support - check both gameMarking and discussion
       return preferences.gameMarking !== false && preferences.discussion !== false;
@@ -304,96 +299,7 @@ export const notifyDiscussionActivity = async (groupId, excludeUserId, notificat
   }
 };
 
-/**
- * Notify users about a new public MeepleUp near their zip code
- * @param {string} groupId - New MeepleUp ID
- * @param {string} groupName - MeepleUp name
- * @param {string} groupZipcode - MeepleUp zipcode
- * @param {string} organizerName - Organizer name
- * @param {number} organizerUserId - Organizer user ID (to exclude from notifications)
- */
-export const notifyNearbyUsersOfNewPublicMeepleUp = async (
-  groupId,
-  groupName,
-  groupZipcode,
-  organizerName,
-  organizerUserId
-) => {
-  if (!groupId || !groupZipcode || !db) {
-    return;
-  }
-
-  try {
-    // Get all users with zipcodes
-    const usersSnapshot = await db.collection('users').get();
-
-    if (usersSnapshot.empty) {
-      return;
-    }
-
-    const batch = db.batch();
-    let notificationCount = 0;
-
-    for (const userDoc of usersSnapshot.docs) {
-      const userId = userDoc.id;
-      
-      // Skip the organizer
-      if (userId === organizerUserId) {
-        continue;
-      }
-
-      const userData = userDoc.data();
-      const userZipcode = userData.zipcode;
-
-      // Skip if user doesn't have a zipcode
-      if (!userZipcode) {
-        continue;
-      }
-
-      // Get user's notification preferences
-      const preferences = userData.notificationPreferences || {
-        newPublicMeepleups: true,
-        nearbyMeepleupDistance: 25,
-      };
-
-      // Check if notification is enabled
-      if (!isNotificationEnabled(preferences, 'newPublicMeepleups')) {
-        continue;
-      }
-
-      // Calculate distance (simplified - using zipcode prefix matching for now)
-      // TODO: Implement proper distance calculation with geocoding API
-      const distance = calculateZipcodeDistance(userZipcode, groupZipcode);
-      const maxDistance = preferences.nearbyMeepleupDistance || 25;
-
-      if (distance !== null && distance <= maxDistance) {
-        const notificationsRef = db.collection('users').doc(userId).collection('notifications');
-        const notificationId = notificationsRef.doc().id;
-
-        const notification = {
-          id: notificationId,
-          type: 'new_public_meepleup',
-          groupId: groupId,
-          fromUserId: organizerUserId || null,
-          fromUserName: organizerName || null,
-          message: `New public MeepleUp "${groupName}" created ${distance.toFixed(1)} miles away!`,
-          read: false,
-          createdAt: firebase.firestore.Timestamp.now(),
-        };
-
-        batch.set(notificationsRef.doc(notificationId), notification);
-        notificationCount++;
-      }
-    }
-
-    if (notificationCount > 0) {
-      await batch.commit();
-      console.log(`Created ${notificationCount} notifications for new public MeepleUp ${groupId}`);
-    }
-  } catch (error) {
-    console.error('Error notifying nearby users of new public MeepleUp:', error);
-  }
-};
+// Public meepleups feature removed - notification function no longer needed
 
 /**
  * Notify a user when someone comments on their game

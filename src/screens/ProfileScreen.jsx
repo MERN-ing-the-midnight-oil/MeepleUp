@@ -47,6 +47,8 @@ const ProfileScreen = () => {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -59,6 +61,24 @@ const ProfileScreen = () => {
       });
     }
   }, [user]);
+
+  // Close password modal on successful password update
+  useEffect(() => {
+    if (passwordState.message && !passwordState.error && !passwordState.loading && showPasswordModal) {
+      const timer = setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordState({
+          current: '',
+          next: '',
+          confirm: '',
+          message: '',
+          error: '',
+          loading: false,
+        });
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [passwordState.message, passwordState.error, passwordState.loading, showPasswordModal]);
 
   const validateZipcode = (zipcode) => {
     if (!zipcode || zipcode.trim() === '') {
@@ -300,8 +320,8 @@ const ProfileScreen = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-        <Text style={styles.title}>Profile</Text>
-        <Text style={styles.subtitle}>Manage your account settings</Text>
+        <Text style={styles.title}>Profile/Settings</Text>
+        <Text style={styles.subtitle}>{user?.email || ''}</Text>
       </View>
 
       <View style={styles.form}>
@@ -370,49 +390,6 @@ const ProfileScreen = () => {
         </View>
 
         <View style={styles.formGroup}>
-          <Text style={styles.label}>Email</Text>
-          <Input
-            value={userData.email}
-            placeholder="Email address"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            style={styles.input}
-            disabled
-          />
-          <Text style={styles.helpText}>
-            Email changes require contacting support so we can keep your account secure.
-          </Text>
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Zipcode</Text>
-          <Input
-            value={userData.zipcode}
-            onChangeText={(text) => handleChange('zipcode', text)}
-            placeholder="12345 or 12345-6789"
-            keyboardType="default"
-            style={styles.input}
-          />
-          {zipcodeError ? (
-            <Text style={[styles.helpText, styles.errorText]}>{zipcodeError}</Text>
-          ) : null}
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>BoardGameGeek Username</Text>
-          <Input
-            value={userData.bggUsername}
-            onChangeText={(text) => handleChange('bggUsername', text)}
-            placeholder="Enter your BGG username"
-            autoCapitalize="none"
-            style={styles.input}
-          />
-          <Text style={styles.helpText}>
-            Connect your BGG account to import your collection. Make sure your BGG collection is set to public.
-          </Text>
-        </View>
-
-        <View style={styles.formGroup}>
           <Text style={styles.label}>Bio</Text>
           <TextInput
             value={userData.bio}
@@ -440,65 +417,19 @@ const ProfileScreen = () => {
       </View>
 
       <View style={styles.form}>
-        <NotificationSettings />
+        <Button
+          label="Notification Settings"
+          onPress={() => setShowNotificationModal(true)}
+          variant="outline"
+          style={styles.saveButton}
+        />
       </View>
 
       <View style={styles.form}>
-        <Text style={styles.sectionTitle}>Update Password</Text>
-        {passwordState.error ? (
-          <View style={[styles.message, styles.errorMessage]}>
-            <Text style={[styles.messageText, styles.errorText]}>{passwordState.error}</Text>
-          </View>
-        ) : null}
-        {passwordState.message ? (
-          <View style={[styles.message, styles.successMessage]}>
-            <Text style={[styles.messageText, styles.successText]}>{passwordState.message}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Current password</Text>
-          <Input
-            value={passwordState.current}
-            onChangeText={(text) =>
-              setPasswordState((prev) => ({ ...prev, current: text, error: '', message: '' }))
-            }
-            placeholder="Enter current password"
-            secureTextEntry
-            style={styles.input}
-          />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>New password</Text>
-          <Input
-            value={passwordState.next}
-            onChangeText={(text) =>
-              setPasswordState((prev) => ({ ...prev, next: text, error: '', message: '' }))
-            }
-            placeholder="Enter new password"
-            secureTextEntry
-            style={styles.input}
-          />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Confirm new password</Text>
-          <Input
-            value={passwordState.confirm}
-            onChangeText={(text) =>
-              setPasswordState((prev) => ({ ...prev, confirm: text, error: '', message: '' }))
-            }
-            placeholder="Confirm new password"
-            secureTextEntry
-            style={styles.input}
-          />
-        </View>
-
         <Button
-          label={passwordState.loading ? 'Updating...' : 'Update password'}
-          onPress={handlePasswordChange}
-          disabled={passwordState.loading}
+          label="Update Password"
+          onPress={() => setShowPasswordModal(true)}
+          variant="outline"
           style={styles.saveButton}
         />
       </View>
@@ -526,6 +457,108 @@ const ProfileScreen = () => {
           />
         </View>
       </View>
+
+      <Modal
+        isOpen={showNotificationModal}
+        onClose={() => setShowNotificationModal(false)}
+        title="Notification Settings"
+      >
+        <NotificationSettings inModal={true} />
+      </Modal>
+
+      <Modal
+        isOpen={showPasswordModal}
+        onClose={() => {
+          setShowPasswordModal(false);
+          setPasswordState({
+            current: '',
+            next: '',
+            confirm: '',
+            message: '',
+            error: '',
+            loading: false,
+          });
+        }}
+        title="Update Password"
+      >
+        <View style={styles.passwordModalContent}>
+          {passwordState.error ? (
+            <View style={[styles.message, styles.errorMessage]}>
+              <Text style={[styles.messageText, styles.errorText]}>{passwordState.error}</Text>
+            </View>
+          ) : null}
+          {passwordState.message ? (
+            <View style={[styles.message, styles.successMessage]}>
+              <Text style={[styles.messageText, styles.successText]}>{passwordState.message}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Current password</Text>
+            <Input
+              value={passwordState.current}
+              onChangeText={(text) =>
+                setPasswordState((prev) => ({ ...prev, current: text, error: '', message: '' }))
+              }
+              placeholder="Enter current password"
+              secureTextEntry
+              style={styles.input}
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>New password</Text>
+            <Input
+              value={passwordState.next}
+              onChangeText={(text) =>
+                setPasswordState((prev) => ({ ...prev, next: text, error: '', message: '' }))
+              }
+              placeholder="Enter new password"
+              secureTextEntry
+              style={styles.input}
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Confirm new password</Text>
+            <Input
+              value={passwordState.confirm}
+              onChangeText={(text) =>
+                setPasswordState((prev) => ({ ...prev, confirm: text, error: '', message: '' }))
+              }
+              placeholder="Confirm new password"
+              secureTextEntry
+              style={styles.input}
+            />
+          </View>
+
+          <View style={styles.passwordModalButtons}>
+            <Button
+              label="Cancel"
+              onPress={() => {
+                setShowPasswordModal(false);
+                setPasswordState({
+                  current: '',
+                  next: '',
+                  confirm: '',
+                  message: '',
+                  error: '',
+                  loading: false,
+                });
+              }}
+              variant="outline"
+              style={styles.cancelButton}
+              disabled={passwordState.loading}
+            />
+            <Button
+              label={passwordState.loading ? 'Updating...' : 'Update password'}
+              onPress={handlePasswordChange}
+              disabled={passwordState.loading}
+              style={styles.saveButton}
+            />
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         isOpen={showDeleteModal}
@@ -603,8 +636,8 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   header: {
-    padding: 20,
-    paddingTop: 40,
+    padding: 16,
+    paddingTop: 32,
   },
   title: {
     fontSize: 28,
@@ -621,10 +654,10 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   form: {
-    padding: 20,
+    padding: 16,
   },
   formGroup: {
-    marginBottom: 20,
+    marginBottom: 14,
   },
   label: {
     fontSize: 16,
@@ -647,7 +680,7 @@ const styles = StyleSheet.create({
   message: {
     padding: 12,
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   successMessage: {
     backgroundColor: '#d4edda',
@@ -669,23 +702,23 @@ const styles = StyleSheet.create({
     color: '#721c24',
   },
   saveButton: {
-    marginBottom: 12,
+    marginBottom: 8,
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   messageButton: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   logoutButton: {
-    marginTop: 8,
+    marginTop: 4,
     borderColor: '#d45d5d',
   },
   dangerZone: {
-    padding: 16,
+    padding: 12,
     backgroundColor: '#fff5f5',
     borderRadius: 8,
     borderWidth: 1,
@@ -694,7 +727,7 @@ const styles = StyleSheet.create({
   dangerText: {
     fontSize: 14,
     color: '#721c24',
-    marginBottom: 16,
+    marginBottom: 12,
     lineHeight: 20,
   },
   deleteButton: {
@@ -745,14 +778,14 @@ const styles = StyleSheet.create({
   },
   profilePictureSection: {
     alignItems: 'center',
-    marginBottom: 32,
-    paddingBottom: 24,
+    marginBottom: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   profilePictureContainer: {
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   profilePicture: {
     width: 120,
@@ -784,6 +817,14 @@ const styles = StyleSheet.create({
   profilePictureActions: {
     width: '100%',
     maxWidth: 300,
+  },
+  passwordModalContent: {
+    padding: 8,
+  },
+  passwordModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
   },
 });
 

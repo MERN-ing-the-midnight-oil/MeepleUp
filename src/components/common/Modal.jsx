@@ -9,7 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Dimensions,
 } from 'react-native';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
   // For fullScreen modals, use "none" animation to prevent flickering on re-renders
@@ -28,41 +31,43 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
-        <Pressable style={styles.overlay} onPress={fullScreen ? undefined : onClose}>
-          <Pressable 
-            style={[styles.content, fullScreen && styles.contentFullScreen]} 
-            onPress={(e) => e.stopPropagation()}
-          >
+        <View style={styles.overlay}>
+          <Pressable style={styles.overlayPressable} onPress={fullScreen ? undefined : onClose} />
+          <View style={[styles.content, fullScreen && styles.contentFullScreen]}>
             {fullScreen ? (
-              <View style={styles.fullScreenHeader}>
-                <TouchableOpacity onPress={onClose} style={styles.backButton}>
-                  <Text style={styles.backButtonText}>← Back</Text>
-                </TouchableOpacity>
-                {title && <Text style={styles.fullScreenTitle}>{title}</Text>}
-                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                  <Text style={styles.closeText}>×</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.header}>
-                {title && <Text style={styles.title}>{title}</Text>}
-                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                  <Text style={styles.closeText}>×</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {fullScreen ? (
-              children
-            ) : (
-              <ScrollView
-                contentContainerStyle={styles.scrollContent}
-                keyboardShouldPersistTaps="handled"
-              >
+              <>
+                <View style={styles.fullScreenHeader}>
+                  <TouchableOpacity onPress={onClose} style={styles.backButton}>
+                    <Text style={styles.backButtonText}>← Back</Text>
+                  </TouchableOpacity>
+                  {title && <Text style={styles.fullScreenTitle}>{title}</Text>}
+                  <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                    <Text style={styles.closeText}>×</Text>
+                  </TouchableOpacity>
+                </View>
                 {children}
-              </ScrollView>
+              </>
+            ) : (
+              <>
+                <View style={styles.header}>
+                  {title && <Text style={styles.title}>{title}</Text>}
+                  <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                    <Text style={styles.closeText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  contentContainerStyle={styles.scrollContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={true}
+                  style={styles.scrollView}
+                  nestedScrollEnabled={true}
+                >
+                  {children}
+                </ScrollView>
+              </>
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </RNModal>
     );
@@ -74,12 +79,21 @@ const styles = StyleSheet.create({
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  overlayPressable: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  scrollView: {
+    maxHeight: SCREEN_HEIGHT * 0.6,
+  },
   scrollContent: {
-    flexGrow: 1,
     paddingBottom: 20,
   },
   content: {
@@ -87,7 +101,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 20,
     width: '90%',
-    maxHeight: '80%',
+    maxHeight: SCREEN_HEIGHT * 0.8,
+    zIndex: 1,
+    position: 'relative',
   },
   contentFullScreen: {
     width: '100%',

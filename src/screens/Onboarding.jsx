@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -6,7 +6,7 @@ import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
 import { validateJoinCode } from '../utils/api';
-import { getUserLocation } from '../utils/helpers';
+import { db } from '../config/firebase';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import CalendarDatePicker from '../components/common/CalendarDatePicker';
@@ -15,7 +15,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import PoweredByBGG from '../components/PoweredByBGG';
 import JoinForm from '../components/JoinForm';
 import EventCard from '../components/EventCard';
-import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
+import UserProfileModal from '../components/UserProfileModal';
 
 const Onboarding = () => {
   const navigation = useNavigation();
@@ -25,11 +25,9 @@ const Onboarding = () => {
   const [joinCodeWord1, setJoinCodeWord1] = useState('');
   const [joinCodeWord2, setJoinCodeWord2] = useState('');
   const [joinCodeWord3, setJoinCodeWord3] = useState('');
-  const [location, setLocation] = useState('');
   const [eventName, setEventName] = useState('');
-  const [eventGeneralLocation, setEventGeneralLocation] = useState('');
-  const [eventExactLocation, setEventExactLocation] = useState('');
-  const [shareExactAddress, setShareExactAddress] = useState(false);
+  const [eventLocation, setEventLocation] = useState('');
+  const [eventAddress, setEventAddress] = useState('');
   const [selectedDates, setSelectedDates] = useState([]); // Array of { date: Date, startTime: Date, endTime: Date }
   const [usualStartTime, setUsualStartTime] = useState(new Date(new Date().setHours(18, 0, 0, 0))); // Default 6 PM
   const [usualEndTime, setUsualEndTime] = useState(new Date(new Date().setHours(22, 0, 0, 0))); // Default 10 PM
@@ -37,26 +35,27 @@ const Onboarding = () => {
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [eventDescription, setEventDescription] = useState('');
   const [rsvpRequired, setRsvpRequired] = useState(true);
-  const [whoCanJoin, setWhoCanJoin] = useState('private'); // 'private' or 'public' (for v1, only 'private')
+  // Public meepleups feature removed - all meepleups are private
   const [memberLimit, setMemberLimit] = useState('');
-  const [mode, setMode] = useState('choice'); // 'choice', 'join', 'discover', 'create'
+  const [mode, setMode] = useState('choice'); // 'choice', 'join', 'create'
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [organizerData, setOrganizerData] = useState({}); // { eventId: { name, avatarUrl } }
+  const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
+  const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const scrollViewRef = useRef(null);
 
   const handleModeChange = (nextMode) => {
     setError('');
     if (nextMode === 'choice') {
       setEventName('');
-      setEventGeneralLocation('');
-      setEventExactLocation('');
-      setShareExactAddress(false);
+      setEventLocation('');
+      setEventAddress('');
       setSelectedDates([]);
       setUsualStartTime(new Date(new Date().setHours(18, 0, 0, 0)));
       setUsualEndTime(new Date(new Date().setHours(22, 0, 0, 0)));
       setEventDescription('');
       setRsvpRequired(true);
-      setWhoCanJoin('private');
       setMemberLimit('');
       setJoinCodeWord1('');
       setJoinCodeWord2('');
@@ -79,10 +78,6 @@ const Onboarding = () => {
     setError('');
   };
 
-  const handleLocationChange = (text) => {
-    setLocation(text);
-    setError('');
-  };
 
   const handleJoinByCode = async () => {
     if (!user) {
@@ -126,65 +121,15 @@ const Onboarding = () => {
     }
   };
 
-  const handleDiscoverEvents = async () => {
-    if (!user) {
-      setError('Please sign in before discovering MeepleUps.');
-      return;
-    }
 
-    if (!location.trim()) {
-      setError('Please enter your location');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await updateUser({ location: location.trim() });
-      // Only navigate if navigation is available and user is authenticated
-      if (navigation && navigation.replace) {
-        try {
-          navigation.replace('Collection');
-        } catch (navErr) {
-          console.error('Navigation error:', navErr);
-          setError('Location saved! Please use the menu to navigate.');
-          setLoading(false);
-        }
-      } else {
-        setError('Location saved! Please use the menu to navigate.');
-        setLoading(false);
-      }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
-      console.error(err);
-      setLoading(false);
-    }
-  };
-
-  const handleUseCurrentLocation = async () => {
-    setLoading(true);
-    try {
-      const position = await getUserLocation();
-      setLocation(`${position.latitude}, ${position.longitude}`);
-      setError('');
-    } catch (err) {
-      setError('Could not get your location. Please enter it manually.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLeaveEvent = async (eventId) => {
-    const userIdentifier = user?.uid || user?.id;
-    handleLeaveEventUtil(eventId, userIdentifier, leaveEvent, getEventById);
-  };
 
   const handleCreateEvent = async () => {
     if (!user) {
-      setError('Please sign in before hosting a MeepleUp.');
+      setError('Please sign in before organizing a MeepleUp.');
       return;
     }
 
-    if (!eventName.trim() || !eventGeneralLocation.trim() || selectedDates.length === 0) {
+    if (!eventName.trim() || !eventLocation.trim() || selectedDates.length === 0) {
       setError('Please fill in all required MeepleUp details, including at least one event date.');
       return;
     }
@@ -200,8 +145,8 @@ const Onboarding = () => {
       
       const eventData = {
         name: eventName.trim(),
-        generalLocation: eventGeneralLocation.trim(),
-        exactLocation: shareExactAddress && eventExactLocation.trim() ? eventExactLocation.trim() : '',
+        location: eventLocation.trim(),
+        address: eventAddress.trim() || '',
         eventDates,
         usualStartTime: usualStartTime.toISOString(),
         usualEndTime: usualEndTime.toISOString(),
@@ -222,21 +167,19 @@ const Onboarding = () => {
       const newEvent = await createEvent(eventData);
 
       setEventName('');
-      setEventGeneralLocation('');
-      setEventExactLocation('');
-      setShareExactAddress(false);
+      setEventLocation('');
+      setEventAddress('');
       setSelectedDates([]);
       setUsualStartTime(new Date(new Date().setHours(18, 0, 0, 0)));
       setUsualEndTime(new Date(new Date().setHours(22, 0, 0, 0)));
       setEventDescription('');
       setRsvpRequired(true);
-      setWhoCanJoin('private');
       setMemberLimit('');
       setShowCalendarModal(false);
       setError('');
 
       Alert.alert(
-        'MeepleUp Hosted',
+        'MeepleUp Organized',
         `Share this membership link or code so trusted guests can join:\n\nCode: ${newEvent.joinCode}`,
         [
           {
@@ -254,36 +197,165 @@ const Onboarding = () => {
         ],
       );
     } catch (err) {
-      setError('Failed to host MeepleUp. Please try again.');
+      setError('Failed to organize MeepleUp. Please try again.');
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  if (mode === 'choice') {
-    // Get user's events and sort by creation date (newest first)
-    const userIdentifier = user?.uid || user?.id;
-    let userEvents = [];
-    try {
-      if (userIdentifier && getUserEvents) {
-        const events = getUserEvents(userIdentifier);
-        userEvents = Array.isArray(events) ? events : [];
-      }
-    } catch (error) {
-      console.error('Error getting user events:', error);
-      userEvents = [];
+  // Get user's events and sort by creation date (newest first)
+  const userIdentifier = user?.uid || user?.id;
+  let userEvents = [];
+  try {
+    if (userIdentifier && getUserEvents) {
+      const events = getUserEvents(userIdentifier);
+      userEvents = Array.isArray(events) ? events : [];
     }
-    
-    const sortedEvents = Array.isArray(userEvents) && userEvents.length > 0
-      ? [...userEvents].sort((a, b) => {
-          const dateA = new Date(a?.createdAt || 0);
-          const dateB = new Date(b?.createdAt || 0);
-          return dateB - dateA; // Newest first
-        })
-      : [];
+  } catch (error) {
+    console.error('Error getting user events:', error);
+    userEvents = [];
+  }
+  
+  const sortedEvents = Array.isArray(userEvents) && userEvents.length > 0
+    ? [...userEvents].sort((a, b) => {
+        const dateA = new Date(a?.createdAt || 0);
+        const dateB = new Date(b?.createdAt || 0);
+        return dateB - dateA; // Newest first
+      })
+    : [];
 
+  // Fetch organizer and member data for all events
+  useEffect(() => {
+    if (!userIdentifier || !db || sortedEvents.length === 0) return;
+
+    const fetchEventData = async () => {
+      const organizers = {};
+      const members = {}; // { eventId: { [userId]: { name, avatarUrl } } }
+      try {
+        for (const event of sortedEvents) {
+          if (!event.id) continue;
+          
+          const eventMembers = {};
+          
+          // Fetch member data from members collection
+          try {
+            const membersSnapshot = await db
+              .collection('gamingGroups')
+              .doc(event.id)
+              .collection('members')
+              .get();
+
+            membersSnapshot.docs.forEach((memberDoc) => {
+              const memberData = memberDoc.data();
+              const memberId = memberDoc.id;
+              
+              // Store member data
+              eventMembers[memberId] = {
+                name: memberData.userName || null,
+                avatarUrl: memberData.userAvatarUrl || null,
+              };
+            });
+          } catch (error) {
+            // Permission errors can occur if user isn't a member yet or group doesn't exist
+            // This is non-fatal - we'll use fallback data from the event.members array
+            if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+              console.warn(`Permission denied fetching members for event ${event.id}, using fallback data`);
+            } else {
+              console.error(`Error fetching members for event ${event.id}:`, error);
+            }
+          }
+
+          // Fetch missing member data from users collection
+          if (event.members && Array.isArray(event.members)) {
+            for (const member of event.members) {
+              if (!member.userId || eventMembers[member.userId]) continue;
+              
+              try {
+                // Check if member is current user first
+                if (member.userId === userIdentifier) {
+                  eventMembers[member.userId] = {
+                    name: user?.name || user?.email || 'You',
+                    avatarUrl: user?.photoURL || user?.avatarUrl || null,
+                  };
+                } else {
+                  // Try to get from users collection
+                  const userDoc = await db.collection('users').doc(member.userId).get();
+                  if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    eventMembers[member.userId] = {
+                      name: userData.name || userData.email || 'Unknown',
+                      avatarUrl: userData.avatarUrl || null,
+                    };
+                  } else if (member.userName) {
+                    // Fallback to member data from event
+                    eventMembers[member.userId] = {
+                      name: member.userName,
+                      avatarUrl: member.userAvatarUrl || null,
+                    };
+                  }
+                }
+              } catch (error) {
+                console.error(`Error fetching member data for ${member.userId}:`, error);
+              }
+            }
+          }
+          
+          members[event.id] = eventMembers;
+          
+          // Fetch organizer info
+          if (event.organizerId) {
+            try {
+              // Check if organizer is current user first
+              if (event.organizerId === userIdentifier) {
+                organizers[event.id] = {
+                  name: user?.name || user?.email || 'You',
+                  avatarUrl: user?.photoURL || user?.avatarUrl || null,
+                };
+              } else {
+                // Fetch from Firestore
+                const organizerDoc = await db.collection('users').doc(event.organizerId).get();
+                if (organizerDoc.exists) {
+                  const organizerData = organizerDoc.data();
+                  organizers[event.id] = {
+                    name: organizerData.name || organizerData.email || 'Unknown Host',
+                    avatarUrl: organizerData.avatarUrl || null,
+                  };
+                } else {
+                  // Fallback: try to get from members collection
+                  const memberDoc = await db
+                    .collection('gamingGroups')
+                    .doc(event.id)
+                    .collection('members')
+                    .doc(event.organizerId)
+                    .get();
+                  if (memberDoc.exists) {
+                    const memberData = memberDoc.data();
+                    organizers[event.id] = {
+                      name: memberData.userName || 'Unknown Host',
+                      avatarUrl: memberData.userAvatarUrl || null,
+                    };
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Error fetching organizer for event ${event.id}:`, error);
+            }
+          }
+        }
+        setOrganizerData(organizers);
+        setMemberData(members);
+      } catch (error) {
+        console.error('Error fetching event data:', error);
+      }
+    };
+
+    fetchEventData();
+  }, [userIdentifier, sortedEvents.length, user]);
+
+  if (mode === 'choice') {
     return (
+      <>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -308,6 +380,17 @@ const Onboarding = () => {
                 const userIdentifier = user?.uid || user?.id;
                 const isOrganizer = event.organizerId === userIdentifier;
                 
+                const organizer = organizerData[event.id] || {};
+                const eventMemberData = memberData[event.id] || {};
+                
+                // Extract member avatars and names
+                const memberAvatars = {};
+                const memberNames = {};
+                Object.keys(eventMemberData).forEach((userId) => {
+                  memberAvatars[userId] = eventMemberData[userId]?.avatarUrl || null;
+                  memberNames[userId] = eventMemberData[userId]?.name || 'Unknown';
+                });
+                
                 return (
                   <EventCard
                     key={event.id}
@@ -315,17 +398,25 @@ const Onboarding = () => {
                     onPress={() => navigation.navigate('EventHub', {
                       eventId: event.id,
                     })}
-                    onLeave={handleLeaveEvent}
-                    showLeaveButton={!isOrganizer}
                     isOrganizer={isOrganizer}
                     style={styles.eventCard}
+                    organizerName={organizer.name}
+                    organizerAvatarUrl={organizer.avatarUrl}
+                    onOrganizerPress={(userId, userName, avatarUrl) => {
+                      setSelectedUserForProfile({ userId, userName, avatarUrl });
+                    }}
+                    memberAvatars={memberAvatars}
+                    memberNames={memberNames}
+                    onMemberPress={(userId, userName, avatarUrl) => {
+                      setSelectedUserForProfile({ userId, userName, avatarUrl });
+                    }}
                   />
                 );
               })}
             </View>
           )}
           
-          {/* Join with Code Section */}
+          {/* Join an existing MeepleUp Section */}
           <View style={styles.joinSection}>
             <JoinForm
               joinCodeWord1={joinCodeWord1}
@@ -344,41 +435,36 @@ const Onboarding = () => {
                 styles.optionCard,
                 pressed && styles.optionCardPressed,
               ]}
-              onPress={() => handleModeChange('discover')}
-            >
-              <View style={styles.optionTitleContainer}>
-                <FontAwesome5 name="search" size={20} color="#d45d5d" solid />
-                <Text style={styles.optionTitle}>Discover</Text>
-              </View>
-              <Text style={styles.optionText}>
-                Find public game nights happening near you.
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.optionCard,
-                pressed && styles.optionCardPressed,
-              ]}
               onPress={() => handleModeChange('create')}
             >
               <View style={styles.optionTitleContainer}>
                 <Text style={styles.plusSymbol}>+</Text>
-                <Text style={styles.optionTitle}>Host</Text>
+                <Text style={styles.optionTitle}>Organize</Text>
               </View>
               <Text style={styles.optionText}>
-                Host your own game night and share a join code with friends.
+                Organize your own game night and share a join code with friends.
               </Text>
             </Pressable>
             </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
+      )}
+      </>
     );
   }
 
   if (mode === 'join') {
     return (
+      <>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -392,7 +478,7 @@ const Onboarding = () => {
               variant="outline"
               style={styles.backButton}
             />
-            <Text style={styles.title}>Join with Code</Text>
+            <Text style={styles.title}>Join an existing MeepleUp</Text>
             <Text style={styles.subtitle}>
               Enter the three-word join code provided by your game night organizer.
             </Text>
@@ -411,60 +497,22 @@ const Onboarding = () => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
+      )}
+      </>
     );
   }
 
-  if (mode === 'discover') {
-    return (
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
-      >
-        <ScrollView contentContainerStyle={styles.container}>
-          <View style={styles.content}>
-          <Button
-            label="← Back"
-            onPress={() => handleModeChange('choice')}
-            variant="outline"
-            style={styles.backButton}
-          />
-          <Text style={styles.title}>Discover MeepleUps</Text>
-          <Text style={styles.subtitle}>
-            Enter your location to find public game nights nearby.
-          </Text>
-
-          {error && <Text style={styles.error}>{error}</Text>}
-
-          <View style={styles.locationRow}>
-            <Input
-              placeholder="City, State or Address"
-              value={location}
-              onChangeText={handleLocationChange}
-              style={styles.locationInput}
-            />
-            <Button
-              label="📍"
-              onPress={handleUseCurrentLocation}
-              disabled={loading}
-              title="Use current location"
-              style={styles.locationButton}
-            />
-          </View>
-
-          <Button
-            label={loading ? 'Searching...' : 'Discover MeepleUps'}
-            onPress={handleDiscoverEvents}
-            disabled={loading}
-            style={styles.fullButton}
-          />
-        </View>
-      </ScrollView>
-      </KeyboardAvoidingView>
-    );
-  }
 
   return (
+    <>
     <KeyboardAvoidingView
       style={styles.keyboardAvoidingView}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -483,7 +531,7 @@ const Onboarding = () => {
           variant="outline"
           style={styles.backButton}
         />
-        <Text style={styles.title}>Host a MeepleUp</Text>
+        <Text style={styles.title}>Organize a MeepleUp</Text>
         <Text style={styles.subtitle}>
           Fill in the details and we&apos;ll generate a join code to share with friends.
         </Text>
@@ -569,36 +617,27 @@ const Onboarding = () => {
             {/* Location */}
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>Location <Text style={styles.requiredAsterisk}>*</Text></Text>
-              <Text style={styles.fieldExample}>Example: "Joe's Apartment" or "Nelson's Market, 1600 Railroad Ave"</Text>
+              <Text style={styles.fieldExample}>Example: "Jason's house" or "Nelson's Market"</Text>
               <Input
-                placeholder="Joe's Apartment"
-                value={eventGeneralLocation}
+                placeholder="Jason's house"
+                value={eventLocation}
                 onChangeText={(text) => {
-                  setEventGeneralLocation(text);
+                  setEventLocation(text);
                   setError('');
                 }}
                 style={styles.input}
               />
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Share exact address with members</Text>
-                <Switch
-                  value={shareExactAddress}
-                  onValueChange={setShareExactAddress}
-                  trackColor={{ false: '#ddd', true: '#d45d5d' }}
-                  thumbColor="#fff"
-                />
-              </View>
-              {shareExactAddress && (
-                <Input
-                  placeholder="Exact address (members only)"
-                  value={eventExactLocation}
-                  onChangeText={(text) => {
-                    setEventExactLocation(text);
-                    setError('');
-                  }}
-                  style={[styles.input, styles.indentedInput]}
-                />
-              )}
+              <Text style={styles.fieldLabel}>Address</Text>
+              <Text style={styles.fieldExample}>Example: "123 Tolkien Dr."</Text>
+              <Input
+                placeholder="123 Tolkien Dr."
+                value={eventAddress}
+                onChangeText={(text) => {
+                  setEventAddress(text);
+                  setError('');
+                }}
+                style={styles.input}
+              />
             </View>
           </View>
 
@@ -613,23 +652,10 @@ const Onboarding = () => {
                 <View style={styles.toggleLabelContainer}>
                   <Text style={styles.toggleLabel}>Private: Invite only</Text>
                   <Text style={styles.toggleDescription}>
-                    {whoCanJoin === 'private' 
-                      ? 'Generates a join code for members' 
-                      : 'Public event (coming in v2)'}
+                    A join code will be generated for this event
                   </Text>
                 </View>
-                <Switch
-                  value={whoCanJoin === 'private'}
-                  onValueChange={(value) => setWhoCanJoin(value ? 'private' : 'public')}
-                  trackColor={{ false: '#ddd', true: '#d45d5d' }}
-                  thumbColor="#fff"
-                />
               </View>
-              {whoCanJoin === 'private' && (
-                <Text style={styles.fieldExample}>
-                  A join code will be generated for this event
-                </Text>
-              )}
             </View>
 
             {/* RSVP Required */}
@@ -697,7 +723,7 @@ const Onboarding = () => {
         </View>
 
         <Button
-          label={loading ? 'Hosting...' : 'Host MeepleUp'}
+          label={loading ? 'Organizing...' : 'Organize MeepleUp'}
           onPress={handleCreateEvent}
           disabled={loading}
           style={styles.fullButton}
@@ -901,6 +927,16 @@ const Onboarding = () => {
       </Modal>
     </ScrollView>
     </KeyboardAvoidingView>
+    {selectedUserForProfile && (
+      <UserProfileModal
+        isOpen={!!selectedUserForProfile}
+        onClose={() => setSelectedUserForProfile(null)}
+        userId={selectedUserForProfile.userId}
+        userName={selectedUserForProfile.userName}
+        avatarUrl={selectedUserForProfile.avatarUrl}
+      />
+    )}
+    </>
   );
 };
 
@@ -985,17 +1021,6 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 16,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  locationInput: {
-    flex: 1,
-    marginRight: 12,
-  },
-  locationButton: {
-    width: 60,
   },
   fullButton: {
     width: '100%',

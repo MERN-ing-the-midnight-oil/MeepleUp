@@ -46,10 +46,21 @@ const CreateEventForm = ({
         style={styles.input}
       />
       
+      <Text style={styles.fieldLabel}>
+        Location <Text style={styles.requiredAsterisk}>*</Text>
+      </Text>
       <Input
-        value={eventForm.generalLocation}
-        onChangeText={(text) => onFormChange({ ...eventForm, generalLocation: text })}
-        placeholder="General location (e.g., Seattle, WA)"
+        value={eventForm.location}
+        onChangeText={(text) => onFormChange({ ...eventForm, location: text })}
+        placeholder="Location (e.g., Jason's house)"
+        style={styles.input}
+      />
+      
+      <Text style={styles.fieldLabel}>Address</Text>
+      <Input
+        value={eventForm.address}
+        onChangeText={(text) => onFormChange({ ...eventForm, address: text })}
+        placeholder="Address (e.g., 123 Tolkien Dr.)"
         style={styles.input}
       />
       
@@ -111,7 +122,7 @@ const CreateEventForm = ({
       
       <View style={styles.actions}>
         <Button
-          label={loading ? 'Hosting...' : 'Host MeepleUp'}
+          label={loading ? 'Organizing...' : 'Organize MeepleUp'}
           onPress={onSubmit}
           disabled={loading || !eventForm.name?.trim()}
           style={styles.submitButton}

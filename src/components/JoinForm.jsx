@@ -23,7 +23,7 @@ const JoinForm = ({
   return (
     <View style={[styles.container, style]}>
       {showTitle && (
-        <Text style={styles.title}>Join with Code</Text>
+        <Text style={styles.title}>Join an existing MeepleUp</Text>
       )}
       {showSubtitle && (
         <Text style={styles.subtitle}>
