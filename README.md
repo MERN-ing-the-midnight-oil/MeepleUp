@@ -1,20 +1,19 @@
 # MeepleUp
 
-MeepleUp is a mobile app that helps board game communities coordinate their regular game nights. Users can quickly catalog their board game collections by scanning barcodes, which pulls game data from BoardGameGeek's API. The core value is making it easy for game night attendees to browse each other's collections and request games they'd like to play at upcoming events.
+MeepleUp is a mobile app that helps private board game groups coordinate their regular game nights. Users can quickly catalog their board game collections using AI-powered game recognition, which pulls game data from BoardGameGeek's API. The core value is making it easy for game night attendees to browse each other's collections and request games they'd like to play at upcoming events.
 
-The app is organized around events - recurring game nights at breweries, game stores, or private homes. Each event has its own hub where members can RSVP, see who's attending, browse the collective game library from all members, and post on a simple message board. Organizers can create events and control privacy settings: private events use join codes for invitation-only groups, while public events are discoverable by anyone in the local area looking for game nights to attend.
+The app is organized around events - recurring game nights at breweries, game stores, or private homes. Each event has its own hub where members can RSVP, see who's attending, browse the collective game library from all members, and post on a simple message board. Events are private and invitation-only, using join codes for access control.
 
-New users either enter a join code to immediately access their friend's game night, or they enter their location to discover public events nearby. Users can belong to multiple events (Tuesday brewery night, Saturday home games, etc.), with each event appearing as a tile on their home screen. The app spreads organically as people invite friends to game nights and those friends download MeepleUp to participate.
+New users enter a join code to access their friend's game night. Users can belong to multiple events (Tuesday brewery night, Saturday home games, etc.), with each event appearing as a tile on their home screen. The app spreads organically as people invite friends to game nights and those friends download MeepleUp to participate.
 
 ## Features
 
-- **Onboarding**: A smooth onboarding process for new users, including join code entry and location selection.
+- **Onboarding**: A smooth onboarding process for new users, including join code entry.
 - **Event Management**: Create, edit, and delete events, and manage attendees.
 - **Game Collection**: Browse and manage your game collection with filtering and sorting options.
-- **Barcode Scanning**: Easily add games to your collection using barcode scanning functionality.
+- **AI Game Recognition**: Easily add games to your collection using AI-powered game recognition from photos.
 - **Messaging**: A message board for events to facilitate communication among attendees.
 - **User Profile**: Manage and edit user profile information.
-- **Event Discovery**: Browse public events nearby to join and participate.
 
 ## Project Architecture
 
@@ -34,7 +33,7 @@ src/
 ├── components/          # Reusable UI components
 │   ├── common/          # Basic components (Button, Input, Modal, etc.)
 │   ├── Navigation.jsx   # Main navigation component
-│   ├── BarcodeScanner.jsx
+│   ├── AIGameRecognition.jsx
 │   ├── CollectionBrowser.jsx
 │   ├── EventManagement.jsx
 │   ├── GameDetails.jsx
@@ -48,8 +47,7 @@ src/
 │   ├── Home.jsx
 │   ├── EventHub.jsx
 │   ├── CollectionManagement.jsx
-│   ├── UserProfile.jsx
-│   └── EventDiscovery.jsx
+│   └── UserProfile.jsx
 ├── utils/               # Utility functions and helpers
 │   ├── api.js           # BoardGameGeek API integration
 │   ├── helpers.js        # General utility functions
@@ -96,7 +94,6 @@ Protected routes require authentication. Public routes redirect authenticated us
 - `/event/:eventId` - Event hub page (protected)
 - `/collection` - Collection management (protected)
 - `/profile` - User profile (protected)
-- `/discover` - Event discovery (protected)
 
 ### Data Persistence
 
@@ -169,7 +166,7 @@ This will generate a `build` directory with optimized files for deployment.
 - [x] Authentication flow
 - [x] Event management basics
 - [x] Collection management structure
-- [ ] Barcode scanning integration
+- [ ] AI game recognition integration
 - [ ] BoardGameGeek API integration
 - [ ] Event creation UI
 - [ ] Event hub page
@@ -178,7 +175,6 @@ This will generate a `build` directory with optimized files for deployment.
 - [ ] Real-time messaging
 - [ ] Game request system
 - [ ] RSVP functionality
-- [ ] Event discovery with location
 - [ ] User profiles
 
 ### Phase 3: Backend Integration
@@ -202,14 +198,14 @@ The app integrates with BoardGameGeek's XML API. Key functions:
 
 - `searchGamesByName(query)`: Search for games
 - `getGameDetails(gameId)`: Get detailed game information
-- `searchGameByBarcode(barcode)`: Placeholder for barcode lookup
+- `recognizeGameFromImage(image)`: AI-powered game recognition from photos
 
 **Note**: BGG API returns XML, so you'll need proper XML parsing. Consider installing `xml2js`:
 ```bash
 npm install xml2js
 ```
 
-For barcode scanning, you may need a barcode-to-game mapping service, as BGG doesn't directly support barcode lookup.
+For AI game recognition, the app uses image recognition technology to identify board games from photos, matching them with BoardGameGeek's database.
 
 ## Contributing
 

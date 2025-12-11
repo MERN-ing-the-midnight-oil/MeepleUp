@@ -12,6 +12,7 @@ import AuthScreen from './src/screens/Auth';
 import VerifyEmailScreen from './src/screens/VerifyEmail';
 import OnboardingScreen from './src/screens/Onboarding';
 import EventHubScreen from './src/screens/EventHub';
+import BrowseAndProposeScreen from './src/screens/BrowseAndProposeScreen';
 import CollectionScreen from './src/screens/CollectionScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import LoadingSpinner from './src/components/common/LoadingSpinner';
@@ -88,6 +89,7 @@ function AppNavigator() {
           <>
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="EventHub" component={EventHubScreen} />
+            <Stack.Screen name="BrowseAndPropose" component={BrowseAndProposeScreen} />
             <Stack.Screen name="Collection" component={CollectionScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
           </>

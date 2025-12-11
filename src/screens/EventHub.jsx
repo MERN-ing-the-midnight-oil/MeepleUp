@@ -36,6 +36,9 @@ import RSVPManagementScreen from '../components/RSVPManagementScreen';
 import UserProfileModal from '../components/UserProfileModal';
 import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
 import PrivateMessaging from '../components/PrivateMessaging';
+import { getBlockedUsers } from '../services/blocking';
+import { pickAndUploadImage } from '../utils/imageUpload';
+import { checkPhotoUploadLimit, incrementPhotoUploadCount } from '../utils/photoUploadTracking';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -44,6 +47,7 @@ const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstr
 let useNavigationHook;
 let useRouteHook;
 let useParamsHook;
+let useNavigateHook;
 
 if (Platform.OS === 'web') {
   try {
@@ -51,16 +55,19 @@ if (Platform.OS === 'web') {
     useNavigationHook = () => ({ goBack: () => window.history.back() });
     useRouteHook = () => ({ params: {} });
     useParamsHook = useParams;
+    useNavigateHook = useNavigate; // useNavigate is already a hook
   } catch (e) {
     useNavigationHook = () => ({ goBack: () => {} });
     useRouteHook = () => ({ params: {} });
     useParamsHook = () => ({ eventId: null });
+    useNavigateHook = () => () => {};
   }
 } else {
   const { useNavigation, useRoute } = require('@react-navigation/native');
   useNavigationHook = useNavigation;
   useRouteHook = useRoute;
   useParamsHook = () => null;
+  useNavigateHook = () => null;
 }
 
 const TABS = {
@@ -99,6 +106,7 @@ const safeParseDate = (dateValue) => {
 
 const EventHub = () => {
   const navigation = useNavigationHook();
+  const navigate = useNavigateHook();
   const route = useRouteHook();
   const params = useParamsHook();
   const { eventId } = params?.eventId ? params : (route?.params || {});
@@ -115,6 +123,9 @@ const EventHub = () => {
     updateMemberRSVP,
     updateEventSchedule,
     updateEvent,
+    updateMemberRole,
+    updateMemberJoinCodePermission,
+    memberRoles,
   } = useEvents();
   const { user } = useAuth();
   const { getUserCollection, getEventCollection, syncGamesForUsers, collections } = useCollections();
@@ -141,10 +152,12 @@ const EventHub = () => {
   const [memberNames, setMemberNames] = useState({});
   const [memberRSVPs, setMemberRSVPs] = useState({}); // { [userId]: { [dateKey]: status } }
   const [memberAvatars, setMemberAvatars] = useState({});
+  const memberDataFetchInProgressRef = useRef(false); // Prevent concurrent fetches
   const [pinnedNotes, setPinnedNotes] = useState('');
   const [showEditPinnedNotes, setShowEditPinnedNotes] = useState(false);
   const [discussionMessages, setDiscussionMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const [selectedPhoto, setSelectedPhoto] = useState(null); // { uri: string, uploading: boolean }
   const [commentsByPost, setCommentsByPost] = useState({}); // { postId: [comments] }
   const [replyingTo, setReplyingTo] = useState(null); // { type: 'post' | 'comment', id: string, postId: string }
   const [replyText, setReplyText] = useState('');
@@ -186,6 +199,11 @@ const EventHub = () => {
   const GAMES_PER_PAGE = 30;
   // Game night date selection for aggregated collections
   const [selectedGameNightDateIndex, setSelectedGameNightDateIndex] = useState(null);
+  const [showNoConfirmedAttendeesModal, setShowNoConfirmedAttendeesModal] = useState(false);
+  const [selectedMemberForAction, setSelectedMemberForAction] = useState(null); // { userId, displayName, role, canShareJoinCode }
+  // Collapsible sections state
+  const [isInviteGuestsExpanded, setIsInviteGuestsExpanded] = useState(false);
+  const [isMembersExpanded, setIsMembersExpanded] = useState(false);
 
   const event = getEventById(eventId);
   const userId = user?.uid || user?.id || null;
@@ -195,11 +213,16 @@ const EventHub = () => {
     : membershipStatus.STRANGER;
   const isMember = memberStatus === membershipStatus.MEMBER;
   const isOrganizer = event?.organizerId && event.organizerId === userId;
+  // Check if user is organizer or co-organizer (has organizer role)
+  const currentUserMember = event?.members?.find(m => m.userId === userId);
+  const isOrganizerOrCoOrganizer = isOrganizer || currentUserMember?.role === memberRoles?.ORGANIZER;
 
-  const members = useMemo(
-    () => (event?.members || []).filter((member) => member.status === membershipStatus.MEMBER),
-    [event?.members, membershipStatus],
-  );
+  // Memoize members array to prevent unnecessary re-renders
+  // Create stable array reference - only change if member userIds actually change
+  const members = useMemo(() => {
+    if (!event?.members) return [];
+    return (event.members || []).filter((member) => member.status === membershipStatus.MEMBER);
+  }, [event?.members, membershipStatus]);
 
   // Stable key representing the member IDs for this event.
   // Used to avoid infinite effect loops caused by changing array references.
@@ -283,7 +306,14 @@ const EventHub = () => {
   useEffect(() => {
     if (!memberIdsKey || !db || !event?.id) return;
 
+    // Prevent concurrent fetches
+    if (memberDataFetchInProgressRef.current) {
+      console.log('[EventHub] Member data fetch already in progress, skipping');
+      return;
+    }
+
     const fetchMemberData = async () => {
+      memberDataFetchInProgressRef.current = true;
       console.log('[EventHub] fetchMemberData starting', {
         memberCount: members.length,
         eventId: event?.id,
@@ -497,16 +527,52 @@ const EventHub = () => {
         }, {}),
         rsvps: rsvps,
       });
-      setMemberNames(names);
+      // Only update memberNames if it actually changed
+      setMemberNames(prev => {
+        const safePrev = prev || {};
+        const safeNames = names || {};
+        const prevKey = JSON.stringify(Object.keys(safePrev).sort().map(k => `${k}:${safePrev[k]}`));
+        const newKey = JSON.stringify(Object.keys(safeNames).sort().map(k => `${k}:${safeNames[k]}`));
+        if (prevKey === newKey) {
+          return safePrev; // No change, return previous object
+        }
+        return safeNames;
+      });
+      
       setMemberRSVPs(prev => {
-        const updated = { ...prev, ...rsvps };
+        // Ensure rsvps is always an object
+        const safeRsvps = rsvps || {};
+        const safePrev = prev || {};
+        const updated = { ...safePrev, ...safeRsvps };
+        // Only update if RSVPs actually changed
+        const prevKey = JSON.stringify(Object.keys(safePrev).sort().map(k => `${k}:${JSON.stringify(safePrev[k])}`));
+        const newKey = JSON.stringify(Object.keys(updated).sort().map(k => `${k}:${JSON.stringify(updated[k])}`));
+        if (prevKey === newKey) {
+          return safePrev; // No change, return previous object
+        }
         console.log('[EventHub] memberRSVPs updated, total count:', Object.keys(updated).length);
         return updated;
       });
-      setMemberAvatars(avatars);
+      
+      // Only update memberAvatars if it actually changed
+      setMemberAvatars(prev => {
+        const safePrev = prev || {};
+        const safeAvatars = avatars || {};
+        const prevKey = JSON.stringify(Object.keys(safePrev).sort().map(k => `${k}:${safePrev[k]}`));
+        const newKey = JSON.stringify(Object.keys(safeAvatars).sort().map(k => `${k}:${safeAvatars[k]}`));
+        if (prevKey === newKey) {
+          return safePrev; // No change, return previous object
+        }
+        return safeAvatars;
+      });
+      
+      memberDataFetchInProgressRef.current = false; // Release lock
     };
 
-    fetchMemberData();
+    fetchMemberData().catch((error) => {
+      console.error('[EventHub] Error in fetchMemberData:', error);
+      memberDataFetchInProgressRef.current = false; // Ensure lock is released even on error
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memberIdsKey, event?.id, user?.uid, user?.id]);
 
@@ -649,6 +715,12 @@ const EventHub = () => {
     const previousStatus = getRSVPForDate(userId, eventDate);
     const savedScroll = scrollPositionRef.current;
 
+    // Check if the status is actually changing
+    if (previousStatus === status) {
+      console.log('[EventHub] RSVP status unchanged, skipping update');
+      return; // No change, exit early to prevent unnecessary updates
+    }
+
     // Optimistically update local state immediately
     setMemberRSVPs(prev => {
       const userRSVPs = prev[userId] || {};
@@ -708,8 +780,8 @@ const EventHub = () => {
   };
 
   const handleEditSchedule = async () => {
-    if (!isOrganizer) {
-      Alert.alert('Error', 'Only the organizer can edit the schedule.');
+    if (!isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers can edit the schedule.');
       return;
     }
 
@@ -747,8 +819,8 @@ const EventHub = () => {
   };
 
   const handleSaveDefaultTime = async () => {
-    if (!isOrganizer) {
-      Alert.alert('Error', 'Only the organizer can edit the default time.');
+    if (!isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers can edit the default time.');
       return;
     }
 
@@ -768,8 +840,8 @@ const EventHub = () => {
   };
 
   const handleSaveDefaultLocation = async () => {
-    if (!isOrganizer) {
-      Alert.alert('Error', 'Only the organizer can edit the default location.');
+    if (!isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers can edit the default location.');
       return;
     }
 
@@ -914,8 +986,8 @@ const EventHub = () => {
   };
 
   const handleArchiveEvent = () => {
-    if (!userId || !isOrganizer) {
-      Alert.alert('Error', 'Only the organizer can archive a MeepleUp.');
+    if (!userId || !isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers can archive a MeepleUp.');
       return;
     }
 
@@ -1096,112 +1168,141 @@ const EventHub = () => {
         scrollEventThrottle={16}
       >
         {/* Invite Guests Section */}
-        {isOrganizer && (
+        {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Invite Guests</Text>
-            <View style={styles.inviteBlock}>
-              <Text style={styles.inviteLabel}>Current join code</Text>
-              <Text style={styles.inviteCode}>{event.joinCode}</Text>
-              <Button
-                label="Share invite code"
-                onPress={handleShareInvite}
-                style={styles.primaryAction}
-              />
-              <Button
-                label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
-                onPress={handleRegenerateJoinCode}
-                style={styles.primaryAction}
-                disabled={regenerateBusy}
-                variant="outline"
-              />
-            </View>
+            <TouchableOpacity
+              style={styles.collapsibleHeader}
+              onPress={() => setIsInviteGuestsExpanded(!isInviteGuestsExpanded)}
+            >
+              <Text style={styles.sectionTitle}>Invite Guests</Text>
+              <Text style={styles.expandIcon}>{isInviteGuestsExpanded ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {isInviteGuestsExpanded && (
+              <View style={styles.inviteBlock}>
+                <Text style={styles.inviteLabel}>Current join code</Text>
+                <Text style={styles.inviteCode}>{event.joinCode}</Text>
+                <Button
+                  label="Share invite code"
+                  onPress={handleShareInvite}
+                  style={styles.primaryAction}
+                />
+                {isOrganizerOrCoOrganizer && (
+                <Button
+                  label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
+                  onPress={handleRegenerateJoinCode}
+                  style={styles.primaryAction}
+                  disabled={regenerateBusy}
+                  variant="outline"
+                />
+                )}
+              </View>
+            )}
           </View>
         )}
 
         {/* Members Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Members ({members.length})</Text>
-          {members.length === 0 ? (
-            <Text style={styles.sectionCopy}>
-              No members yet. Invite trusted players to join.
-            </Text>
-          ) : (
-            members.map((member) => {
-              const displayName = memberNames[member.userId] || member.userId;
-              const isCurrentUser = member.userId === userId;
-              const avatarUrl = memberAvatars[member.userId];
-              const hasValidAvatar = isValidAvatarUrl(avatarUrl);
+          <TouchableOpacity
+            style={styles.collapsibleHeader}
+            onPress={() => setIsMembersExpanded(!isMembersExpanded)}
+          >
+            <Text style={styles.sectionTitle}>Members ({members.length})</Text>
+            <Text style={styles.expandIcon}>{isMembersExpanded ? '▼' : '▶'}</Text>
+          </TouchableOpacity>
+          {isMembersExpanded && (
+            <>
+              {members.length === 0 ? (
+                <Text style={styles.sectionCopy}>
+                  No members yet. Invite trusted players to join.
+                </Text>
+              ) : (
+                members.map((member) => {
+                  const displayName = memberNames[member.userId] || member.userId;
+                  const isCurrentUser = member.userId === userId;
+                  const avatarUrl = memberAvatars[member.userId];
+                  const hasValidAvatar = isValidAvatarUrl(avatarUrl);
 
-              return (
-                <View key={member.userId} style={styles.memberCard}>
-                  <TouchableOpacity
-                    style={styles.memberAvatarContainer}
-                    onPress={() => setSelectedUserForProfile({
-                      userId: member.userId,
-                      userName: displayName,
-                      avatarUrl: avatarUrl
-                    })}
-                  >
-                    {hasValidAvatar ? (
-                      <Image 
-                        source={{ uri: avatarUrl }} 
-                        style={styles.memberAvatar}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.memberAvatarPlaceholder}>
-                        <Text style={styles.memberAvatarInitial}>
-                          {displayName.charAt(0).toUpperCase()}
+                  return (
+                    <View key={member.userId} style={styles.memberCard}>
+                      <TouchableOpacity
+                        style={styles.memberAvatarContainer}
+                        onPress={() => setSelectedUserForProfile({
+                          userId: member.userId,
+                          userName: displayName,
+                          avatarUrl: avatarUrl
+                        })}
+                      >
+                        {hasValidAvatar ? (
+                          <Image 
+                            source={{ uri: avatarUrl }} 
+                            style={styles.memberAvatar}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.memberAvatarPlaceholder}>
+                            <Text style={styles.memberAvatarInitial}>
+                              {displayName.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.memberInfo}
+                        onPress={() => {
+                          // If organizer and not current user, show action menu; otherwise show profile
+                          if (isOrganizerOrCoOrganizer && !isCurrentUser) {
+                            setSelectedMemberForAction({
+                              userId: member.userId,
+                              displayName,
+                              role: member.role,
+                              canShareJoinCode: member.canShareJoinCode || false,
+                            });
+                          } else {
+                            setSelectedUserForProfile({
+                              userId: member.userId,
+                              userName: displayName,
+                              avatarUrl: avatarUrl
+                            });
+                          }
+                        }}
+                      >
+                        <View>
+                        <Text style={styles.memberName}>
+                            {(member.role === 'organizer' || member.userId === event?.organizerId) ? '👑 ' : ''}{displayName}
+                          {isCurrentUser && ' (You)'}
+                        </Text>
+                        <Text style={styles.memberRole}>
+                          {member.role === 'organizer' 
+                            ? (member.userId === event?.organizerId ? 'Organizer' : 'Co-Organizer')
+                            : 'Member'}
                         </Text>
                       </View>
-                    )}
-                  </TouchableOpacity>
-                  <View style={styles.memberInfo}>
-                    <Text style={styles.memberName}>
-                      {member.role === 'organizer' ? '👑 ' : ''}{displayName}
-                      {isCurrentUser && ' (You)'}
-                    </Text>
-                    <Text style={styles.memberRole}>
-                      {member.role === 'organizer' ? 'Organizer' : 'Member'}
-                    </Text>
-                  </View>
-                  {isOrganizer && !isCurrentUser && member.role !== 'organizer' && (
-                    <TouchableOpacity
-                      style={styles.removeMemberButton}
-                      onPress={() => {
-                        Alert.alert(
-                          'Remove Member?',
-                          `Are you sure you want to remove ${displayName} from this MeepleUp?`,
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Remove',
-                              style: 'destructive',
-                              onPress: async () => {
-                                try {
-                                  await leaveEvent(event.id, member.userId);
-                                  Alert.alert('Member Removed', `${displayName} has been removed from the MeepleUp.`);
-                                } catch (error) {
-                                  Alert.alert('Error', 'Failed to remove member. Please try again.');
-                                  console.error(error);
-                                }
-                              },
-                            },
-                          ],
-                        );
-                      }}
-                    >
-                      <Text style={styles.removeMemberText}>Remove</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })
+                      </TouchableOpacity>
+                      {isOrganizerOrCoOrganizer && !isCurrentUser && (
+                        <TouchableOpacity
+                          style={styles.memberActionButton}
+                          onPress={() => {
+                            setSelectedMemberForAction({
+                              userId: member.userId,
+                              displayName,
+                              role: member.role,
+                              canShareJoinCode: member.canShareJoinCode || false,
+                            });
+                          }}
+                        >
+                          <Text style={styles.memberActionButtonText}>⚙️</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </>
           )}
         </View>
 
         {/* Default Time and Location Section - Only for Organizers */}
-        {isOrganizer && (
+        {isOrganizerOrCoOrganizer && (
           <View style={styles.section}>
             {/* Default Time */}
             <View style={styles.defaultSettingRow}>
@@ -1346,7 +1447,7 @@ const EventHub = () => {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Event Details & RSVP</Text>
+            <Text style={styles.sectionTitle}>Schedule</Text>
             <View style={styles.sectionHeaderActions}>
               {isOrganizer && (
                 <Button
@@ -1367,7 +1468,7 @@ const EventHub = () => {
             </View>
           </View>
         
-        {isOrganizer && (
+        {isOrganizerOrCoOrganizer && (
           <View style={styles.editScheduleButtonContainer}>
             <Button
               label="Edit Schedule"
@@ -1379,7 +1480,6 @@ const EventHub = () => {
         )}
         
         <View style={styles.scheduleInfo}>
-          <Text style={styles.scheduleLabel}>Date & Time</Text>
           {event.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0 ? (
             <View>
               {event.eventDates.map((ed, index) => {
@@ -1447,11 +1547,11 @@ const EventHub = () => {
                           }, 3000);
                         }}
                       >
-                        <Text style={styles.scheduleValue}>
+                        <Text style={styles.scheduleValueBoldRed}>
                           {dateStr}{timeStr ? ` (${timeStr})` : ''}
                         </Text>
                         {location && (
-                          <Text style={styles.scheduleLocation}>{location}</Text>
+                          <Text style={styles.scheduleLocationBoldRed}>{location}</Text>
                         )}
                       </Pressable>
                       
@@ -1610,7 +1710,7 @@ const EventHub = () => {
                         }
                       }}
                     >
-                      <Text style={styles.scheduleValue}>
+                      <Text style={styles.scheduleValueBoldRed}>
                         {(() => {
                           if (!date || isNaN(date.getTime())) {
                             return 'Date and time to be announced';
@@ -1621,7 +1721,7 @@ const EventHub = () => {
                         })()}
                       </Text>
                       {(event.location || event.generalLocation) && (
-                        <Text style={styles.scheduleLocation}>{event.location || event.generalLocation}</Text>
+                        <Text style={styles.scheduleLocationBoldRed}>{event.location || event.generalLocation}</Text>
                       )}
                     </Pressable>
                     {showRSVPForDate && date && (
@@ -1668,7 +1768,7 @@ const EventHub = () => {
           )}
         </View>
 
-        {isOrganizer && (
+        {isOrganizerOrCoOrganizer && (
           <Button
             label="Edit Schedule"
             onPress={() => setShowEditSchedule(true)}
@@ -1679,7 +1779,7 @@ const EventHub = () => {
       </View>
 
       {/* Archive Section - Combined with Event Details */}
-      {isOrganizer && (
+      {isOrganizerOrCoOrganizer && (
         <View style={styles.section}>
           <Button
             label="Archive MeepleUp"
@@ -1760,7 +1860,7 @@ const EventHub = () => {
       })()}
 
       {/* Leave MeepleUp Section - Only for non-organizer members */}
-      {isMember && !isOrganizer && (
+      {isMember && !isOrganizerOrCoOrganizer && (
         <View style={styles.section}>
           <Button
             label="Leave MeepleUp"
@@ -1794,8 +1894,12 @@ const EventHub = () => {
       .limit(100); // Get more than we need, then filter
 
     const unsubscribe = postsRef.onSnapshot(
-      (snapshot) => {
+      async (snapshot) => {
         console.log('[EventHub] Discussion posts snapshot received, docs:', snapshot.docs.length);
+        
+        // Get list of blocked users
+        const blockedUsers = await getBlockedUsers(userId);
+        const blockedUserSet = new Set(blockedUsers);
         
         const posts = [];
         
@@ -1804,11 +1908,18 @@ const EventHub = () => {
           // Filter out deleted posts
           if (data.deleted === true) continue;
           
+          // Skip posts from blocked users
+          if (data.userId && blockedUserSet.has(data.userId)) {
+            continue;
+          }
+          
           posts.push({
             id: doc.id,
             userId: data.userId,
             userName: data.userName || 'Unknown',
-            content: data.content,
+            userAvatarUrl: data.userAvatarUrl || null,
+            content: data.content || '',
+            photoUrl: data.photoUrl || null,
             createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt || new Date().toISOString(),
             updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt || null,
             edited: data.edited || false,
@@ -1839,7 +1950,7 @@ const EventHub = () => {
       console.log('[EventHub] Cleaning up discussion posts listener');
       unsubscribe();
     };
-  }, [event?.id, isMember, db]);
+  }, [event?.id, isMember, db, userId]);
 
   // Fetch comments for all posts with real-time listeners
   useEffect(() => {
@@ -1860,8 +1971,12 @@ const EventHub = () => {
         .limit(500); // Get enough for deep nesting
 
       const unsubscribe = commentsRef.onSnapshot(
-        (snapshot) => {
+        async (snapshot) => {
           console.log(`[EventHub] Comments snapshot for post ${post.id}, docs:`, snapshot.docs.length);
+          
+          // Get list of blocked users
+          const blockedUsers = await getBlockedUsers(userId);
+          const blockedUserSet = new Set(blockedUsers);
           
           const comments = [];
           
@@ -1869,6 +1984,11 @@ const EventHub = () => {
             const data = doc.data();
             // Filter out deleted comments
             if (data.deleted === true) continue;
+            
+            // Skip comments from blocked users
+            if (data.userId && blockedUserSet.has(data.userId)) {
+              continue;
+            }
             
             comments.push({
               id: doc.id,
@@ -1905,7 +2025,7 @@ const EventHub = () => {
       console.log('[EventHub] Cleaning up comment listeners');
       unsubscribes.forEach(unsub => unsub());
     };
-  }, [event?.id, isMember, db, discussionMessages]);
+  }, [event?.id, isMember, db, discussionMessages, userId]);
 
   // Build comment tree structure (parent -> children)
   const buildCommentTree = useCallback((comments) => {
@@ -2026,9 +2146,50 @@ const EventHub = () => {
     }
   }, [replyText, userId, event?.id, db, replyingTo, user?.name, user?.email]);
 
+  // Handler for selecting a photo
+  const handleSelectPhoto = useCallback(async () => {
+    if (!userId) return;
+
+    try {
+      // Check photo upload limit
+      const limitCheck = await checkPhotoUploadLimit(userId);
+      if (!limitCheck.canUpload) {
+        Alert.alert(
+          'Photo Limit Reached',
+          `You've reached your monthly photo limit of ${limitCheck.limit} photos. You've uploaded ${limitCheck.count} photos this month.`,
+        );
+        return;
+      }
+
+      setSelectedPhoto({ uri: null, uploading: true });
+
+      // Pick and upload photo with mobile-optimized settings
+      const photoUrl = await pickAndUploadImage(userId, {
+        maxSize: 1200, // Good quality for mobile viewing
+        quality: 0.7, // Balanced compression
+        path: 'post-photos',
+        allowsEditing: false, // Don't force square for posts
+        aspect: null, // Allow any aspect ratio
+      });
+
+      if (photoUrl) {
+        // Increment photo upload count
+        await incrementPhotoUploadCount(userId);
+        setSelectedPhoto({ uri: photoUrl, uploading: false });
+      } else {
+        // User cancelled
+        setSelectedPhoto(null);
+      }
+    } catch (error) {
+      console.error('Error selecting photo:', error);
+      Alert.alert('Error', error.message || 'Failed to select photo. Please try again.');
+      setSelectedPhoto(null);
+    }
+  }, [userId]);
+
   // Handler for posting messages - memoized to prevent recreation
   const handlePostMessage = useCallback(async () => {
-    if (!newMessage.trim() || !userId || !event?.id || !db) {
+    if ((!newMessage.trim() && !selectedPhoto?.uri) || !userId || !event?.id || !db) {
       return;
     }
 
@@ -2040,7 +2201,8 @@ const EventHub = () => {
         userId,
         userName: user?.name || user?.email || 'Unknown',
         userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
-        content: newMessage.trim(),
+        content: newMessage.trim() || '',
+        photoUrl: selectedPhoto?.uri || null,
         likeCount: 0,
         commentCount: 0,
         createdAt: firebase.firestore.Timestamp.now(),
@@ -2070,17 +2232,19 @@ const EventHub = () => {
         id: docRef.id,
         userId,
         userName: user?.name || user?.email || 'Unknown',
-        content: newMessage.trim(),
+        content: newMessage.trim() || '',
+        photoUrl: selectedPhoto?.uri || null,
         createdAt: new Date().toISOString(),
         pinned: false,
       }, ...prev]);
       
       setNewMessage('');
+      setSelectedPhoto(null);
     } catch (error) {
       console.error('Error posting message:', error);
       Alert.alert('Error', 'Failed to post message. Please try again.');
     }
-  }, [newMessage, userId, event?.id, db, user?.name, user?.email]);
+  }, [newMessage, selectedPhoto, userId, event?.id, db, user?.name, user?.email]);
 
   // Handler for editing posts
   const handleEditPost = useCallback(async (postId, newContent) => {
@@ -2317,7 +2481,15 @@ const EventHub = () => {
               )}
             </TouchableOpacity>
             <View style={styles.commentHeaderText}>
-              <Text style={styles.commentAuthor}>{comment.userName}</Text>
+              <TouchableOpacity
+                onPress={() => setSelectedUserForProfile({
+                  userId: comment.userId,
+                  userName: comment.userName,
+                  avatarUrl: comment.userAvatarUrl
+                })}
+              >
+                <Text style={styles.commentAuthor}>{comment.userName}</Text>
+              </TouchableOpacity>
               <Text style={styles.commentTime}>
                 {formatDate(comment.createdAt)}
                 {comment.edited && comment.updatedAt && (
@@ -2432,7 +2604,11 @@ const EventHub = () => {
     if (showPrivateMessaging && isMember) {
       return (
         <View style={styles.tabContent}>
-          <PrivateMessaging eventId={event?.id} members={members} />
+          <PrivateMessaging 
+            eventId={event?.id} 
+            members={members}
+            onBackToTabletalk={() => setShowPrivateMessaging(false)}
+          />
         </View>
       );
     }
@@ -2451,7 +2627,7 @@ const EventHub = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Pinned Notes</Text>
-            {isOrganizer && (
+            {isOrganizerOrCoOrganizer && (
               <TouchableOpacity
                 onPress={() => setShowEditPinnedNotes(true)}
                 style={styles.editLink}
@@ -2461,7 +2637,7 @@ const EventHub = () => {
             )}
           </View>
           <Text style={styles.sectionCopy}>
-            {pinnedNotes || (isOrganizer ? 'Add notes about parking, what to bring, house rules, etc.' : 'No pinned notes yet.')}
+            {pinnedNotes || (isOrganizerOrCoOrganizer ? 'Add notes about parking, what to bring, house rules, etc.' : 'No pinned notes yet.')}
           </Text>
         </View>
 
@@ -2515,7 +2691,18 @@ const EventHub = () => {
                       </View>
                     ) : (
                       <>
-                        <Text style={styles.messageContent}>{message.content}</Text>
+                        {message.content ? (
+                          <Text style={styles.messageContent}>{message.content}</Text>
+                        ) : null}
+                        {message.photoUrl && (
+                          <View style={styles.postPhotoContainer}>
+                            <Image
+                              source={{ uri: message.photoUrl }}
+                              style={styles.postPhoto}
+                              resizeMode="contain"
+                            />
+                          </View>
+                        )}
                         <View style={styles.postActions}>
                           {isMember && (
                             <TouchableOpacity
@@ -2592,17 +2779,7 @@ const EventHub = () => {
         {/* Discussion Messages */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Discussion</Text>
-            {isMember && (
-              <TouchableOpacity
-                onPress={() => setShowPrivateMessaging(!showPrivateMessaging)}
-                style={styles.privateMessageButton}
-              >
-                <Text style={styles.privateMessageButtonText}>
-                  {showPrivateMessaging ? 'Public Discussion' : 'Private Messages'}
-                </Text>
-              </TouchableOpacity>
-            )}
+            <Text style={styles.sectionTitle}>Tabletalk</Text>
           </View>
           {regularMessages.length === 0 && pinnedMessages.length === 0 ? (
             <Text style={styles.sectionCopy}>
@@ -2617,7 +2794,19 @@ const EventHub = () => {
                 <View key={`regular-${message.id}`} style={styles.postContainer}>
                   <View style={styles.messageCard}>
                     <View style={styles.messageHeader}>
-                      <Text style={styles.messageAuthor}>{message.userName}</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (message.userId) {
+                            setSelectedUserForProfile({
+                              userId: message.userId,
+                              userName: message.userName,
+                              avatarUrl: message.userAvatarUrl || null,
+                            });
+                          }
+                        }}
+                      >
+                        <Text style={styles.messageAuthor}>{message.userName}</Text>
+                      </TouchableOpacity>
                       <Text style={styles.messageTime}>
                         {formatDate(message.createdAt)}
                         {message.edited && message.updatedAt && (
@@ -2655,7 +2844,18 @@ const EventHub = () => {
                       </View>
                     ) : (
                       <>
-                        <Text style={styles.messageContent}>{message.content}</Text>
+                        {message.content ? (
+                          <Text style={styles.messageContent}>{message.content}</Text>
+                        ) : null}
+                        {message.photoUrl && (
+                          <View style={styles.postPhotoContainer}>
+                            <Image
+                              source={{ uri: message.photoUrl }}
+                              style={styles.postPhoto}
+                              resizeMode="contain"
+                            />
+                          </View>
+                        )}
                         <View style={styles.postActions}>
                           {isMember && (
                             <TouchableOpacity
@@ -2731,17 +2931,55 @@ const EventHub = () => {
           {/* New Post Input */}
           {isMember && !replyingTo && (
             <View style={styles.messageInput}>
-              <Input
-                value={newMessage}
-                onChangeText={setNewMessage}
-                placeholder="Start a new discussion..."
-                multiline
-                style={styles.messageInputField}
-              />
+              {isMember && (
+                <TouchableOpacity
+                  onPress={() => setShowPrivateMessaging(!showPrivateMessaging)}
+                  style={styles.privateMessageToggle}
+                >
+                  <Text style={styles.privateMessageToggleText}>
+                    {showPrivateMessaging ? '← Back to Tabletalk' : '💬 Private Messages'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {selectedPhoto && (
+                <View style={styles.selectedPhotoContainer}>
+                  {selectedPhoto.uploading ? (
+                    <View style={styles.photoUploadingContainer}>
+                      <Text style={styles.photoUploadingText}>Uploading photo...</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.selectedPhotoPreview}>
+                      <Image source={{ uri: selectedPhoto.uri }} style={styles.selectedPhotoPreviewImage} />
+                      <TouchableOpacity
+                        onPress={() => setSelectedPhoto(null)}
+                        style={styles.removePhotoButton}
+                      >
+                        <Text style={styles.removePhotoButtonText}>×</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )}
+              <View style={styles.postInputRow}>
+                <Input
+                  value={newMessage}
+                  onChangeText={setNewMessage}
+                  placeholder="Start a new discussion..."
+                  multiline
+                  style={styles.messageInputField}
+                />
+                <TouchableOpacity
+                  onPress={handleSelectPhoto}
+                  style={styles.photoButton}
+                  disabled={selectedPhoto?.uploading}
+                >
+                  <Text style={styles.photoButtonText}>📷</Text>
+                </TouchableOpacity>
+              </View>
               <Button
                 label="Post"
                 onPress={handlePostMessage}
-                disabled={!newMessage.trim()}
+                disabled={(!newMessage.trim() && !selectedPhoto?.uri) || selectedPhoto?.uploading}
                 style={styles.postButton}
               />
             </View>
@@ -2756,7 +2994,7 @@ const EventHub = () => {
     members,
     discussionMessages,
     pinnedNotes,
-    isOrganizer,
+    isOrganizerOrCoOrganizer,
     newMessage,
     handlePostMessage,
     commentsByPost,
@@ -2929,7 +3167,29 @@ const EventHub = () => {
           }
           interests[gameId][userId] = status;
         });
-        setGameInterests(interests);
+        
+        // Only update state if the data actually changed (deep comparison)
+        setGameInterests(prev => {
+          // Create stable keys by sorting both gameIds and userIds
+          const createStableKey = (data) => {
+            return Object.keys(data || {}).sort().map(gameId => {
+              const statuses = data[gameId] || {};
+              const statusKeys = Object.keys(statuses).sort();
+              const statusStr = statusKeys.map(uid => `${uid}:${statuses[uid]}`).join(',');
+              return `${gameId}:{${statusStr}}`;
+            }).join('|');
+          };
+          
+          const prevKey = createStableKey(prev);
+          const newKey = createStableKey(interests);
+          
+          if (prevKey === newKey) {
+            // Data hasn't changed, return previous object to prevent re-render
+            return prev;
+          }
+          
+          return interests;
+        });
       },
       (error) => {
         console.error('Error loading game interests:', error);
@@ -3078,6 +3338,145 @@ const EventHub = () => {
     }
   }, [showAttendeeCollectionModal]);
 
+  // Move refs to parent scope so they persist across component recreations
+  const gameInterestsKeyRef = useRef('');
+  const collectionsKeyRef = useRef('');
+  const membersKeyRef = useRef('');
+  const memberNamesKeyRef = useRef('');
+  const failedGameLookupsRef = useRef(new Set()); // Cache for games we know don't exist or are invalid
+  const isComputingRef = useRef(false); // Track if computation is in progress
+  const lastComputationTimeRef = useRef(0); // Track last computation time for debouncing
+  
+  // Use refs to track actual dependency values, not object references
+  const gameInterestsRef = useRef(gameInterests);
+  const collectionsRef = useRef(collections);
+  const membersRef = useRef(members);
+  const memberNamesRef = useRef(memberNames);
+
+  // Load proposals from Firestore - MOVED OUTSIDE GamesTabComponent to prevent recreation loops
+  useEffect(() => {
+    if (!event?.id || !db || !isMember) {
+      setProposedGames([]);
+      setUserProposals(new Set());
+      return;
+    }
+    
+    const loadProposals = async () => {
+      try {
+        const proposalsSnapshot = await db.collection('gamingGroups').doc(event.id)
+          .collection('nominations').get(); // Keep collection name as 'nominations' for backward compatibility
+          
+        const proposalsMap = new Map();
+        const userProps = new Set();
+        
+        proposalsSnapshot.forEach(doc => {
+          const data = doc.data();
+          const gameId = data.gameId;
+          
+          if (!gameId) return;
+          
+          // Check if this is a proposal document (document ID is just the gameId, not gameId_userId)
+          const isProposalDoc = doc.id === gameId;
+          
+          // Track user's proposals - check both proposal documents and rating documents
+          if (data.nominatedBy === userId) {
+            userProps.add(gameId);
+          }
+          
+          // Initialize or update proposal
+          if (!proposalsMap.has(gameId)) {
+            // Create proposal entry - use data from proposal document if available
+            proposalsMap.set(gameId, {
+              gameId,
+              gameName: data.gameName || 'Unknown Game',
+              gameImage: data.gameImage || null,
+              proposedBy: data.nominatedBy || null, // Keep field name for backward compatibility
+              ratings: {},
+            });
+          } else {
+            // Update existing proposal with better data if this is the proposal document
+            // (proposal documents have more complete info than rating documents)
+            if (isProposalDoc && data.nominatedBy) {
+              const existing = proposalsMap.get(gameId);
+              proposalsMap.set(gameId, {
+                ...existing,
+                gameName: data.gameName || existing.gameName || 'Unknown Game',
+                gameImage: data.gameImage || existing.gameImage || null,
+                proposedBy: data.nominatedBy || existing.proposedBy,
+              });
+            }
+          }
+          
+          // Add rating if this is a rating document (has userId and rating)
+          if (data.userId && data.rating !== undefined) {
+            const proposal = proposalsMap.get(gameId);
+            if (proposal) {
+              proposal.ratings[data.userId] = data.rating;
+              // Also ensure proposedBy is set from rating document if not already set
+              if (!proposal.proposedBy && data.nominatedBy) {
+                proposal.proposedBy = data.nominatedBy;
+              }
+              // Update game info from rating document if missing
+              if (!proposal.gameName || proposal.gameName === 'Unknown Game') {
+                proposal.gameName = data.gameName || proposal.gameName || 'Unknown Game';
+              }
+              if (!proposal.gameImage) {
+                proposal.gameImage = data.gameImage || proposal.gameImage || null;
+              }
+            }
+          }
+        });
+        
+        // Filter out any proposals without a proposedBy (shouldn't happen, but safety check)
+        const allProposals = Array.from(proposalsMap.values());
+        const validProposals = allProposals.filter(p => p.proposedBy);
+        const invalidProposals = allProposals.filter(p => !p.proposedBy);
+        
+        if (invalidProposals.length > 0) {
+          console.warn(`[Gameplan] Found ${invalidProposals.length} proposals without proposedBy:`, invalidProposals);
+        }
+        
+        console.log(`[Gameplan] Loaded ${validProposals.length} proposed games (out of ${allProposals.length} total) for event ${event.id}, userId: ${userId}`);
+        
+        // Only update if proposals actually changed (deep comparison)
+        setProposedGames(prev => {
+          if (prev.length !== validProposals.length) {
+            return validProposals;
+          }
+          // Compare by gameId and proposedBy
+          const prevKey = prev.map(p => `${p.gameId}:${p.proposedBy}`).sort().join(',');
+          const newKey = validProposals.map(p => `${p.gameId}:${p.proposedBy}`).sort().join(',');
+          if (prevKey !== newKey) {
+            return validProposals;
+          }
+          // Same proposals, return previous array to prevent re-render
+          return prev;
+        });
+        
+        // Only update if user proposals actually changed
+        setUserProposals(prev => {
+          const prevArray = Array.from(prev).sort();
+          const newArray = Array.from(userProps).sort();
+          if (prevArray.length !== newArray.length) {
+            return userProps;
+          }
+          if (prevArray.join(',') !== newArray.join(',')) {
+            return userProps;
+          }
+          // Same proposals, return previous Set to prevent re-render
+          return prev;
+        });
+      } catch (error) {
+        console.error('Error loading proposals:', error);
+        // Set empty arrays on error to prevent stale data
+        setProposedGames([]);
+        setUserProposals(new Set());
+      }
+    };
+
+    loadProposals();
+  }, [event?.id, db, isMember, userId]);
+
   // Games Tab Component - Rebuilt from scratch
   // Memoize to prevent recreation on every render (which causes modal to remount)
   const GamesTab = React.useMemo(() => {
@@ -3103,29 +3502,120 @@ const EventHub = () => {
 
     // Lazy update expected games - only recompute when gameInterests changes
     const [expectedGames, setExpectedGames] = useState([]);
-    const gameInterestsKeyRef = useRef('');
     
     useEffect(() => {
-      // Create a stable key from gameInterests to detect actual changes
-      const gameInterestsKey = JSON.stringify(gameInterests);
-      
-      // Only update if gameInterests actually changed
-      if (gameInterestsKey === gameInterestsKeyRef.current) {
+      // Prevent concurrent computations
+      if (isComputingRef.current) {
+        console.log('[ExpectedGames] Computation already in progress, skipping');
         return;
       }
       
+      // Debounce: Don't run if we just computed recently (within 200ms)
+      const now = Date.now();
+      if (now - lastComputationTimeRef.current < 200) {
+        console.log('[ExpectedGames] Debouncing - too soon since last computation');
+        return;
+      }
+      
+      // Create stable keys from CURRENT prop values (use props directly, not refs)
+      // This ensures we're comparing against the actual current state
+      const safeGameInterests = gameInterests || {};
+      const safeCollections = collections || {};
+      const safeMembers = Array.isArray(members) ? members : [];
+      const safeMemberNames = memberNames || {};
+      
+      const gameInterestsSorted = Object.keys(safeGameInterests).sort().reduce((acc, gameId) => {
+        const statuses = safeGameInterests[gameId] || {};
+        const statusKeys = Object.keys(statuses).sort();
+        acc[gameId] = statusKeys.map(uid => `${uid}:${statuses[uid]}`).join(',');
+        return acc;
+      }, {});
+      const gameInterestsKey = JSON.stringify(gameInterestsSorted);
+      const collectionsKey = JSON.stringify(Object.keys(safeCollections).sort());
+      const membersKey = JSON.stringify(safeMembers.filter(m => m && m.userId).map(m => m.userId).sort());
+      const memberNamesKey = JSON.stringify(Object.keys(safeMemberNames).sort().map(k => `${k}:${safeMemberNames[k] || ''}`));
+      
+      // Only update if gameInterests actually changed (main trigger)
+      // OR if collections/members changed significantly (new data available)
+      const gameInterestsChanged = gameInterestsKey !== gameInterestsKeyRef.current;
+      const collectionsChanged = collectionsKey !== collectionsKeyRef.current;
+      const membersChanged = membersKey !== membersKeyRef.current;
+      const memberNamesChanged = memberNamesKey !== memberNamesKeyRef.current;
+      
+      // Log what changed (but only once per change, not every render)
+      const changes = [];
+      if (gameInterestsChanged) changes.push('gameInterests');
+      if (collectionsChanged) changes.push('collections');
+      if (membersChanged) changes.push('members');
+      if (memberNamesChanged) changes.push('memberNames');
+      
+      if (changes.length > 0) {
+        console.log(`[ExpectedGames] Effect triggered - changes: ${changes.join(', ')}`);
+        console.log(`[ExpectedGames] Key comparison - gameInterests: ${gameInterestsChanged ? 'CHANGED' : 'same'} (prev: ${gameInterestsKeyRef.current?.substring(0, 50) || 'empty'}..., new: ${gameInterestsKey.substring(0, 50)}...)`);
+        console.log(`[ExpectedGames] Key comparison - collections: ${collectionsChanged ? 'CHANGED' : 'same'} (prev: ${collectionsKeyRef.current || 'empty'}, new: ${collectionsKey})`);
+        console.log(`[ExpectedGames] Key comparison - members: ${membersChanged ? 'CHANGED' : 'same'} (prev: ${membersKeyRef.current || 'empty'}, new: ${membersKey})`);
+        
+        // If gameInterests changed, log why
+        if (gameInterestsChanged) {
+          console.log(`[ExpectedGames] gameInterests key changed - prev length: ${gameInterestsKeyRef.current?.length || 0}, new length: ${gameInterestsKey.length}`);
+        }
+      } else {
+        console.log('[ExpectedGames] No changes detected, skipping computation');
+        return;
+      }
+      
+      // Only recompute if gameInterests, collections, or members changed
+      // memberNames changes don't require recomputation (only affects display names in results)
+      if (!gameInterestsChanged && !collectionsChanged && !membersChanged) {
+        // Update memberNames key ref but don't recompute
+        memberNamesKeyRef.current = memberNamesKey;
+        // Also update data refs for next comparison
+        gameInterestsRef.current = gameInterests;
+        collectionsRef.current = collections;
+        membersRef.current = members;
+        memberNamesRef.current = memberNames;
+        return;
+      }
+      
+      // CRITICAL: Update key refs IMMEDIATELY after detecting a change
+      // This must happen BEFORE any async operations to prevent the next effect run
+      // from seeing the same change again
       gameInterestsKeyRef.current = gameInterestsKey;
+      collectionsKeyRef.current = collectionsKey;
+      membersKeyRef.current = membersKey;
+      memberNamesKeyRef.current = memberNamesKey;
+      
+      // Also update data refs for use in computation
+      gameInterestsRef.current = safeGameInterests;
+      collectionsRef.current = safeCollections;
+      membersRef.current = safeMembers;
+      memberNamesRef.current = safeMemberNames;
+      
+      console.log(`[ExpectedGames] Updated key refs - gameInterests length: ${gameInterestsKey.length}, collections: ${collectionsKey}, members: ${membersKey}`);
+      
+      // Clear failed lookups cache ONLY if gameInterests changed (new games might be added)
+      // Don't clear on other dependency changes - we want to preserve the cache
+      if (gameInterestsChanged) {
+        console.log('[ExpectedGames] Clearing failed lookups cache - gameInterests changed');
+        failedGameLookupsRef.current.clear();
+      }
       
       // Skip computation if we don't have required data
-      if (!event?.id || !members.length || !collections) {
-        setExpectedGames([]);
+      if (!event?.id || !safeMembers.length || !safeCollections || Object.keys(safeCollections).length === 0) {
+        setExpectedGames(prev => {
+          if (prev.length === 0) return prev; // Already empty, no need to update
+          return [];
+        });
         return;
       }
       
       // Compute expected games lazily
       const computeExpectedGames = async () => {
-        const expected = [];
-        const seenGameIds = new Set();
+        isComputingRef.current = true;
+        lastComputationTimeRef.current = Date.now();
+        try {
+          const expected = [];
+          const seenGameIds = new Set();
         
         // Helper to fetch game from Firestore
         const fetchGameFromFirestore = async (gameId, userId) => {
@@ -3225,21 +3715,57 @@ const EventHub = () => {
         };
         
         // Get all games that are marked as "bringing"
-        const gamePromises = Object.keys(gameInterests).map(async (gameId) => {
+        // Filter out games that are already in the failed cache BEFORE processing
+        const allGameIds = Object.keys(gameInterests);
+        const gamesToProcess = [];
+        const skippedCount = { cached: 0, noBringing: 0 };
+        
+        allGameIds.forEach(gameId => {
           const statuses = gameInterests[gameId] || {};
           const bringingUserIds = Object.keys(statuses).filter(
             uid => statuses[uid] === 'bringing'
           );
           
-          if (bringingUserIds.length === 0 || seenGameIds.has(gameId)) {
+          if (bringingUserIds.length === 0) {
+            skippedCount.noBringing++;
+            return;
+          }
+          
+          // Check cache BEFORE processing
+          const lookupKey = `${gameId}_${bringingUserIds.sort().join(',')}`;
+          if (failedGameLookupsRef.current.has(lookupKey)) {
+            skippedCount.cached++;
+            return;
+          }
+          
+          gamesToProcess.push(gameId);
+        });
+        
+        if (skippedCount.cached > 0 || skippedCount.noBringing > 0) {
+          console.log(`[ExpectedGames] Processing ${gamesToProcess.length} games (skipped: ${skippedCount.cached} cached, ${skippedCount.noBringing} no bringing)`);
+        }
+        
+        const gamePromises = gamesToProcess.map(async (gameId) => {
+          const currentGameInterests = gameInterestsRef.current || {};
+          const statuses = currentGameInterests[gameId] || {};
+          const bringingUserIds = Object.keys(statuses).filter(
+            uid => statuses[uid] === 'bringing'
+          );
+          
+          if (seenGameIds.has(gameId)) {
             return null;
           }
           
+          // Create lookup key for this game
+          const lookupKey = `${gameId}_${bringingUserIds.sort().join(',')}`;
+          
           // Find the game in any user's collection
           // Match by BGG ID first, then fallback to game.id
+          const currentMembers = Array.isArray(membersRef.current) ? membersRef.current : [];
+          const currentCollections = collectionsRef.current || {};
           let gameData = null;
-          for (const member of members) {
-            const memberGames = collections[member.userId] || [];
+          for (const member of currentMembers) {
+            const memberGames = currentCollections[member.userId] || [];
             const found = memberGames.find(g => {
               const gId = g.bggId || g.id;
               return gId === gameId;
@@ -3252,7 +3778,7 @@ const EventHub = () => {
           
           // Also check current user's collection
           if (!gameData && userId) {
-            const userGames = collections[userId] || [];
+            const userGames = currentCollections[userId] || [];
             gameData = userGames.find(g => {
               const gId = g.bggId || g.id;
               return gId === gameId;
@@ -3260,6 +3786,7 @@ const EventHub = () => {
           }
           
           // If not found in collections, fetch from Firestore (from the first user bringing it)
+          // Cache check already done above, so we can proceed if we have db and users
           if (!gameData && db && bringingUserIds.length > 0) {
             // Try to fetch from each user bringing it until we find it
             for (const fetchFromUserId of bringingUserIds) {
@@ -3271,7 +3798,9 @@ const EventHub = () => {
             }
             
             // If still no good data, try fetching all games from the user and matching
-            if ((!gameData || !gameData.title || gameData.title === 'Unknown Game' || gameData.title === `Game ${gameId}`) && bringingUserIds.length > 0) {
+            // Cache check already done above
+            if ((!gameData || !gameData.title || gameData.title === 'Unknown Game' || gameData.title === `Game ${gameId}`) && 
+                bringingUserIds.length > 0) {
               try {
                 const fetchFromUserId = bringingUserIds[0];
                 console.log(`[ExpectedGames] Fetching all games for user ${fetchFromUserId} to find gameId ${gameId}`);
@@ -3280,7 +3809,11 @@ const EventHub = () => {
                   .get();
                 
                 if (!allGamesSnapshot.empty) {
-                  console.log(`[ExpectedGames] Found ${allGamesSnapshot.docs.length} games for user ${fetchFromUserId}`);
+                  // Only log once per user, not for every game
+                  if (!seenGameIds.has(`_logged_${fetchFromUserId}`)) {
+                    console.log(`[ExpectedGames] Fetched ${allGamesSnapshot.docs.length} games for user ${fetchFromUserId}`);
+                    seenGameIds.add(`_logged_${fetchFromUserId}`);
+                  }
                   for (const doc of allGamesSnapshot.docs) {
                     const data = doc.data();
                     const docId = doc.id;
@@ -3292,28 +3825,38 @@ const EventHub = () => {
                     const dataBggIdStr = dataBggId ? String(dataBggId) : null;
                     
                     if (docIdStr === gameIdStr || dataBggIdStr === gameIdStr) {
-                      console.log(`[ExpectedGames] Matched game! docId: ${docId}, bggId: ${dataBggId}, title: ${data.title || data.gameName}`);
-                      gameData = {
-                        id: docId,
-                        title: data.title || data.gameName || 'Unknown Game',
-                        bggId: dataBggId || (typeof gameId === 'string' && !isNaN(parseInt(gameId)) ? gameId : null),
-                        image: data.image || data.bggImage || null,
-                        thumbnail: data.thumbnail || data.bggThumbnail || null,
-                        bggThumbnail: data.bggThumbnail || data.thumbnail || null,
-                        description: data.description || '',
-                        yearPublished: data.yearPublished || null,
-                        minPlayers: data.minPlayers || null,
-                        maxPlayers: data.maxPlayers || null,
-                        playingTime: data.playingTime || null,
-                        bggRating: data.bggRating || null,
-                        userRating: data.userRating || null,
-                        numplays: data.numplays || null,
-                        teachingStatus: data.teachingStatus || null,
-                        addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                        source: data.source || 'manual',
-                        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                      };
-                      break;
+                      const foundTitle = data.title || data.gameName || null;
+                      // Only log if title is invalid (to help debug)
+                      if (!foundTitle || foundTitle === 'Unknown Game' || foundTitle === `Game ${gameId}`) {
+                        console.warn(`[ExpectedGames] Matched game ${gameId} but title invalid: ${foundTitle || 'null'}`);
+                      }
+                      
+                      // Only create gameData if we have a valid title
+                      if (foundTitle && foundTitle !== 'Unknown Game' && foundTitle !== `Game ${gameId}`) {
+                        gameData = {
+                          id: docId,
+                          title: foundTitle,
+                          bggId: dataBggId || (typeof gameId === 'string' && !isNaN(parseInt(gameId)) ? gameId : null),
+                          image: data.image || data.bggImage || null,
+                          thumbnail: data.thumbnail || data.bggThumbnail || null,
+                          bggThumbnail: data.bggThumbnail || data.thumbnail || null,
+                          description: data.description || '',
+                          yearPublished: data.yearPublished || null,
+                          minPlayers: data.minPlayers || null,
+                          maxPlayers: data.maxPlayers || null,
+                          playingTime: data.playingTime || null,
+                          bggRating: data.bggRating || null,
+                          userRating: data.userRating || null,
+                          numplays: data.numplays || null,
+                          teachingStatus: data.teachingStatus || null,
+                          addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                          source: data.source || 'manual',
+                          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                        };
+                        break;
+                      } else {
+                        // Found the game but it has invalid title - will be marked as failed below
+                      }
                     }
                   }
                 }
@@ -3321,127 +3864,68 @@ const EventHub = () => {
                 console.error(`Error fetching all games for user ${bringingUserIds[0]}:`, error);
               }
             }
+            
+          }
+          
+          // If we still don't have valid data after all attempts, mark this lookup as failed to prevent repeated fetches
+          if (!gameData || !gameData.title || gameData.title === 'Unknown Game' || gameData.title === `Game ${gameId}`) {
+            failedGameLookupsRef.current.add(lookupKey);
+            // Only log first few failures to avoid spam
+            if (failedGameLookupsRef.current.size <= 10) {
+              console.log(`[ExpectedGames] Marking gameId ${gameId} as failed (cache size: ${failedGameLookupsRef.current.size})`);
+            }
           }
           
           // Only add game if we have valid game data with a real title
           if (gameData && gameData.title && gameData.title !== 'Unknown Game' && gameData.title !== `Game ${gameId}`) {
             seenGameIds.add(gameId);
+            const safeMemberNamesForLookup = memberNamesRef.current || {};
             return {
               ...gameData,
               bringingBy: bringingUserIds.map(uid => ({
                 userId: uid,
                 userName: uid === userId 
                   ? (user?.name || user?.email || userId) 
-                  : (memberNames[uid] || uid),
+                  : (safeMemberNamesForLookup[uid] || uid),
               })),
             };
           } else {
-            console.warn(`[ExpectedGames] Could not find valid game data for gameId ${gameId}. gameData:`, gameData);
+            // Only log warning if we haven't already marked this as a failed lookup
+            if (!failedGameLookupsRef.current.has(lookupKey)) {
+              console.warn(`[ExpectedGames] Could not find valid game data for gameId ${gameId}. gameData:`, gameData);
+            }
           }
           
           return null;
         });
         
-        const results = await Promise.all(gamePromises);
-        const validGames = results.filter(g => g !== null);
-        setExpectedGames(validGames);
+          const results = await Promise.all(gamePromises);
+          const validGames = results.filter(g => g !== null);
+          console.log(`[ExpectedGames] Computation complete: ${validGames.length} valid games, ${failedGameLookupsRef.current.size} in failed cache`);
+          
+          // Only update if games actually changed (deep comparison)
+          setExpectedGames(prev => {
+            if (prev.length !== validGames.length) {
+              return validGames;
+            }
+            // Compare by game IDs
+            const prevIds = prev.map(g => g.id).sort().join(',');
+            const newIds = validGames.map(g => g.id).sort().join(',');
+            if (prevIds !== newIds) {
+              return validGames;
+            }
+            // Same games, return previous array to prevent re-render
+            return prev;
+          });
+        } finally {
+          isComputingRef.current = false;
+        }
       };
       
       computeExpectedGames();
-    }, [gameInterests, event?.id, members, collections, userId, user, memberNames]);
-
-    // Load proposals from Firestore
-    useEffect(() => {
-      if (!event?.id || !db || !isMember) return;
-      
-      const loadProposals = async () => {
-        try {
-          const proposalsSnapshot = await db.collection('gamingGroups').doc(event.id)
-            .collection('nominations').get(); // Keep collection name as 'nominations' for backward compatibility
-            
-          const proposalsMap = new Map();
-          const userProps = new Set();
-          
-          proposalsSnapshot.forEach(doc => {
-            const data = doc.data();
-            const gameId = data.gameId;
-            
-            if (!gameId) return;
-            
-            // Check if this is a proposal document (document ID is just the gameId, not gameId_userId)
-            const isProposalDoc = doc.id === gameId;
-            
-            // Track user's proposals - check both proposal documents and rating documents
-            if (data.nominatedBy === userId) {
-              userProps.add(gameId);
-            }
-            
-            // Initialize or update proposal
-            if (!proposalsMap.has(gameId)) {
-              // Create proposal entry - use data from proposal document if available
-              proposalsMap.set(gameId, {
-                gameId,
-                gameName: data.gameName || 'Unknown Game',
-                gameImage: data.gameImage || null,
-                proposedBy: data.nominatedBy || null, // Keep field name for backward compatibility
-                ratings: {},
-              });
-            } else {
-              // Update existing proposal with better data if this is the proposal document
-              // (proposal documents have more complete info than rating documents)
-              if (isProposalDoc && data.nominatedBy) {
-                const existing = proposalsMap.get(gameId);
-                proposalsMap.set(gameId, {
-                  ...existing,
-                  gameName: data.gameName || existing.gameName || 'Unknown Game',
-                  gameImage: data.gameImage || existing.gameImage || null,
-                  proposedBy: data.nominatedBy || existing.proposedBy,
-                });
-              }
-            }
-            
-            // Add rating if this is a rating document (has userId and rating)
-            if (data.userId && data.rating !== undefined) {
-              const proposal = proposalsMap.get(gameId);
-              if (proposal) {
-                proposal.ratings[data.userId] = data.rating;
-                // Also ensure proposedBy is set from rating document if not already set
-                if (!proposal.proposedBy && data.nominatedBy) {
-                  proposal.proposedBy = data.nominatedBy;
-                }
-                // Update game info from rating document if missing
-                if (!proposal.gameName || proposal.gameName === 'Unknown Game') {
-                  proposal.gameName = data.gameName || proposal.gameName || 'Unknown Game';
-                }
-                if (!proposal.gameImage) {
-                  proposal.gameImage = data.gameImage || proposal.gameImage || null;
-                }
-              }
-            }
-          });
-          
-          // Filter out any proposals without a proposedBy (shouldn't happen, but safety check)
-          const allProposals = Array.from(proposalsMap.values());
-          const validProposals = allProposals.filter(p => p.proposedBy);
-          const invalidProposals = allProposals.filter(p => !p.proposedBy);
-          
-          if (invalidProposals.length > 0) {
-            console.warn(`[Gameplan] Found ${invalidProposals.length} proposals without proposedBy:`, invalidProposals);
-          }
-          
-          console.log(`[Gameplan] Loaded ${validProposals.length} proposed games (out of ${allProposals.length} total) for event ${event.id}, userId: ${userId}`);
-          setProposedGames(validProposals);
-          setUserProposals(userProps);
-        } catch (error) {
-          console.error('Error loading proposals:', error);
-          // Set empty arrays on error to prevent stale data
-          setProposedGames([]);
-          setUserProposals(new Set());
-        }
-      };
-
-      loadProposals();
-    }, [event?.id, db, isMember, userId]);
+      // Note: We only depend on event?.id (stable) and use refs for actual data
+      // This prevents the effect from running on every render when object references change
+    }, [event?.id, userId]);
 
     const toggleGameSelection = (gameId) => {
       setSelectedGamesForBringing(prev => {
@@ -3488,31 +3972,107 @@ const EventHub = () => {
       return [];
     }, [event]);
 
-    // Auto-select first date if available and none selected
+    // Do not auto-select a date; wait for user selection
+
+    // Show modal when no other confirmed attendees (excluding logged-in user)
+    // Only show when a date is first selected, not on every change
+    const prevSelectedDateIndexRef = useRef(null);
     useEffect(() => {
-      if (eventDates.length > 0 && selectedGameNightDateIndex === null) {
-        setSelectedGameNightDateIndex(0);
+      if (selectedGameNightDateIndex === null) {
+        setShowNoConfirmedAttendeesModal(false);
+        prevSelectedDateIndexRef.current = null;
+        return;
       }
-    }, [eventDates.length, selectedGameNightDateIndex]);
+      
+      // Only show modal if this is a new date selection (not just a re-render)
+      const isNewDateSelection = prevSelectedDateIndexRef.current !== selectedGameNightDateIndex;
+      prevSelectedDateIndexRef.current = selectedGameNightDateIndex;
+      
+      if (isNewDateSelection) {
+        // Check if the logged-in user has confirmed for this date
+        const selectedDate = eventDates[selectedGameNightDateIndex];
+        const userHasConfirmed = selectedDate && userId ? (() => {
+          const userRSVPs = memberRSVPs[userId] || {};
+          if (typeof userRSVPs === 'string') {
+            // Backward compatibility: old format
+            return !selectedDate.date ? userRSVPs === 'going' : false;
+          }
+          const dateKey = getDateKey(selectedDate.date);
+          return userRSVPs[dateKey] === 'going';
+        })() : false;
+        
+        // Only show modal if user hasn't confirmed AND there are no other confirmed attendees
+        const otherConfirmedAttendees = confirmedAttendees.filter(m => m.userId !== userId);
+        const hasNoOtherConfirmedAttendees = otherConfirmedAttendees.length === 0;
+        
+        if (hasNoOtherConfirmedAttendees && !userHasConfirmed) {
+          setShowNoConfirmedAttendeesModal(true);
+        } else {
+          setShowNoConfirmedAttendeesModal(false);
+        }
+      }
+    }, [selectedGameNightDateIndex, confirmedAttendees, userId, eventDates, memberRSVPs]);
 
     // Get confirmed attendees for selected date (those with rsvpStatus === 'going')
+    // Always include the logged-in user if they're a member
     const confirmedAttendees = useMemo(() => {
       if (selectedGameNightDateIndex === null) return [];
       
-      return members.filter(member => {
-        const rsvpStatus = memberRSVPs[member.userId];
-        // Consider 'going' as confirmed. For now, RSVPs are global, not per-date
-        return rsvpStatus === 'going';
+      const selectedDate = eventDates[selectedGameNightDateIndex];
+      if (!selectedDate) return [];
+      
+      const dateKey = getDateKey(selectedDate.date);
+      
+      const confirmed = members.filter(member => {
+        const memberRsvps = memberRSVPs[member.userId] || {};
+        if (typeof memberRsvps === 'string') {
+          // Backward compatibility: old format with single status
+          return !selectedDate.date ? memberRsvps === 'going' : false;
+        }
+        const status = memberRsvps[dateKey];
+        return status === 'going';
       });
-    }, [members, memberRSVPs, selectedGameNightDateIndex]);
+      
+      // Always include the logged-in user if they're a member and have confirmed for this date
+      if (isMember && userId) {
+        const userIsInList = confirmed.some(m => m.userId === userId);
+        if (!userIsInList) {
+          const userRSVPs = memberRSVPs[userId] || {};
+          let userHasConfirmed = false;
+          if (typeof userRSVPs === 'string') {
+            // Backward compatibility: old format
+            userHasConfirmed = !selectedDate.date ? userRSVPs === 'going' : false;
+          } else {
+            userHasConfirmed = userRSVPs[dateKey] === 'going';
+          }
+          
+          if (userHasConfirmed) {
+          const userMember = members.find(m => m.userId === userId);
+          if (userMember) {
+            confirmed.push(userMember);
+            }
+          }
+        }
+      }
+      
+      return confirmed;
+    }, [members, memberRSVPs, selectedGameNightDateIndex, isMember, userId, eventDates]);
 
     // Aggregate games from confirmed attendees with owner info
+    // Always include the logged-in user's games if they're a member
     const aggregatedGames = useMemo(() => {
-      if (selectedGameNightDateIndex === null || confirmedAttendees.length === 0) return [];
+      if (selectedGameNightDateIndex === null) return [];
+      
+      // If no confirmed attendees, still include logged-in user's games if they're a member
+      const attendeesToProcess = confirmedAttendees.length > 0 
+        ? confirmedAttendees 
+        : (isMember && userId ? members.filter(m => m.userId === userId) : []);
+      
+      if (attendeesToProcess.length === 0) return [];
       
       const gamesMap = new Map(); // Key: gameId (bggId or id), Value: { game, owners: [names] }
       
-      confirmedAttendees.forEach(attendee => {
+      attendeesToProcess.forEach(attendee => {
         const attendeeId = attendee.userId;
         const attendeeName = memberNames[attendeeId] || attendeeId;
         const attendeeGames = collections[attendeeId] || [];
@@ -3544,162 +4104,86 @@ const EventHub = () => {
         ...item.game,
         _owners: item.owners, // Store owners as a special field
       }));
-    }, [confirmedAttendees, collections, memberNames, selectedGameNightDateIndex]);
+    }, [confirmedAttendees, collections, memberNames, selectedGameNightDateIndex, isMember, userId, members]);
+
+    // State for tracking which proposed game is expanded for rating
+    const [expandedProposedGameId, setExpandedProposedGameId] = useState(null);
 
     return (
       <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
-        {/* Browse and Propose Section */}
+        {/* Game Night Dates Section (navigation to Browse & Propose) */}
         {isMember && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Browse and Propose</Text>
+            <Text style={styles.sectionTitle}>Propose Games</Text>
             <Text style={styles.sectionCopy}>
-              Select a game night date to see all games owned by confirmed attendees. Propose up to 5 games you'd like to play.
+              Choose a date to browse the super collection and propose games.
             </Text>
             
-            {/* Date Selector */}
             {eventDates.length > 0 ? (
-              <>
-                <Text style={styles.dateSelectorLabel}>Select Game Night Date:</Text>
-                <View style={styles.dateSelectorContainer}>
+              <View style={styles.dateListContainer}>
                   {eventDates.map((ed, index) => {
-                    const isSelected = selectedGameNightDateIndex === index;
+                  const currentEventId = eventId || event?.id;
+                  const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
+                  const myRSVPs = memberRSVPs?.[userId] || {};
+                  const rsvp = typeof myRSVPs === 'string' ? myRSVPs : myRSVPs[dateKey];
+                  const rsvpLabel = rsvp ? rsvp : 'no response';
+                  const rsvpStyle =
+                    rsvp === 'going' ? styles.rsvpBadgeGoing :
+                    rsvp === 'maybe' ? styles.rsvpBadgeMaybe :
+                    rsvp === 'not going' ? styles.rsvpBadgeNotGoing :
+                    styles.rsvpBadgeUnknown;
+                  const rsvpTextColor =
+                    rsvp === 'going' ? '#2e9b5e' :
+                    rsvp === 'maybe' ? '#a06c00' :
+                    rsvp === 'not going' ? '#b33936' :
+                    '#555';
+
                     return (
                       <TouchableOpacity
                         key={index}
-                        style={[
-                          styles.dateSelectorButton,
-                          isSelected && styles.dateSelectorButtonActive,
-                        ]}
-                        onPress={() => setSelectedGameNightDateIndex(index)}
-                      >
-                        <Text
-                          style={[
-                            styles.dateSelectorButtonText,
-                            isSelected && styles.dateSelectorButtonTextActive,
-                          ]}
-                        >
+                      style={styles.dateListItem}
+                                      onPress={() => {
+                        console.log('[EventHub] Date selector clicked:', { 
+                          index, 
+                          currentEventId, 
+                          platform: Platform.OS,
+                          hasNavigate: !!navigate,
+                          hasNavigation: !!navigation?.navigate
+                        });
+                        if (Platform.OS === 'web' && navigate && currentEventId) {
+                          console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${index}`);
+                          navigate(`/event/${currentEventId}/browse/${index}`);
+                        } else if (navigation?.navigate && currentEventId) {
+                          console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: index });
+                          navigation.navigate('BrowseAndPropose', { 
+                            eventId: currentEventId, 
+                            dateIndex: index 
+                          });
+                        }
+                      }}
+                    >
+                      <View style={styles.dateListTextBlock}>
+                        <Text style={styles.dateListTitle}>
                           {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
-                        </Text>
-                        {ed.startTime && (
-                          <Text
-                            style={[
-                              styles.dateSelectorButtonTime,
-                              isSelected && styles.dateSelectorButtonTimeActive,
-                            ]}
-                          >
-                            {formatTime(ed.startTime.toISOString())}
                           </Text>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {/* Aggregated Games Display */}
-                {selectedGameNightDateIndex !== null && (
-                  <>
-                    {confirmedAttendees.length === 0 ? (
-                      <Text style={styles.sectionCopy}>
-                        No confirmed attendees yet. Ask members to RSVP!
-                      </Text>
-                    ) : aggregatedGames.length === 0 ? (
-                      <Text style={styles.sectionCopy}>
-                        No games found from confirmed attendees for this date.
-                      </Text>
-                    ) : (
-                      <>
-                        <Text style={styles.aggregatedGamesHeader}>
-                          {aggregatedGames.length} {aggregatedGames.length === 1 ? 'game' : 'games'} from {confirmedAttendees.length} {confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
-                        </Text>
-                        <View style={styles.aggregatedGamesGrid}>
-                          {aggregatedGames.map((game, idx) => {
-                            const gameId = game.bggId || game.id;
-                            const isProposedByUser = userProposals.has(gameId);
-                            const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
-                            const canPropose = userProposals.size < 5 || isProposedByUser;
-                            const owners = game._owners || [];
-                            
-                            return (
-                              <View key={gameId || `game-${idx}`} style={styles.aggregatedGameCardWrapper}>
-                                <Pressable
-                                  onPress={() => {
-                                    handleOpenGameDetails(game);
-                                  }}
-                                  style={styles.selectableGameCardWrapper}
-                                  activeOpacity={0.7}
-                                >
-                                  <GameCard 
-                                    game={game} 
-                                    preloadedBggData={game._bggData}
-                                    disableModal={true}
-                                  />
-                                  {/* Owner Names */}
-                                  {owners.length > 0 && (
-                                    <View style={styles.gameOwnerNames}>
-                                      <Text style={styles.gameOwnerNamesText} numberOfLines={2}>
-                                        {owners.join(', ')}
+                        <Text style={styles.dateListSubtext}>
+                          {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
+                            </Text>
+                        {ed.location ? (
+                          <Text style={styles.dateListLocation} numberOfLines={1}>
+                            {ed.location}
                                       </Text>
+                        ) : null}
                                     </View>
-                                  )}
-                                </Pressable>
-                                {!isProposedByUser && canPropose && (
-                                  <TouchableOpacity
-                                    style={styles.proposeGameButton}
-                                    onPress={async () => {
-                                      if (!event?.id || !db || !userId) return;
-                                      
-                                      if (userProposals.size >= 5) {
-                                        Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
-                                        return;
-                                      }
-                                      
-                                      try {
-                                        const proposalDoc = {
-                                          gameId,
-                                          gameName: game.title || 'Unknown Game',
-                                          gameImage: game.image || game.thumbnail || null,
-                                          nominatedBy: userId,
-                                          createdAt: firebase.firestore.Timestamp.now(),
-                                        };
-                                        
-                                        await db.collection('gamingGroups').doc(event.id)
-                                          .collection('nominations')
-                                          .doc(gameId)
-                                          .set(proposalDoc, { merge: true });
-                                        
-                                        setUserProposals(prev => new Set([...prev, gameId]));
-                                        setProposedGames(prev => [...prev, {
-                                          gameId,
-                                          gameName: proposalDoc.gameName,
-                                          gameImage: proposalDoc.gameImage,
-                                          proposedBy: userId,
-                                          ratings: {},
-                                        }]);
-                                        
-                                        Alert.alert('Success', 'Game proposed successfully!');
-                                      } catch (error) {
-                                        console.error('Error proposing game:', error);
-                                        Alert.alert('Error', 'Failed to propose game. Please try again.');
-                                      }
-                                    }}
-                                  >
-                                    <Text style={styles.proposeGameButtonText}>Propose</Text>
-                                  </TouchableOpacity>
-                                )}
-                                {isProposedByUser && (
-                                  <View style={styles.proposedBadge}>
-                                    <Text style={styles.proposedBadgeText}>Proposed</Text>
+                      <View style={[styles.rsvpBadge, rsvpStyle]}>
+                        <Text style={[styles.rsvpBadgeText, { color: rsvpTextColor }]}>
+                          {rsvpLabel}
+                        </Text>
                                   </View>
-                                )}
-                              </View>
+                    </TouchableOpacity>
                             );
                           })}
-                        </View>
-                      </>
-                    )}
-                  </>
-                )}
-              </>
+                            </View>
             ) : (
               <Text style={styles.sectionCopy}>
                 No game night dates scheduled yet. Ask the organizer to add dates!
@@ -3708,138 +4192,6 @@ const EventHub = () => {
           </View>
         )}
 
-        {/* Proposed to Play Next Section */}
-        {isMember && proposedGames.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Proposed to Play Next</Text>
-            <Text style={styles.sectionCopy}>
-              Games proposed for the next game night. Rate each game to help decide what to play.
-            </Text>
-            {proposedGames.map((proposal) => {
-              const gameId = proposal.gameId;
-              const userRating = proposal.ratings?.[userId] ?? null;
-              
-              return (
-                <View key={gameId} style={styles.proposedGameItem}>
-                  <View style={styles.proposedGameHeader}>
-                    {proposal.gameImage ? (
-                      <Image 
-                        source={{ uri: proposal.gameImage }} 
-                        style={styles.proposedGameThumbnail}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.proposedGameThumbnailPlaceholder}>
-                        <Text style={styles.proposedGameThumbnailText}>
-                          {(proposal.gameName || '?').charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={styles.proposedGameInfo}>
-                      <Text style={styles.proposedGameTitle}>{proposal.gameName}</Text>
-                      <Text style={styles.proposedGameSubtext}>
-                        Proposed by {memberNames[proposal.proposedBy] || proposal.proposedBy}
-                                    </Text>
-                                  </View>
-                              </View>
-                  
-                  {/* Rating Buttons */}
-                  <View style={styles.ratingButtonsContainer}>
-                    {[
-                      { value: 3, label: '⭐⭐⭐', text: 'I really want to play this game' },
-                      { value: 2, label: '⭐⭐', text: 'I want to play this game' },
-                      { value: 1, label: '⭐', text: 'I am fine with playing this game' },
-                      { value: 0, label: '⚪', text: 'I am not sure about this game' },
-                      { value: -1, label: '👎', text: 'I would rather not play this game' },
-                    ].map(({ value, label, text }) => (
-                    <TouchableOpacity
-                        key={value}
-                        style={[
-                          styles.ratingButton,
-                          userRating === value && styles.ratingButtonActive
-                        ]}
-                        onPress={async () => {
-                          if (!event?.id || !db || !userId) return;
-                          
-                          // If clicking the same rating, allow clearing it by setting to null
-                          const newRating = userRating === value ? null : value;
-                          
-                          try {
-                            if (newRating === null) {
-                              // Clear the rating by deleting the document
-                              await db.collection('gamingGroups').doc(event.id)
-                                .collection('nominations')
-                                .doc(`${gameId}_${userId}`)
-                                .delete();
-                              
-                              // Update local state to remove rating
-                              setProposedGames(prev => prev.map(n => {
-                                if (n.gameId === gameId) {
-                                  const newRatings = { ...n.ratings };
-                                  delete newRatings[userId];
-                                  return {
-                                    ...n,
-                                    ratings: newRatings
-                                  };
-                                }
-                                return n;
-                              }));
-                            } else {
-                              // Set new rating
-                              const ratingDoc = {
-                                gameId,
-                                gameName: proposal.gameName,
-                                gameImage: proposal.gameImage,
-                                userId,
-                                rating: newRating,
-                                nominatedBy: proposal.proposedBy, // Keep field name for backward compatibility
-                                updatedAt: firebase.firestore.Timestamp.now(),
-                              };
-                              
-                              await db.collection('gamingGroups').doc(event.id)
-                                .collection('nominations')
-                                .doc(`${gameId}_${userId}`)
-                                .set(ratingDoc, { merge: true });
-                              
-                              // Update local state
-                              setProposedGames(prev => prev.map(n => {
-                                if (n.gameId === gameId) {
-                                  return {
-                                    ...n,
-                                    ratings: { ...n.ratings, [userId]: newRating }
-                                  };
-                                }
-                                return n;
-                              }));
-                            }
-                        } catch (error) {
-                            console.error('Error saving rating:', error);
-                            Alert.alert('Error', 'Failed to save rating. Please try again.');
-                          }
-                        }}
-                      >
-                        <View style={styles.ratingButtonContent}>
-                          <Text style={[
-                            styles.ratingButtonLabel,
-                            userRating === value && styles.ratingButtonLabelActive
-                          ]}>
-                            {label}
-                          </Text>
-                          <Text style={[
-                            styles.ratingButtonText,
-                            userRating === value && styles.ratingButtonTextActive
-                          ]}>
-                            {text}
-                          </Text>
-                        </View>
-                    </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
 
 
         {/* Planning Games Modal */}
@@ -3973,7 +4325,7 @@ const EventHub = () => {
           onPress={() => setActiveTab(TABS.DISCUSSION)}
         >
           <Text style={[styles.tabText, activeTab === TABS.DISCUSSION && styles.tabTextActive]}>
-            Discussion
+            Tabletalk
           </Text>
         </TouchableOpacity>
       </View>
@@ -4000,6 +4352,35 @@ const EventHub = () => {
           eventId={event?.id}
         />
       )}
+
+      {/* User Profile Modal */}
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
+      )}
+
+      {/* No Confirmed Attendees Modal */}
+      <Modal
+        isOpen={showNoConfirmedAttendeesModal}
+        onClose={() => setShowNoConfirmedAttendeesModal(false)}
+        title="Game Night"
+      >
+        <View style={styles.modalContent}>
+          <Text style={styles.modalMessage}>
+            No confirmed attendees yet, be the first to confirm!
+          </Text>
+          <Button
+            label="Close"
+            onPress={() => setShowNoConfirmedAttendeesModal(false)}
+            style={styles.modalButton}
+          />
+        </View>
+      </Modal>
 
       {/* Attendee Collection Modal */}
       <Modal
@@ -4204,6 +4585,148 @@ const EventHub = () => {
           userName={selectedUserForProfile.userName}
           avatarUrl={selectedUserForProfile.avatarUrl}
         />
+      )}
+
+      {/* Member Action Modal */}
+      {selectedMemberForAction && (
+        <Modal
+          isOpen={!!selectedMemberForAction}
+          onClose={() => setSelectedMemberForAction(null)}
+          title={`Manage ${selectedMemberForAction.displayName}`}
+        >
+          <View style={styles.memberActionModalContent}>
+            {/* Make/Remove Co-Organizer */}
+            {selectedMemberForAction.userId !== event?.organizerId && (
+              <View style={styles.memberActionSection}>
+                <Text style={styles.memberActionLabel}>Role</Text>
+                {selectedMemberForAction.role !== memberRoles?.ORGANIZER ? (
+                  <Button
+                    label="Make Co-Organizer"
+                    onPress={async () => {
+                      try {
+                        await updateMemberRole(event.id, userId, selectedMemberForAction.userId, memberRoles.ORGANIZER);
+                        Alert.alert('Success', `${selectedMemberForAction.displayName} is now a co-organizer.`);
+                        setSelectedMemberForAction(null);
+                      } catch (error) {
+                        Alert.alert('Error', error.message || 'Failed to update member role.');
+                        console.error(error);
+                      }
+                    }}
+                    style={styles.memberActionButton}
+                  />
+                ) : (
+                  <Button
+                    label="Remove Co-Organizer"
+                    onPress={async () => {
+                      try {
+                        await updateMemberRole(event.id, userId, selectedMemberForAction.userId, memberRoles.MEMBER);
+                        Alert.alert('Success', `${selectedMemberForAction.displayName} is no longer a co-organizer.`);
+                        setSelectedMemberForAction(null);
+                      } catch (error) {
+                        Alert.alert('Error', error.message || 'Failed to update member role.');
+                        console.error(error);
+                      }
+                    }}
+                    variant="outline"
+                    style={styles.memberActionButton}
+                  />
+                )}
+              </View>
+            )}
+
+            {/* Join Code Sharing Permission */}
+            {selectedMemberForAction.role !== memberRoles?.ORGANIZER && (
+              <View style={styles.memberActionSection}>
+                <Text style={styles.memberActionLabel}>Join Code Sharing</Text>
+                <View style={styles.toggleRow}>
+                  <Text style={styles.toggleLabel}>
+                    {selectedMemberForAction.canShareJoinCode
+                      ? 'Can share join codes'
+                      : 'Cannot share join codes'}
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.toggleSwitch,
+                      selectedMemberForAction.canShareJoinCode && styles.toggleSwitchActive,
+                    ]}
+                    onPress={async () => {
+                      try {
+                        const newValue = !selectedMemberForAction.canShareJoinCode;
+                        await updateMemberJoinCodePermission(
+                          event.id,
+                          userId,
+                          selectedMemberForAction.userId,
+                          newValue
+                        );
+                        setSelectedMemberForAction({
+                          ...selectedMemberForAction,
+                          canShareJoinCode: newValue,
+                        });
+                        Alert.alert(
+                          'Success',
+                          `${selectedMemberForAction.displayName} ${newValue ? 'can' : 'cannot'} now share join codes.`
+                        );
+                      } catch (error) {
+                        Alert.alert('Error', error.message || 'Failed to update permission.');
+                        console.error(error);
+                      }
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.toggleSwitchThumb,
+                        selectedMemberForAction.canShareJoinCode && styles.toggleSwitchThumbActive,
+                      ]}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Remove Member */}
+            {selectedMemberForAction.userId !== event?.organizerId && (
+              <View style={styles.memberActionSection}>
+                <Button
+                  label={`Remove ${selectedMemberForAction.displayName}`}
+                  onPress={() => {
+                    Alert.alert(
+                      'Remove Member?',
+                      `Are you sure you want to remove ${selectedMemberForAction.displayName} from this MeepleUp?`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Remove',
+                          style: 'destructive',
+                          onPress: async () => {
+                            try {
+                              await leaveEvent(event.id, selectedMemberForAction.userId);
+                              Alert.alert('Member Removed', `${selectedMemberForAction.displayName} has been removed from the MeepleUp.`);
+                              setSelectedMemberForAction(null);
+                            } catch (error) {
+                              Alert.alert('Error', 'Failed to remove member. Please try again.');
+                              console.error(error);
+                            }
+                          },
+                        },
+                      ],
+                    );
+                  }}
+                  variant="outline"
+                  style={[styles.memberActionButton, styles.removeMemberButton]}
+                />
+              </View>
+            )}
+
+            <View style={styles.memberActionModalFooter}>
+              <Button
+                label="Close"
+                onPress={() => setSelectedMemberForAction(null)}
+                variant="outline"
+                style={styles.memberActionButton}
+              />
+            </View>
+          </View>
+        </Modal>
       )}
 
       {/* Edit Schedule Modal */}
@@ -4542,14 +5065,21 @@ const EventHub = () => {
               </View>
             )}
 
-            {selectedDateDetail.note && (
-              <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailLabel}>Note</Text>
-                <Text style={styles.dateDetailValue}>
-                  {selectedDateDetail.note}
-                </Text>
-              </View>
-            )}
+            <View style={styles.dateDetailSection}>
+              <Text style={styles.dateDetailLabel}>Notes</Text>
+              <Text
+                style={
+                  selectedDateDetail.note
+                    ? styles.dateDetailValue
+                    : styles.dateDetailPlaceholder
+                }
+              >
+                {selectedDateDetail.note ||
+                  (isOrganizerOrCoOrganizer
+                    ? 'No notes yet. Add logistics like parking or snacks in Edit Schedule.'
+                    : 'No notes yet.')}
+              </Text>
+            </View>
 
             <View style={styles.dateDetailActions}>
               <Button
@@ -4699,16 +5229,32 @@ const styles = StyleSheet.create({
     color: '#2f2f2f',
     flex: 1,
   },
-  privateMessageButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#007AFF',
+  collapsibleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
     borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
-  privateMessageButtonText: {
-    color: '#fff',
+  expandIcon: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+  },
+  privateMessageToggle: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+  },
+  privateMessageToggleText: {
+    color: '#666',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   sectionCopy: {
     fontSize: 14,
@@ -4848,6 +5394,11 @@ const styles = StyleSheet.create({
     color: '#2f2f2f',
     fontWeight: '500',
   },
+  dateDetailPlaceholder: {
+    fontSize: 14,
+    color: '#777',
+    fontStyle: 'italic',
+  },
   dateDetailActions: {
     marginTop: 20,
     paddingTop: 20,
@@ -4881,12 +5432,23 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '600',
   },
+  scheduleValueBoldRed: {
+    fontSize: 16,
+    color: '#ff0000',
+    fontWeight: 'bold',
+  },
+  scheduleLocationBoldRed: {
+    fontSize: 18,
+    color: '#ff0000',
+    marginTop: 4,
+    fontWeight: 'bold',
+  },
   dateEntryContainer: {
-    marginBottom: 16,
+    marginBottom: 24,
     borderWidth: 1,
     borderColor: '#e0e0e0',
     borderRadius: 12,
-    backgroundColor: '#fafafa',
+    backgroundColor: '#e8e8e8',
     overflow: 'hidden',
   },
   dateEntryContent: {
@@ -5134,6 +5696,76 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 4,
   },
+  postPhotoContainer: {
+    marginTop: 8,
+    marginBottom: 8,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  postPhoto: {
+    width: '100%',
+    maxHeight: 400,
+    minHeight: 200,
+  },
+  selectedPhotoContainer: {
+    marginBottom: 12,
+  },
+  selectedPhotoPreview: {
+    position: 'relative',
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  selectedPhotoPreviewImage: {
+    width: '100%',
+    maxHeight: 200,
+    minHeight: 150,
+  },
+  removePhotoButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 20,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removePhotoButtonText: {
+    color: '#fff',
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: 'bold',
+  },
+  photoUploadingContainer: {
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  photoUploadingText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  postInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  photoButton: {
+    padding: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 48,
+    height: 48,
+  },
+  photoButtonText: {
+    fontSize: 24,
+  },
   messageTime: {
     fontSize: 12,
     color: '#999',
@@ -5143,6 +5775,7 @@ const styles = StyleSheet.create({
   },
   messageInputField: {
     marginBottom: 12,
+    flex: 1,
   },
   postButton: {
     marginTop: 8,
@@ -5355,17 +5988,68 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   removeMemberButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#fff5f5',
-    borderRadius: 6,
-    borderWidth: 1,
     borderColor: '#d45d5d',
   },
   removeMemberText: {
     color: '#d45d5d',
     fontSize: 13,
     fontWeight: '500',
+  },
+  memberActionButton: {
+    marginBottom: 8,
+  },
+  memberActionButtonText: {
+    fontSize: 18,
+  },
+  memberActionModalContent: {
+    padding: 20,
+  },
+  memberActionSection: {
+    marginBottom: 24,
+  },
+  memberActionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  toggleSwitch: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#ccc',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleSwitchActive: {
+    backgroundColor: '#d45d5d',
+  },
+  toggleSwitchThumb: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#fff',
+    alignSelf: 'flex-start',
+  },
+  toggleSwitchThumbActive: {
+    alignSelf: 'flex-end',
+  },
+  memberActionModalFooter: {
+    marginTop: 8,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
   },
   adminSection: {
     paddingTop: 20,
@@ -5412,6 +6096,13 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     padding: 20,
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: '#444',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 24,
   },
   modalScrollContent: {
     paddingBottom: 40,
@@ -6188,6 +6879,69 @@ const styles = StyleSheet.create({
   dateSelectorButtonTimeActive: {
     color: '#4a90e2',
   },
+  dateListContainer: {
+    flexDirection: 'column',
+    gap: 12,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  dateListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  dateListTextBlock: {
+    flex: 1,
+    marginRight: 12,
+  },
+  dateListTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#222',
+  },
+  dateListSubtext: {
+    fontSize: 13,
+    color: '#555',
+    marginTop: 2,
+  },
+  dateListLocation: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 4,
+  },
+  rsvpBadge: {
+    minWidth: 90,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+  },
+  rsvpBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#222',
+    textTransform: 'capitalize',
+  },
+  rsvpBadgeGoing: {
+    backgroundColor: '#eef8f2',
+  },
+  rsvpBadgeMaybe: {
+    backgroundColor: '#fff8ec',
+  },
+  rsvpBadgeNotGoing: {
+    backgroundColor: '#fff0f0',
+  },
+  rsvpBadgeUnknown: {
+    backgroundColor: '#f5f7f9',
+  },
   aggregatedGamesHeader: {
     fontSize: 14,
     fontWeight: '600',
@@ -6502,6 +7256,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
+  expectedGamesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  expectedGameCardWrapper: {
+    width: '31%',
+    position: 'relative',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  bringingByContainer: {
+    backgroundColor: '#f0f0f0',
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  bringingByText: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+  },
+  addGamesButton: {
+    marginTop: 12,
+  },
   proposedByOthersBadge: {
     backgroundColor: '#6c757d',
     paddingVertical: 6,
@@ -6542,6 +7323,20 @@ const styles = StyleSheet.create({
   },
   starIconFilled: {
     color: '#FFA500',
+  },
+  expandIndicator: {
+    paddingLeft: 12,
+    justifyContent: 'center',
+  },
+  expandIndicatorText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  proposedGameRatingIndicator: {
+    fontSize: 12,
+    color: '#4a90e2',
+    marginTop: 4,
+    fontWeight: '500',
   },
 });
 

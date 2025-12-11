@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { TextInput, StyleSheet } from 'react-native';
+import { theme, commonStyles } from '../../utils/theme';
 
 const Input = React.forwardRef(({
   placeholder,
@@ -15,22 +16,39 @@ const Input = React.forwardRef(({
   multiline = false,
   numberOfLines = multiline ? 4 : 1,
   textAlignVertical = multiline ? 'top' : 'center',
+  onFocus,
+  onBlur,
   ...rest
 }, ref) => {
+  const [isFocused, setIsFocused] = useState(false);
+
+  const handleFocus = (e) => {
+    setIsFocused(true);
+    onFocus?.(e);
+  };
+
+  const handleBlur = (e) => {
+    setIsFocused(false);
+    onBlur?.(e);
+  };
+
   return (
     <TextInput
       ref={ref}
       style={[
         styles.input,
+        isFocused && styles.inputFocused,
         multiline && styles.multiline,
         style,
         disabled && styles.disabled,
       ]}
       placeholder={placeholder}
-      placeholderTextColor="#999"
+      placeholderTextColor={theme.colors.textSecondary}
       value={value}
       onChangeText={onChangeText}
       onKeyPress={onKeyPress}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
       maxLength={maxLength}
       editable={!disabled}
       secureTextEntry={secureTextEntry}
@@ -48,20 +66,18 @@ Input.displayName = 'Input';
 
 const styles = StyleSheet.create({
   input: {
-    borderWidth: 2,
-    borderColor: '#dee2e6',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
+    ...commonStyles.input,
     minHeight: 44,
   },
+  inputFocused: {
+    ...commonStyles.inputFocused,
+  },
   multiline: {
-    paddingTop: 12,
-    paddingBottom: 12,
+    paddingTop: theme.spacing.sm,
+    paddingBottom: theme.spacing.sm,
   },
   disabled: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.woodLight,
     opacity: 0.6,
   },
 });

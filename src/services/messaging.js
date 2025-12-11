@@ -1,5 +1,6 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import { getBlockedUsers } from './blocking';
 
 /**
  * Generate a consistent conversation ID from two user IDs
@@ -30,10 +31,19 @@ export const getConversations = async (eventId, userId) => {
       .orderBy('lastMessageAt', 'desc')
       .get();
 
+    // Get list of blocked users
+    const blockedUsers = await getBlockedUsers(userId);
+    const blockedUserSet = new Set(blockedUsers);
+
     const conversations = [];
     for (const doc of snapshot.docs) {
       const data = doc.data();
       const otherUserId = data.participants.find(id => id !== userId);
+      
+      // Skip if other user is blocked
+      if (otherUserId && blockedUserSet.has(otherUserId)) {
+        continue;
+      }
       
       // Get other user's info
       let otherUser = null;
@@ -175,9 +185,9 @@ export const sendMessage = async (eventId, conversationId, senderId, content) =>
 /**
  * Get messages for a conversation with real-time listener
  */
-export const subscribeToMessages = (eventId, conversationId, callback) => {
-  if (!db || !eventId || !conversationId) {
-    return () => {};
+export const subscribeToMessages = (eventId, conversationId, userId, callback) => {
+  if (!db || !eventId || !conversationId || !callback) {
+    return null;
   }
 
   const messagesRef = db
@@ -188,24 +198,36 @@ export const subscribeToMessages = (eventId, conversationId, callback) => {
     .collection('messages')
     .orderBy('createdAt', 'asc');
 
-  const unsubscribe = messagesRef.onSnapshot(
-    (snapshot) => {
-      const messages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        senderId: doc.data().senderId,
-        content: doc.data().content,
-        createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt || null,
-        read: doc.data().read || false,
-      }));
+  return messagesRef.onSnapshot(
+    async (snapshot) => {
+      // Get list of blocked users
+      const blockedUsers = userId ? await getBlockedUsers(userId) : [];
+      const blockedUserSet = new Set(blockedUsers);
+
+      const messages = [];
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        
+        // Skip messages from blocked users
+        if (data.senderId && blockedUserSet.has(data.senderId)) {
+          continue;
+        }
+
+        messages.push({
+          id: doc.id,
+          senderId: data.senderId,
+          content: data.content,
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt || null,
+          read: data.read || false,
+        });
+      }
       callback(messages);
     },
     (error) => {
-      console.error('Error in messages listener:', error);
+      console.error('Error subscribing to messages:', error);
       callback([]);
     }
   );
-
-  return unsubscribe;
 };
 
 /**

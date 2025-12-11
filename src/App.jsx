@@ -8,6 +8,7 @@ import WebNavigation from './components/WebNavigation';
 import Onboarding from './screens/Onboarding';
 import EventsScreen from './screens/EventsScreen';
 import EventHub from './screens/EventHub';
+import BrowseAndProposeScreen from './screens/BrowseAndProposeScreen';
 import CollectionScreen from './screens/CollectionScreen';
 import ProfileScreen from './screens/ProfileScreen';
 
@@ -59,6 +60,14 @@ const AppContent = () => {
           element={
             <ProtectedRoute>
               <EventHub />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/event/:eventId/browse/:dateIndex"
+          element={
+            <ProtectedRoute>
+              <BrowseAndProposeScreen />
             </ProtectedRoute>
           }
         />

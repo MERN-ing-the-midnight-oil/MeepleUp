@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Pressable, Dimensions } from 'react-native';
+import { View, Text, Image, StyleSheet, Pressable, Dimensions, useWindowDimensions } from 'react-native';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import GameDetailsModal from './GameDetailsModal';
+import { getColumnCount, BREAKPOINTS } from '../utils/responsive';
 
 /**
  * Game Card Component with BGG Thumbnails
@@ -11,7 +12,7 @@ import GameDetailsModal from './GameDetailsModal';
  * @param {Function} props.onDelete - Delete handler
  * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
  */
-const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false }) => {
+const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8 }) => {
   console.log(
     '[GameCard] Rendering for game:',
     game.title || game.id,
@@ -21,11 +22,40 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     preloadedBggData ? 'yes' : 'no',
   );
 
+  const { width: screenWidth } = useWindowDimensions();
   const [bggData, setBggData] = useState(null);
   const [badges, setBadges] = useState([]);
   const [starRating, setStarRating] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
+  
+  // Calculate responsive card width
+  const cardWidth = useMemo(() => {
+    return getCardWidth(screenWidth, containerPadding, gap);
+  }, [screenWidth, containerPadding, gap]);
+  
+  // Create dynamic styles based on card width
+  const dynamicStyles = useMemo(() => {
+    return StyleSheet.create({
+      card: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#e0e0e0',
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
+        position: 'relative',
+        width: cardWidth,
+        marginBottom: 12,
+        alignSelf: 'flex-start',
+        flexShrink: 0,
+      },
+    });
+  }, [cardWidth]);
 
   // Track if we've initialized this game+bggData combo to prevent re-initialization
   const initializationKeyRef = useRef(null);
@@ -129,7 +159,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
 
   try {
     return (
-      <View style={styles.card} pointerEvents={disableModal ? 'box-none' : 'auto'}>
+      <View style={[dynamicStyles.card, styles.card]} pointerEvents={disableModal ? 'box-none' : 'auto'}>
         {/* Delete Button */}
         {onDelete && (
           <Pressable
@@ -219,43 +249,33 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   } catch (error) {
     console.error('[GameCard] Error rendering game card:', error);
     return (
-      <View style={styles.card}>
+      <View style={[dynamicStyles.card, styles.card]}>
         <Text style={styles.title}>Error loading game</Text>
       </View>
     );
   }
 };
 
-// Calculate card width for 3-column layout
-// Account for: container padding (12px each side = 24px), row padding (4px each side = 8px), gaps (8px between 2 gaps = 16px)
-const getCardWidth = () => {
-  const screenWidth = Dimensions.get('window').width;
-  const containerPadding = 24; // 12px each side
-  const rowPadding = 8; // 4px each side
-  const gaps = 16; // 8px between each of 3 cards = 2 gaps
-  const availableWidth = screenWidth - containerPadding - rowPadding - gaps;
-  return availableWidth / 3;
+// Calculate responsive card width based on screen size
+// Returns a function that calculates width based on current dimensions
+const getCardWidth = (screenWidth, containerPadding = 0, gap = 8) => {
+  const columns = getColumnCount(screenWidth, {
+    mobile: 1,
+    tablet: 2,
+    desktop: 3,
+    largeDesktop: 4,
+  });
+  
+  // Account for container padding, row padding, and gaps between cards
+  const totalPadding = containerPadding * 2; // padding on both sides
+  const totalGaps = gap * (columns - 1); // gaps between columns
+  const availableWidth = screenWidth - totalPadding - totalGaps;
+  return availableWidth / columns;
 };
-
-const cardWidth = getCardWidth();
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    position: 'relative',
-    width: cardWidth,
-    marginBottom: 12,
-    alignSelf: 'flex-start',
-    flexShrink: 0,
+    // Base card styles - width will be overridden by dynamicStyles
   },
   cardPressable: {
     width: '100%',

@@ -46,15 +46,18 @@ const normalizeMember = (member, organizerId, fallbackDate) => {
       status: MEMBERSHIP_STATUS.MEMBER,
       role: member === organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
       joinedAt: fallbackDate || new Date().toISOString(),
+      canShareJoinCode: false, // Default to false
     };
   }
 
   const status = member.status || MEMBERSHIP_STATUS.MEMBER;
+  const isOrganizer = member.userId === organizerId || member.role === MEMBER_ROLES.ORGANIZER;
   return {
     userId: member.userId || member.id || null,
     status,
     role: member.role || (member.userId === organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER),
     joinedAt: member.joinedAt || fallbackDate || new Date().toISOString(),
+    canShareJoinCode: member.canShareJoinCode !== undefined ? member.canShareJoinCode : isOrganizer, // Organizers can always share
   };
 };
 
@@ -138,7 +141,7 @@ const normalizeEvent = (event) => {
   };
 };
 
-const addOrUpdateMember = (event, userId, role = MEMBER_ROLES.MEMBER) => {
+const addOrUpdateMember = (event, userId, role = MEMBER_ROLES.MEMBER, canShareJoinCode = false) => {
   if (!userId) {
     return event.members;
   }
@@ -150,7 +153,8 @@ const addOrUpdateMember = (event, userId, role = MEMBER_ROLES.MEMBER) => {
         ? {
             ...member,
             status: MEMBERSHIP_STATUS.MEMBER,
-            role: role || member.role,
+            role: role !== undefined ? role : member.role,
+            canShareJoinCode: canShareJoinCode !== undefined ? canShareJoinCode : (member.canShareJoinCode !== undefined ? member.canShareJoinCode : (role === MEMBER_ROLES.ORGANIZER)),
             joinedAt: member.joinedAt || new Date().toISOString(),
           }
         : member,
@@ -163,6 +167,7 @@ const addOrUpdateMember = (event, userId, role = MEMBER_ROLES.MEMBER) => {
       userId,
       status: MEMBERSHIP_STATUS.MEMBER,
       role: role || MEMBER_ROLES.MEMBER,
+      canShareJoinCode: canShareJoinCode || (role === MEMBER_ROLES.ORGANIZER),
       joinedAt: new Date().toISOString(),
     },
   ];
@@ -322,6 +327,7 @@ export const EventsProvider = ({ children }) => {
                   rsvpStatus: memberData.rsvpStatus || null, // Backward compatibility
                   rsvpStatuses: memberData.rsvpStatuses || {}, // Date-specific RSVPs
                   rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || null,
+                  canShareJoinCode: memberData.canShareJoinCode !== undefined ? memberData.canShareJoinCode : (memberData.role === MEMBER_ROLES.ORGANIZER), // Default: organizers can share
                 };
               });
             } catch (memberError) {
@@ -337,6 +343,7 @@ export const EventsProvider = ({ children }) => {
                 rsvpStatus: null,
                 rsvpStatuses: {},
                 rsvpUpdatedAt: null,
+                canShareJoinCode: memberId === firestoreData.organizerId, // Only organizer by default
               }));
             }
 
@@ -981,6 +988,159 @@ export const EventsProvider = ({ children }) => {
     [],
   );
 
+  const updateMemberRole = useCallback(
+    async (eventId, requestingUserId, targetUserId, newRole) => {
+      if (!eventId || !requestingUserId || !targetUserId) {
+        throw new Error('Event ID, requesting user ID, and target user ID are required.');
+      }
+
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('MeepleUp not found.');
+      }
+
+      // Verify requesting user is organizer (cannot be removed)
+      if (event.organizerId !== requestingUserId) {
+        throw new Error('Only the organizer can change member roles.');
+      }
+
+      // Cannot change the original organizer's role
+      if (targetUserId === event.organizerId) {
+        throw new Error('Cannot change the original organizer\'s role.');
+      }
+
+      // Update in Firestore if available
+      if (db && eventId) {
+        try {
+          const membersRef = db.collection('gamingGroups')
+            .doc(eventId)
+            .collection('members')
+            .doc(targetUserId);
+          
+          await membersRef.update({
+            role: newRole,
+            updatedAt: firebase.firestore.Timestamp.now(),
+          }).catch(async (error) => {
+            // If document doesn't exist, try to set it
+            const groupDoc = await db.collection('gamingGroups').doc(eventId).get();
+            if (groupDoc.exists) {
+              await membersRef.set({
+                userId: targetUserId,
+                role: newRole,
+                joinedAt: firebase.firestore.Timestamp.now(),
+                updatedAt: firebase.firestore.Timestamp.now(),
+              });
+            } else {
+              throw error;
+            }
+          });
+        } catch (error) {
+          console.error('Error updating member role in Firestore:', error);
+          // Continue with local update even if Firestore update fails
+        }
+      }
+
+      // Update local state
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === eventId
+            ? {
+                ...e,
+                members: e.members.map((member) =>
+                  member.userId === targetUserId
+                    ? {
+                        ...member,
+                        role: newRole,
+                        // If making co-organizer, ensure they can share join code
+                        canShareJoinCode: newRole === MEMBER_ROLES.ORGANIZER ? true : member.canShareJoinCode,
+                      }
+                    : member,
+                ),
+                lastUpdatedAt: new Date().toISOString(),
+              }
+            : e,
+        ),
+      );
+    },
+    [events],
+  );
+
+  const updateMemberJoinCodePermission = useCallback(
+    async (eventId, requestingUserId, targetUserId, canShare) => {
+      if (!eventId || !requestingUserId || !targetUserId) {
+        throw new Error('Event ID, requesting user ID, and target user ID are required.');
+      }
+
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('MeepleUp not found.');
+      }
+
+      // Verify requesting user is organizer
+      if (event.organizerId !== requestingUserId) {
+        throw new Error('Only the organizer can change join code sharing permissions.');
+      }
+
+      // Organizers can always share, no need to update
+      const targetMember = event.members.find((m) => m.userId === targetUserId);
+      if (targetMember?.role === MEMBER_ROLES.ORGANIZER) {
+        return; // Organizers can always share
+      }
+
+      // Update in Firestore if available
+      if (db && eventId) {
+        try {
+          const membersRef = db.collection('gamingGroups')
+            .doc(eventId)
+            .collection('members')
+            .doc(targetUserId);
+          
+          await membersRef.update({
+            canShareJoinCode: canShare,
+            updatedAt: firebase.firestore.Timestamp.now(),
+          }).catch(async (error) => {
+            // If document doesn't exist, try to set it
+            const groupDoc = await db.collection('gamingGroups').doc(eventId).get();
+            if (groupDoc.exists) {
+              await membersRef.set({
+                userId: targetUserId,
+                canShareJoinCode: canShare,
+                joinedAt: firebase.firestore.Timestamp.now(),
+                updatedAt: firebase.firestore.Timestamp.now(),
+              });
+            } else {
+              throw error;
+            }
+          });
+        } catch (error) {
+          console.error('Error updating member join code permission in Firestore:', error);
+          // Continue with local update even if Firestore update fails
+        }
+      }
+
+      // Update local state
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === eventId
+            ? {
+                ...e,
+                members: e.members.map((member) =>
+                  member.userId === targetUserId
+                    ? {
+                        ...member,
+                        canShareJoinCode: canShare,
+                      }
+                    : member,
+                ),
+                lastUpdatedAt: new Date().toISOString(),
+              }
+            : e,
+        ),
+      );
+    },
+    [events],
+  );
+
   const getEventById = useCallback(
     (eventId) => events.find((event) => event.id === eventId),
     [events],
@@ -1619,9 +1779,12 @@ export const EventsProvider = ({ children }) => {
       updateEventSchedule,
       updateRSVPSettings,
       overrideMemberRSVP,
+      updateMemberRole,
+      updateMemberJoinCodePermission,
       loading,
       membershipStatus: MEMBERSHIP_STATUS,
       contactStatus: CONTACT_STATUS,
+      memberRoles: MEMBER_ROLES,
     }),
     [
       events,
@@ -1646,6 +1809,8 @@ export const EventsProvider = ({ children }) => {
       updateEventSchedule,
       updateRSVPSettings,
       overrideMemberRSVP,
+      updateMemberRole,
+      updateMemberJoinCodePermission,
     ],
   );
 

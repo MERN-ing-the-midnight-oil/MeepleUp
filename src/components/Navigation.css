@@ -1,7 +1,8 @@
 .navigation {
-  background-color: #fff;
-  border-bottom: 1px solid #e0e0e0;
+  background: var(--wood-light);
+  border-bottom: 2px solid var(--wood-medium);
   padding-top: 40px;
+  box-shadow: var(--shadow-soft);
 }
 
 .nav-content {
@@ -25,23 +26,27 @@
   margin-right: 4px;
   background: none;
   border: none;
-  color: #666;
+  color: var(--ink-black);
   font-size: 14px;
   cursor: pointer;
   text-decoration: none;
-  transition: color 0.2s ease;
+  transition: background 0.15s ease;
   font-family: inherit;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
 }
 
 .nav-link:hover {
-  color: #4a90e2;
+  background: rgba(0,0,0,0.08);
+  color: var(--ink-black);
 }
 
 .nav-link-active {
-  color: #dc2626;
+  background: var(--meeple-yellow);
+  color: var(--ink-black);
   font-weight: bold;
   font-size: 18px;
-  border-bottom: 4px solid #dc2626;
+  border-bottom: 4px solid var(--meeple-red);
 }
 
 .nav-link-content {
@@ -56,18 +61,88 @@
   vertical-align: middle;
 }
 
-@media (max-width: 768px) {
+/* Extra Small Devices (phones, < 576px) */
+@media (max-width: 575.98px) {
+  .navigation {
+    padding-top: 20px;
+  }
+  
   .nav-content {
-    flex-direction: column;
-    gap: var(--spacing-md);
+    padding: 0 12px 8px;
   }
   
   .nav-links {
     width: 100%;
     justify-content: space-around;
+    gap: 4px;
   }
   
   .nav-link {
-    font-size: var(--font-size-sm);
+    font-size: 12px;
+    padding: 6px 8px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .nav-link-active {
+    font-size: 14px;
+  }
+}
+
+/* Small Devices (landscape phones, ≥ 576px) */
+@media (min-width: 576px) and (max-width: 767.98px) {
+  .nav-content {
+    padding: 0 16px 10px;
+  }
+  
+  .nav-links {
+    gap: 8px;
+  }
+  
+  .nav-link {
+    font-size: 13px;
+    padding: 8px 10px;
+  }
+  
+  .nav-link-active {
+    font-size: 16px;
+  }
+}
+
+/* Medium Devices (tablets, ≥ 768px) */
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .nav-content {
+    padding: 0 20px 12px;
+  }
+  
+  .nav-links {
+    gap: 16px;
+  }
+  
+  .nav-link {
+    font-size: 14px;
+    padding: 8px 12px;
+  }
+  
+  .nav-link-active {
+    font-size: 18px;
+  }
+}
+
+/* Large Devices and up (≥ 992px) */
+@media (min-width: 992px) {
+  .nav-links {
+    gap: 24px;
+  }
+  
+  .nav-link {
+    font-size: 14px;
+    padding: 8px 16px;
+  }
+  
+  .nav-link-active {
+    font-size: 18px;
   }
 }

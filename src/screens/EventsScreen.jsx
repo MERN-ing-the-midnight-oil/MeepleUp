@@ -6,7 +6,10 @@ import {
   ScrollView,
   Pressable,
   Alert,
+  useWindowDimensions,
+  Platform,
 } from 'react-native';
+import { useResponsive } from '../utils/responsive';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
 import { formatDate } from '../utils/helpers';
@@ -24,6 +27,8 @@ import UserProfileModal from '../components/UserProfileModal';
 const EventsScreen = () => {
   const navigate = useUnifiedNavigation();
   const { user } = useAuth();
+  const { width } = useWindowDimensions();
+  const { isMobile, isTablet } = useResponsive();
   const {
     events,
     getUserEvents,
@@ -619,10 +624,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 12,
     marginBottom: 8,
+    // Responsive font size
+    ...(Platform.OS === 'web' ? {
+      fontSize: 'clamp(20px, 4vw, 28px)',
+    } : {}),
   },
   subtitle: {
     fontSize: 16,
     color: '#666',
+    // Responsive font size
+    ...(Platform.OS === 'web' ? {
+      fontSize: 'clamp(14px, 2vw, 16px)',
+    } : {}),
   },
   actions: {
     flexDirection: 'row',

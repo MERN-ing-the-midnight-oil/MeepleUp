@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, TouchableOpacity } from 'react-native';
 import RSVPButtons from './RSVPButtons';
 
@@ -42,6 +42,29 @@ const EventCard = memo(({
   const isMember = currentUserId && (event.members || []).some(m => m.userId === currentUserId);
   const showRSVPButtons = isMember && rsvpSettings.enabled && onRSVP;
 
+  // Automatically minimize cards with one or fewer confirmed attendees
+  const shouldBeMinimized = rsvpCounts.going <= 1;
+  const [isExpanded, setIsExpanded] = useState(!shouldBeMinimized);
+  const prevGoingCountRef = useRef(rsvpCounts.going);
+
+  // Auto-collapse when RSVP count drops from > 1 to <= 1
+  useEffect(() => {
+    const prevGoing = prevGoingCountRef.current;
+    const currentGoing = rsvpCounts.going;
+    
+    // If count dropped from > 1 to <= 1, auto-collapse
+    if (prevGoing > 1 && currentGoing <= 1 && isExpanded) {
+      setIsExpanded(false);
+    }
+    
+    prevGoingCountRef.current = currentGoing;
+  }, [rsvpCounts.going, isExpanded]);
+
+  const toggleExpanded = (e) => {
+    e.stopPropagation();
+    setIsExpanded(!isExpanded);
+  };
+
   const getRSVPStatusLabel = (status) => {
     if (!status) return 'Not RSVP\'d';
     switch (status) {
@@ -63,119 +86,144 @@ const EventCard = memo(({
       >
         <View style={styles.header}>
           <View style={styles.info}>
-            <Text style={styles.title}>
-              {event.name || 'Untitled MeepleUp'}
-            </Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>
+                {event.name || 'Untitled MeepleUp'}
+              </Text>
+              {shouldBeMinimized && (
+                <TouchableOpacity
+                  onPress={toggleExpanded}
+                  style={styles.expandButton}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.expandIcon}>
+                    {isExpanded ? '▼' : '▶'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {/* Show RSVP count in collapsed view */}
+            {!isExpanded && rsvpSettings.enabled && (
+              <Text style={styles.collapsedRsvpCount}>
+                {rsvpCounts.going > 0 ? `✓ ${rsvpCounts.going} Going` : 'No confirmations yet'}
+              </Text>
+            )}
           </View>
         </View>
 
-        {/* Organizer/Host Info */}
-        {(organizerName || organizerAvatarUrl) && (
+        {/* Expanded content */}
+        {isExpanded && (
+          <>
+            {/* Organizer/Host Info */}
+            {(organizerName || organizerAvatarUrl) && (
           <View style={styles.organizerContainer}>
             <Text style={styles.organizerLabel}>Organizer:</Text>
-            {onOrganizerPress ? (
-              <TouchableOpacity
-                style={styles.organizerInfo}
-                onPress={() => onOrganizerPress(event.organizerId, organizerName, organizerAvatarUrl)}
-              >
-                {organizerAvatarUrl ? (
-                  <Image
-                    source={{ uri: organizerAvatarUrl }}
-                    style={styles.organizerAvatar}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.organizerAvatarPlaceholder}>
-                    <Text style={styles.organizerAvatarInitial}>
-                      {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.organizerName}>{organizerName || 'Unknown Organizer'}</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.organizerInfo}>
-                {organizerAvatarUrl ? (
-                  <Image
-                    source={{ uri: organizerAvatarUrl }}
-                    style={styles.organizerAvatar}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.organizerAvatarPlaceholder}>
-                    <Text style={styles.organizerAvatarInitial}>
-                      {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.organizerName}>{organizerName || 'Unknown Organizer'}</Text>
+            <View style={styles.organizerInfo}>
+              {onOrganizerPress ? (
+                <TouchableOpacity
+                  style={styles.organizerAvatarContainer}
+                  onPress={() => onOrganizerPress(event.organizerId, organizerName, organizerAvatarUrl)}
+                >
+                  {organizerAvatarUrl ? (
+                    <Image
+                      source={{ uri: organizerAvatarUrl }}
+                      style={styles.organizerAvatar}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.organizerAvatarPlaceholder}>
+                      <Text style={styles.organizerAvatarInitial}>
+                        {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.organizerAvatarContainer}>
+                  {organizerAvatarUrl ? (
+                    <Image
+                      source={{ uri: organizerAvatarUrl }}
+                      style={styles.organizerAvatar}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.organizerAvatarPlaceholder}>
+                      <Text style={styles.organizerAvatarInitial}>
+                        {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+              <Text style={styles.organizerName}>{organizerName || 'Unknown Organizer'}</Text>
+            </View>
+          </View>
+            )}
+        
+            {/* Member Avatars */}
+            {event.members && event.members.length > 0 && (
+              <View style={styles.membersContainer}>
+                <Text style={styles.membersLabel}>Members:</Text>
+                <View style={styles.memberAvatars}>
+                  {event.members
+                    .filter((member) => member.status === 'member')
+                    .map((member) => {
+                      const avatarUrl = memberAvatars[member.userId];
+                      const memberName = memberNames[member.userId] || member.userName || 'Unknown';
+                      const hasPressHandler = onMemberPress && member.userId;
+                      
+                      const AvatarComponent = hasPressHandler ? TouchableOpacity : View;
+                      
+                      return (
+                        <AvatarComponent
+                          key={member.userId}
+                          style={styles.memberAvatarContainer}
+                          onPress={hasPressHandler ? () => onMemberPress(member.userId, memberName, avatarUrl) : undefined}
+                        >
+                          {avatarUrl ? (
+                            <Image
+                              source={{ uri: avatarUrl }}
+                              style={styles.memberAvatar}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <View style={styles.memberAvatarPlaceholder}>
+                              <Text style={styles.memberAvatarInitial}>
+                                {memberName.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </AvatarComponent>
+                      );
+                    })}
+                </View>
               </View>
             )}
-          </View>
-        )}
-        
-        {/* Member Avatars */}
-        {event.members && event.members.length > 0 && (
-          <View style={styles.membersContainer}>
-            <Text style={styles.membersLabel}>Members:</Text>
-            <View style={styles.memberAvatars}>
-              {event.members
-                .filter((member) => member.status === 'member')
-                .map((member) => {
-                  const avatarUrl = memberAvatars[member.userId];
-                  const memberName = memberNames[member.userId] || member.userName || 'Unknown';
-                  const hasPressHandler = onMemberPress && member.userId;
-                  
-                  const AvatarComponent = hasPressHandler ? TouchableOpacity : View;
-                  
-                  return (
-                    <AvatarComponent
-                      key={member.userId}
-                      style={styles.memberAvatarContainer}
-                      onPress={hasPressHandler ? () => onMemberPress(member.userId, memberName, avatarUrl) : undefined}
-                    >
-                      {avatarUrl ? (
-                        <Image
-                          source={{ uri: avatarUrl }}
-                          style={styles.memberAvatar}
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <View style={styles.memberAvatarPlaceholder}>
-                          <Text style={styles.memberAvatarInitial}>
-                            {memberName.charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
-                    </AvatarComponent>
-                  );
-                })}
-            </View>
-          </View>
-        )}
 
-        {/* RSVP Status and Counts */}
-        {rsvpSettings.enabled && (
-          <View style={styles.rsvpInfo}>
-            {currentUserRSVP && (
-              <Text style={styles.rsvpStatus}>
-                Your RSVP: {getRSVPStatusLabel(currentUserRSVP)}
-              </Text>
+            {/* RSVP Status and Counts */}
+            {rsvpSettings.enabled && (
+              <View style={styles.rsvpInfo}>
+                {currentUserRSVP && (
+                  <Text style={styles.rsvpStatus}>
+                    Your RSVP: {getRSVPStatusLabel(currentUserRSVP)}
+                  </Text>
+                )}
+                <View style={styles.rsvpCounts}>
+                  {rsvpCounts.going > 0 && (
+                    <Text style={styles.rsvpCount}>✓ {rsvpCounts.going} Going</Text>
+                  )}
+                  {rsvpSettings.allowMaybe && rsvpCounts.maybe > 0 && (
+                    <Text style={styles.rsvpCount}>? {rsvpCounts.maybe} Maybe</Text>
+                  )}
+                  {rsvpSettings.attendanceLimit && (
+                    <Text style={styles.rsvpLimit}>
+                      Limit: {rsvpCounts.going}/{rsvpSettings.attendanceLimit}
+                    </Text>
+                  )}
+                </View>
+              </View>
             )}
-            <View style={styles.rsvpCounts}>
-              {rsvpCounts.going > 0 && (
-                <Text style={styles.rsvpCount}>✓ {rsvpCounts.going} Going</Text>
-              )}
-              {rsvpSettings.allowMaybe && rsvpCounts.maybe > 0 && (
-                <Text style={styles.rsvpCount}>? {rsvpCounts.maybe} Maybe</Text>
-              )}
-              {rsvpSettings.attendanceLimit && (
-                <Text style={styles.rsvpLimit}>
-                  Limit: {rsvpCounts.going}/{rsvpSettings.attendanceLimit}
-                </Text>
-              )}
-            </View>
-          </View>
+          </>
         )}
       </Pressable>
 
@@ -241,11 +289,31 @@ const styles = StyleSheet.create({
   info: {
     flex: 1,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
     fontSize: 20,
     fontWeight: '600',
     color: '#333',
     marginBottom: 4,
+    flex: 1,
+  },
+  expandButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  expandIcon: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '600',
+  },
+  collapsedRsvpCount: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   meta: {
     fontSize: 14,
@@ -369,11 +437,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
+  organizerAvatarContainer: {
+    marginRight: 8,
+  },
   organizerAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    marginRight: 8,
   },
   organizerAvatarPlaceholder: {
     width: 32,
@@ -382,7 +452,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#d45d5d',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
   },
   organizerAvatarInitial: {
     fontSize: 14,

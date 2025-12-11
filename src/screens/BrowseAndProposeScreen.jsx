@@ -1,0 +1,1349 @@
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { Platform, View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Image, Pressable } from 'react-native';
+import { useAuth } from '../context/AuthContext';
+import { useEvents } from '../context/EventsContext';
+import { useCollections } from '../context/CollectionsContext';
+import { db } from '../config/firebase';
+import firebase from '../config/firebase';
+import Button from '../components/common/Button';
+import GameCard from '../components/GameCard';
+import GameDetailsModal from '../components/GameDetailsModal';
+import UserProfileModal from '../components/UserProfileModal';
+import Modal from '../components/common/Modal';
+import { formatDate, formatTime } from '../utils/helpers';
+
+// Platform-specific navigation hooks
+let useNavigationHook;
+let useParamsHook;
+
+if (Platform.OS === 'web') {
+  try {
+    const { useNavigate, useParams } = require('react-router-dom');
+    useNavigationHook = () => ({ goBack: () => window.history.back() });
+    useParamsHook = useParams;
+  } catch (e) {
+    useNavigationHook = () => ({ goBack: () => {} });
+    useParamsHook = () => ({ eventId: null, dateIndex: null });
+  }
+} else {
+  const { useNavigation, useRoute } = require('@react-navigation/native');
+  useNavigationHook = useNavigation;
+  useParamsHook = () => {
+    const route = useRoute();
+    return route.params || {};
+  };
+}
+
+// Helper function to safely parse date values
+const safeParseDate = (dateValue) => {
+  if (!dateValue) return null;
+  if (dateValue instanceof Date) {
+    return isNaN(dateValue.getTime()) ? null : dateValue;
+  }
+  if (dateValue && typeof dateValue.toDate === 'function') {
+    try {
+      const date = dateValue.toDate();
+      return isNaN(date.getTime()) ? null : date;
+    } catch (e) {
+      return null;
+    }
+  }
+  try {
+    const date = new Date(dateValue);
+    return isNaN(date.getTime()) ? null : date;
+  } catch (e) {
+    return null;
+  }
+};
+
+// Helper to get date key from event date
+const getDateKey = (eventDate) => {
+  if (!eventDate) return 'default';
+  const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
+  return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+};
+
+const ITEMS_PER_PAGE = 20;
+
+const BrowseAndProposeScreen = () => {
+  const navigation = useNavigationHook();
+  const params = useParamsHook();
+  const { user } = useAuth();
+  const userId = user?.uid || user?.id;
+  const { getEventById } = useEvents();
+  const { collections } = useCollections();
+  
+  const eventId = params?.eventId;
+  const rawDateIndex = params?.dateIndex;
+  const parsedDateIndex = rawDateIndex === undefined || rawDateIndex === null
+    ? null
+    : Number(rawDateIndex);
+  const dateIndex = Number.isNaN(parsedDateIndex) ? null : parsedDateIndex;
+  
+  // Log when screen mounts or params change
+  useEffect(() => {
+    console.log('[BrowseAndProposeScreen] Screen mounted/updated:', {
+      eventId,
+      dateIndex,
+      params,
+      platform: Platform.OS,
+      hasUserId: !!userId
+    });
+  }, [eventId, dateIndex, params, userId]);
+  
+  const [event, setEvent] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [memberRSVPs, setMemberRSVPs] = useState({});
+  const [proposedGames, setProposedGames] = useState([]);
+  const [userProposals, setUserProposals] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [selectedGame, setSelectedGame] = useState(null);
+  const [showGameDetails, setShowGameDetails] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [memberNames, setMemberNames] = useState({});
+  const [memberAvatars, setMemberAvatars] = useState({});
+  const [ratingModalGame, setRatingModalGame] = useState(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
+  
+  // Get event dates
+  const eventDates = useMemo(() => {
+    if (!event) return [];
+    
+    if (event.eventDates && Array.isArray(event.eventDates)) {
+      return event.eventDates.map((ed, index) => {
+        const date = safeParseDate(ed.date);
+        return {
+          index,
+          date: date && !isNaN(date.getTime()) ? date : null,
+          dateString: ed.date,
+          startTime: safeParseDate(ed.startTime),
+          endTime: safeParseDate(ed.endTime),
+          location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
+        };
+      }).filter(ed => ed.date !== null);
+    } else if (event.scheduledFor) {
+      const date = safeParseDate(event.scheduledFor);
+      if (date && !isNaN(date.getTime())) {
+        return [{
+          index: 0,
+          date,
+          dateString: event.scheduledFor,
+          startTime: null,
+          endTime: null,
+          location: event.location || event.generalLocation || '',
+        }];
+      }
+    }
+    
+    return [];
+  }, [event]);
+  
+  const normalizedDateIndex =
+    dateIndex !== null &&
+    Number.isInteger(dateIndex) &&
+    dateIndex >= 0 &&
+    dateIndex < eventDates.length
+      ? dateIndex
+      : (eventDates.length > 0 ? 0 : null);
+  const selectedDate =
+    normalizedDateIndex !== null && eventDates[normalizedDateIndex]
+      ? eventDates[normalizedDateIndex]
+      : null;
+  
+  // Get confirmed attendees for selected date
+  const confirmedAttendees = useMemo(() => {
+    if (dateIndex === null || !selectedDate) return [];
+    
+    const dateKey = getDateKey(selectedDate.date);
+    
+    const confirmed = members.filter(member => {
+      const memberRsvps = memberRSVPs[member.userId] || {};
+      if (typeof memberRsvps === 'string') {
+        return !selectedDate.date ? memberRsvps === 'going' : false;
+      }
+      const status = memberRsvps[dateKey];
+      return status === 'going';
+    });
+    
+    // Always include the logged-in user if they're a member and have confirmed for this date
+    const isMember = members.some(m => m.userId === userId);
+    if (isMember && userId) {
+      const userIsInList = confirmed.some(m => m.userId === userId);
+      if (!userIsInList) {
+        const userRSVPs = memberRSVPs[userId] || {};
+        let userHasConfirmed = false;
+        if (typeof userRSVPs === 'string') {
+          userHasConfirmed = !selectedDate.date ? userRSVPs === 'going' : false;
+        } else {
+          userHasConfirmed = userRSVPs[dateKey] === 'going';
+        }
+        
+        if (userHasConfirmed) {
+          const userMember = members.find(m => m.userId === userId);
+          if (userMember) {
+            confirmed.push(userMember);
+          }
+        }
+      }
+    }
+    
+    return confirmed;
+  }, [members, memberRSVPs, dateIndex, selectedDate, userId]);
+  
+  // Aggregate games from confirmed attendees
+  const aggregatedGames = useMemo(() => {
+    if (!selectedDate) {
+      console.log('[BrowseAndProposeScreen] No selectedDate, returning empty games');
+      return [];
+    }
+    
+    if (confirmedAttendees.length === 0) {
+      console.log('[BrowseAndProposeScreen] No confirmed attendees, returning empty games');
+      return [];
+    }
+    
+    // Safety checks
+    const safeCollections = collections || {};
+    const safeMemberNames = memberNames || {};
+    
+    console.log('[BrowseAndProposeScreen] Aggregating games:', {
+      confirmedAttendeesCount: confirmedAttendees.length,
+      confirmedAttendeeIds: confirmedAttendees.map(a => a.userId),
+      collectionsKeys: Object.keys(safeCollections),
+      memberNamesKeys: Object.keys(safeMemberNames)
+    });
+    
+    const gamesMap = new Map(); // Key: gameId (bggId or id), Value: { game, owners: [names] }
+    
+    confirmedAttendees.forEach(attendee => {
+      const attendeeId = attendee.userId;
+      if (!attendeeId) return;
+      
+      const attendeeName = safeMemberNames[attendeeId] || attendeeId;
+      const attendeeGames = Array.isArray(safeCollections[attendeeId]) ? safeCollections[attendeeId] : [];
+      
+      console.log(`[BrowseAndProposeScreen] Processing attendee ${attendeeId}:`, {
+        name: attendeeName,
+        gamesCount: attendeeGames.length
+      });
+      
+      attendeeGames.forEach(game => {
+        const gameId = game.bggId || game.id;
+        if (!gameId) return;
+        
+        const gameKey = String(gameId);
+        
+        if (gamesMap.has(gameKey)) {
+          // Game already exists, add owner
+          const existing = gamesMap.get(gameKey);
+          if (!existing.owners.includes(attendeeName)) {
+            existing.owners.push(attendeeName);
+          }
+        } else {
+          // New game, add with owner
+          gamesMap.set(gameKey, {
+            game: { ...game },
+            owners: [attendeeName],
+          });
+        }
+      });
+    });
+    
+    // Convert map to array
+    const result = Array.from(gamesMap.values()).map(item => ({
+      ...item.game,
+      _owners: item.owners || [],
+    }));
+    
+    console.log('[BrowseAndProposeScreen] Aggregated games result:', {
+      totalGames: result.length,
+      gameIds: result.map(g => g.bggId || g.id).slice(0, 5)
+    });
+    
+    return result;
+  }, [confirmedAttendees, collections, memberNames, selectedDate]);
+
+  // Helper to get rating label
+  const getRatingLabel = (rating) => {
+    const ratingLabels = {
+      3: '⭐⭐⭐ I really want to play this game',
+      2: '⭐⭐ I want to play this game',
+      1: '⭐ I am fine with playing this game',
+      0: '⚪ I am not sure about this game',
+      '-1': '😞 I would rather not play this game',
+    };
+    return ratingLabels[rating] || '';
+  };
+  
+  // Paginated games
+  const paginatedGames = useMemo(() => {
+    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) return [];
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    return aggregatedGames.slice(startIndex, endIndex);
+  }, [aggregatedGames, currentPage]);
+  
+  const totalPages = Array.isArray(aggregatedGames) ? Math.ceil(aggregatedGames.length / ITEMS_PER_PAGE) : 0;
+  
+  // Load event data
+  useEffect(() => {
+    if (!eventId) return;
+    
+    const loadEvent = async () => {
+      try {
+        setLoading(true);
+        const eventData = await getEventById(eventId);
+        if (eventData) {
+          setEvent(eventData);
+        }
+      } catch (error) {
+        console.error('Error loading event:', error);
+        Alert.alert('Error', 'Failed to load event. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadEvent();
+  }, [eventId, getEventById]);
+  
+  // Load members and RSVPs
+  // Note: RSVPs are stored in the members document itself (rsvpStatus, rsvpStatuses fields)
+  useEffect(() => {
+    if (!event?.id || !db) return;
+    
+    const unsubscribeMembers = db.collection('gamingGroups').doc(event.id)
+      .collection('members')
+      .onSnapshot(async (snapshot) => {
+        const membersList = [];
+        const rsvps = {};
+        const names = {};
+        const avatars = {};
+        
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          const userId = doc.id;
+          membersList.push({ id: userId, userId, ...data });
+          
+          // Extract RSVP data from member document
+          if (data.rsvpStatuses && typeof data.rsvpStatuses === 'object') {
+            // New format: rsvpStatuses is an object with date keys
+            rsvps[userId] = { ...data.rsvpStatuses };
+          } else if (data.rsvpStatus) {
+            // Legacy format: single rsvpStatus field
+            rsvps[userId] = { default: data.rsvpStatus };
+          } else {
+            rsvps[userId] = {};
+          }
+          
+          // Extract name and avatar from member document
+          if (data.userName) {
+            names[userId] = data.userName;
+          }
+          if (data.userAvatarUrl) {
+            avatars[userId] = data.userAvatarUrl;
+          }
+        });
+        
+        setMembers(membersList);
+        setMemberRSVPs(rsvps);
+        
+        // Fetch missing names and avatars from users collection
+        const userIdsToFetch = membersList
+          .map(m => m.userId)
+          .filter(uid => !names[uid] || !avatars[uid]);
+        
+        if (userIdsToFetch.length > 0) {
+          try {
+            const userDocs = await Promise.all(
+              userIdsToFetch.map(uid => 
+                db.collection('users').doc(uid).get().catch(() => null)
+              )
+            );
+            
+            userDocs.forEach((userDoc, index) => {
+              if (userDoc && userDoc.exists) {
+                const userData = userDoc.data();
+                const uid = userIdsToFetch[index];
+                if (!names[uid] && userData.name) {
+                  names[uid] = userData.name;
+                }
+                if (!avatars[uid] && (userData.avatarUrl || userData.photoURL)) {
+                  avatars[uid] = userData.avatarUrl || userData.photoURL;
+                }
+              }
+            });
+          } catch (error) {
+            console.error('[BrowseAndProposeScreen] Error fetching user data:', error);
+          }
+        }
+        
+        setMemberNames(names);
+        setMemberAvatars(avatars);
+      }, (error) => {
+        console.error('[BrowseAndProposeScreen] Error loading members:', error);
+        // Set empty arrays on error to prevent crashes
+        setMembers([]);
+        setMemberRSVPs({});
+        setMemberNames({});
+        setMemberAvatars({});
+      });
+    
+    return () => {
+      unsubscribeMembers();
+    };
+  }, [event?.id, db]);
+  
+  // Load proposed games (nominations)
+  useEffect(() => {
+    if (!event?.id || !db) return;
+    
+    const unsubscribe = db.collection('gamingGroups').doc(event.id)
+      .collection('nominations')
+      .onSnapshot((snapshot) => {
+        const proposalsMap = new Map();
+        const userProposalsSet = new Set();
+        
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          const gameId = data.gameId;
+          
+          if (!gameId) return;
+          
+          // Check if this is a rating document (has userId field) or a proposal document
+          if (data.userId && data.userId !== data.nominatedBy) {
+            // This is a rating document
+            if (!proposalsMap.has(gameId)) {
+              proposalsMap.set(gameId, {
+                gameId,
+                gameName: data.gameName || 'Unknown Game',
+                gameImage: data.gameImage || null,
+                proposedBy: data.nominatedBy || data.userId,
+                ratings: {},
+              });
+            }
+            const proposal = proposalsMap.get(gameId);
+            proposal.ratings[data.userId] = data.rating;
+          } else {
+            // This is a proposal document
+            if (!proposalsMap.has(gameId)) {
+              proposalsMap.set(gameId, {
+                gameId,
+                gameName: data.gameName || 'Unknown Game',
+                gameImage: data.gameImage || null,
+                proposedBy: data.nominatedBy || data.userId || userId,
+                ratings: {},
+              });
+            }
+            
+            // Check if this proposal is by the current user
+            if (data.nominatedBy === userId || data.userId === userId) {
+              userProposalsSet.add(gameId);
+            }
+          }
+        });
+        
+        // Also load ratings separately
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.userId && data.userId !== data.nominatedBy && proposalsMap.has(data.gameId)) {
+            const proposal = proposalsMap.get(data.gameId);
+            proposal.ratings[data.userId] = data.rating;
+          }
+        });
+        
+        setProposedGames(Array.from(proposalsMap.values()));
+        setUserProposals(userProposalsSet);
+      });
+    
+    return unsubscribe;
+  }, [event?.id, userId]);
+  
+  const handleOpenGameDetails = useCallback((game) => {
+    setSelectedGame(game);
+    setShowGameDetails(true);
+  }, []);
+  
+  const handleProposeGame = async (game) => {
+    if (!event?.id || !db || !userId) return;
+    
+    const gameId = game.bggId || game.id;
+    
+    if (userProposals.size >= 5) {
+      Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
+      return;
+    }
+    
+    try {
+      const proposalDoc = {
+        gameId,
+        gameName: game.title || 'Unknown Game',
+        gameImage: game.image || game.thumbnail || null,
+        nominatedBy: userId,
+        createdAt: firebase.firestore.Timestamp.now(),
+      };
+      
+      await db.collection('gamingGroups').doc(event.id)
+        .collection('nominations')
+        .doc(gameId)
+        .set(proposalDoc, { merge: true });
+      
+      setUserProposals(prev => new Set([...prev, gameId]));
+      setProposedGames(prev => {
+        const exists = prev.some(n => n.gameId === gameId);
+        if (exists) return prev;
+        return [...prev, {
+          gameId,
+          gameName: proposalDoc.gameName,
+          gameImage: proposalDoc.gameImage,
+          proposedBy: userId,
+          ratings: {},
+        }];
+      });
+      
+      Alert.alert('Success', 'Game proposed successfully!');
+    } catch (error) {
+      console.error('Error proposing game:', error);
+      Alert.alert('Error', 'Failed to propose game. Please try again.');
+    }
+  };
+  
+  const handleOpenRatingModal = (proposal) => {
+    setRatingModalGame(proposal);
+    setShowRatingModal(true);
+  };
+
+  const handleCloseRatingModal = () => {
+    setShowRatingModal(false);
+    setRatingModalGame(null);
+  };
+
+  const handleRateGame = async (gameId, newRating) => {
+    if (!event?.id || !db || !userId) return;
+    
+    const proposal = proposedGames.find(p => p.gameId === gameId);
+    if (!proposal) return;
+    
+    const userRating = proposal.ratings?.[userId] ?? null;
+    
+    // If clicking the same rating, clear it
+    const ratingToSave = userRating === newRating ? null : newRating;
+    
+    try {
+      if (ratingToSave === null) {
+        // Clear the rating
+        await db.collection('gamingGroups').doc(event.id)
+          .collection('nominations')
+          .doc(`${gameId}_${userId}`)
+          .delete();
+        
+        setProposedGames(prev => prev.map(n => {
+          if (n.gameId === gameId) {
+            const newRatings = { ...n.ratings };
+            delete newRatings[userId];
+            return { ...n, ratings: newRatings };
+          }
+          return n;
+        }));
+      } else {
+        // Set new rating
+        const ratingDoc = {
+          gameId,
+          gameName: proposal.gameName,
+          gameImage: proposal.gameImage,
+          userId,
+          rating: ratingToSave,
+          nominatedBy: proposal.proposedBy,
+          updatedAt: firebase.firestore.Timestamp.now(),
+        };
+        
+        await db.collection('gamingGroups').doc(event.id)
+          .collection('nominations')
+          .doc(`${gameId}_${userId}`)
+          .set(ratingDoc, { merge: true });
+        
+        setProposedGames(prev => prev.map(n => {
+          if (n.gameId === gameId) {
+            return { ...n, ratings: { ...n.ratings, [userId]: ratingToSave } };
+          }
+          return n;
+        }));
+      }
+      
+      // Close modal after rating
+      handleCloseRatingModal();
+    } catch (error) {
+      console.error('Error saving rating:', error);
+      Alert.alert('Error', 'Failed to save rating. Please try again.');
+    }
+  };
+  
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>Loading...</Text>
+      </View>
+    );
+  }
+  
+  if (!event || !selectedDate) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Text style={styles.backButtonText}>← Back</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.errorText}>Event or date not found.</Text>
+      </View>
+    );
+  }
+  
+  return (
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Browse and Propose</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Event Details Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Game Night Details</Text>
+          <View style={styles.eventDetailsCard}>
+            <Text style={styles.eventName}>{event.name}</Text>
+            <View style={styles.eventDetailRow}>
+              <Text style={styles.eventDetailLabel}>Date:</Text>
+              <Text style={styles.eventDetailValue}>
+                {selectedDate.date ? formatDate(selectedDate.date.toISOString()) : 'TBD'}
+              </Text>
+            </View>
+            {selectedDate.startTime && (
+              <View style={styles.eventDetailRow}>
+                <Text style={styles.eventDetailLabel}>Time:</Text>
+                <Text style={styles.eventDetailValue}>
+                  {formatTime(selectedDate.startTime.toISOString())}
+                  {selectedDate.endTime && ` - ${formatTime(selectedDate.endTime.toISOString())}`}
+                </Text>
+              </View>
+            )}
+            {selectedDate.location && (
+              <View style={styles.eventDetailRow}>
+                <Text style={styles.eventDetailLabel}>Location:</Text>
+                <Text style={styles.eventDetailValue}>{selectedDate.location}</Text>
+              </View>
+            )}
+            <View style={styles.eventDetailRow}>
+              <Text style={styles.eventDetailLabel}>Confirmed Attendees:</Text>
+              <Text style={styles.eventDetailValue}>{confirmedAttendees.length}</Text>
+            </View>
+          </View>
+        </View>
+        
+        {/* Proposed Games Section */}
+        {proposedGames.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Proposed Games</Text>
+            <Text style={styles.sectionCopy}>
+              Rate each game to help decide what to play.
+            </Text>
+            {proposedGames.map((proposal) => {
+              const gameId = proposal.gameId;
+              const userRating = proposal.ratings?.[userId] ?? null;
+              const proposerId = proposal.proposedBy;
+              const proposerName = memberNames[proposerId] || proposerId;
+              const proposerAvatar = memberAvatars[proposerId] || null;
+              
+              return (
+                <View key={gameId} style={styles.proposedGameItem}>
+                  <View style={styles.proposedGameHeader}>
+                    {proposal.gameImage ? (
+                      <Image 
+                        source={{ uri: proposal.gameImage }} 
+                        style={styles.proposedGameThumbnail}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.proposedGameThumbnailPlaceholder}>
+                        <Text style={styles.proposedGameThumbnailText}>
+                          {(proposal.gameName || '?').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.proposedGameInfo}>
+                      <Text style={styles.proposedGameTitle}>{proposal.gameName}</Text>
+                      <View style={styles.proposedByContainer}>
+                        <Text style={styles.proposedByLabel}>Proposed by </Text>
+                        <TouchableOpacity
+                          style={styles.proposedByUser}
+                          onPress={() => {
+                            if (proposerId) {
+                              setSelectedUserForProfile({
+                                userId: proposerId,
+                                userName: proposerName,
+                                avatarUrl: proposerAvatar,
+                              });
+                            }
+                          }}
+                        >
+                          {proposerAvatar ? (
+                            <Image
+                              source={{ uri: proposerAvatar }}
+                              style={styles.proposerAvatar}
+                            />
+                          ) : (
+                            <View style={styles.proposerAvatarPlaceholder}>
+                              <Text style={styles.proposerAvatarInitial}>
+                                {proposerName.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                          <Text style={styles.proposedByUserName}>{proposerName}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                  
+                  {/* Collapsed Rating Display */}
+                  <View style={styles.ratingDisplayContainer}>
+                    {userRating !== null ? (
+                      <View style={styles.userRatingDisplay}>
+                        <Text style={styles.userRatingLabel}>Your rating:</Text>
+                        <Text style={styles.userRatingText}>{getRatingLabel(userRating)}</Text>
+                        <TouchableOpacity
+                          style={styles.changeRatingButton}
+                          onPress={() => handleOpenRatingModal(proposal)}
+                        >
+                          <Text style={styles.changeRatingButtonText}>Change rating</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.rateButton}
+                        onPress={() => handleOpenRatingModal(proposal)}
+                      >
+                        <Text style={styles.rateButtonText}>Rate this game</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+        
+        {/* Super Collection Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Browse Collections</Text>
+          <Text style={styles.sectionCopy}>
+            {Array.isArray(aggregatedGames) ? aggregatedGames.length : 0} {Array.isArray(aggregatedGames) && aggregatedGames.length === 1 ? 'game' : 'games'} from {Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0} {Array.isArray(confirmedAttendees) && confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
+          </Text>
+          
+          {!Array.isArray(aggregatedGames) || aggregatedGames.length === 0 ? (
+            <Text style={styles.emptyText}>No games found from confirmed attendees for this date.</Text>
+          ) : (
+            <>
+              <View style={styles.gamesGrid}>
+                {Array.isArray(paginatedGames) ? paginatedGames.map((game, idx) => {
+                  const gameId = game.bggId || game.id;
+                  const isProposedByUser = userProposals.has(gameId);
+                  const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
+                  const canPropose = userProposals.size < 5 || isProposedByUser;
+                  const owners = game._owners || [];
+                  
+                  return (
+                    <View key={gameId || `game-${idx}`} style={styles.gameCardWrapper}>
+                      <Pressable
+                        onPress={() => handleOpenGameDetails(game)}
+                        style={styles.selectableGameCardWrapper}
+                        activeOpacity={0.7}
+                      >
+                        <GameCard 
+                          game={game} 
+                          preloadedBggData={game._bggData}
+                          disableModal={true}
+                        />
+                        {/* Owner Names */}
+                        {owners.length > 0 && (
+                          <View style={styles.gameOwnerNames}>
+                            <Text style={styles.gameOwnerNamesText} numberOfLines={2}>
+                              {owners.join(', ')}
+                            </Text>
+                          </View>
+                        )}
+                      </Pressable>
+                      {!isProposedByUser && canPropose && (
+                        <TouchableOpacity
+                          style={styles.proposeGameButton}
+                          onPress={() => handleProposeGame(game)}
+                        >
+                          <Text style={styles.proposeGameButtonText}>Propose</Text>
+                        </TouchableOpacity>
+                      )}
+                      {isProposedByUser && (
+                        <View style={styles.proposedBadge}>
+                          <Text style={styles.proposedBadgeText}>Proposed</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                }) : null}
+              </View>
+              
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <View style={styles.paginationContainer}>
+                  <TouchableOpacity
+                    style={[styles.paginationButton, currentPage === 1 && styles.paginationButtonDisabled]}
+                    onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <Text style={[styles.paginationButtonText, currentPage === 1 && styles.paginationButtonTextDisabled]}>
+                      Previous
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <Text style={styles.paginationText}>
+                    Page {currentPage} of {totalPages}
+                  </Text>
+                  
+                  <TouchableOpacity
+                    style={[styles.paginationButton, currentPage === totalPages && styles.paginationButtonDisabled]}
+                    onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    <Text style={[styles.paginationButtonText, currentPage === totalPages && styles.paginationButtonTextDisabled]}>
+                      Next
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
+          )}
+        </View>
+      </ScrollView>
+      
+      {/* Game Details Modal */}
+      {showGameDetails && selectedGame && (
+        <GameDetailsModal
+          game={selectedGame}
+          isOpen={showGameDetails}
+          onClose={() => {
+            setShowGameDetails(false);
+            setSelectedGame(null);
+          }}
+        />
+      )}
+
+      {/* Rating Modal */}
+      {showRatingModal && ratingModalGame && (
+        <Modal
+          isOpen={showRatingModal}
+          onClose={handleCloseRatingModal}
+          title={`Rate: ${ratingModalGame.gameName}`}
+        >
+          <View style={styles.ratingModalContent}>
+            <Text style={styles.ratingModalInstructions}>
+              How do you feel about playing this game?
+            </Text>
+            <View style={styles.ratingModalButtonsContainer}>
+              {[
+                { value: 3, label: '⭐⭐⭐', text: 'I really want to play this game' },
+                { value: 2, label: '⭐⭐', text: 'I want to play this game' },
+                { value: 1, label: '⭐', text: 'I am fine with playing this game' },
+                { value: 0, label: '⚪', text: 'I am not sure about this game' },
+                { value: -1, label: '😞', text: 'I would rather not play this game' },
+              ].map(({ value, label, text }) => {
+                const currentRating = ratingModalGame.ratings?.[userId] ?? null;
+                const isActive = currentRating === value;
+                
+                return (
+                  <TouchableOpacity
+                    key={value}
+                    style={[
+                      styles.ratingModalButton,
+                      isActive && styles.ratingModalButtonActive
+                    ]}
+                    onPress={() => handleRateGame(ratingModalGame.gameId, value)}
+                  >
+                    <View style={styles.ratingModalButtonContent}>
+                      <Text style={[
+                        styles.ratingModalButtonLabel,
+                        isActive && styles.ratingModalButtonLabelActive
+                      ]}>
+                        {label}
+                      </Text>
+                      <Text style={[
+                        styles.ratingModalButtonText,
+                        isActive && styles.ratingModalButtonTextActive
+                      ]}>
+                        {text}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {ratingModalGame.ratings?.[userId] !== null && ratingModalGame.ratings?.[userId] !== undefined && (
+              <TouchableOpacity
+                style={styles.clearRatingButton}
+                onPress={() => handleRateGame(ratingModalGame.gameId, ratingModalGame.ratings[userId])}
+              >
+                <Text style={styles.clearRatingButtonText}>Clear rating</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </Modal>
+      )}
+
+      {/* User Profile Modal */}
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    ...(Platform.OS === 'web' ? { paddingTop: 20 } : {}),
+  },
+  backButton: {
+    padding: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#dc2626',
+    fontWeight: '600',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  headerSpacer: {
+    width: 60,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+  },
+  section: {
+    marginBottom: 32,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  sectionCopy: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#e74c3c',
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  eventDetailsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  eventName: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  eventDetailRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  eventDetailLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    width: 120,
+  },
+  eventDetailValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+  },
+  proposedGameItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  proposedGameHeader: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  proposedGameThumbnail: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  proposedGameThumbnailPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  proposedGameThumbnailText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#999',
+  },
+  proposedGameInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  proposedGameTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  proposedGameSubtext: {
+    fontSize: 12,
+    color: '#666',
+  },
+  proposedByContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  proposedByLabel: {
+    fontSize: 12,
+    color: '#666',
+  },
+  proposedByUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  proposerAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  proposerAvatarPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  proposerAvatarInitial: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  proposedByUserName: {
+    fontSize: 12,
+    color: '#4a90e2',
+    fontWeight: '500',
+  },
+  ratingDisplayContainer: {
+    marginTop: 12,
+  },
+  userRatingDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  userRatingLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  userRatingText: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+  },
+  changeRatingButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  changeRatingButtonText: {
+    fontSize: 12,
+    color: '#4a90e2',
+    fontWeight: '500',
+  },
+  rateButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#4a90e2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rateButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  ratingButtonsContainer: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  ratingButton: {
+    width: '100%',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  ratingButtonActive: {
+    borderColor: '#4a90e2',
+    backgroundColor: '#e8f4fd',
+  },
+  ratingButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  ratingButtonLabel: {
+    fontSize: 20,
+    minWidth: 50,
+  },
+  ratingButtonLabelActive: {
+    opacity: 1,
+  },
+  ratingButtonText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    textAlign: 'left',
+  },
+  ratingButtonTextActive: {
+    color: '#4a90e2',
+    fontWeight: '600',
+  },
+  ratingModalContent: {
+    paddingVertical: 8,
+  },
+  ratingModalInstructions: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  ratingModalButtonsContainer: {
+    flexDirection: 'column',
+    gap: 12,
+    marginBottom: 16,
+  },
+  ratingModalButton: {
+    width: '100%',
+    padding: 14,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  ratingModalButtonActive: {
+    borderColor: '#4a90e2',
+    backgroundColor: '#e8f4fd',
+  },
+  ratingModalButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  ratingModalButtonLabel: {
+    fontSize: 24,
+    minWidth: 60,
+  },
+  ratingModalButtonLabelActive: {
+    opacity: 1,
+  },
+  ratingModalButtonText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#666',
+    fontWeight: '500',
+    textAlign: 'left',
+  },
+  ratingModalButtonTextActive: {
+    color: '#4a90e2',
+    fontWeight: '600',
+  },
+  clearRatingButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  clearRatingButtonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  gamesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  gameCardWrapper: {
+    width: '31%',
+    position: 'relative',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  selectableGameCardWrapper: {
+    marginBottom: 8,
+  },
+  gameOwnerNames: {
+    backgroundColor: '#f0f0f0',
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  gameOwnerNamesText: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+  },
+  proposeGameButton: {
+    backgroundColor: '#4a90e2',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    width: '100%',
+  },
+  proposeGameButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  proposedBadge: {
+    backgroundColor: '#28a745',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    width: '100%',
+  },
+  proposedBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    padding: 20,
+  },
+  paginationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    gap: 16,
+  },
+  paginationButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#dc2626',
+    borderRadius: 6,
+  },
+  paginationButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  paginationButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  paginationButtonTextDisabled: {
+    color: '#999',
+  },
+  paginationText: {
+    fontSize: 14,
+    color: '#666',
+  },
+});
+
+export default BrowseAndProposeScreen;
+

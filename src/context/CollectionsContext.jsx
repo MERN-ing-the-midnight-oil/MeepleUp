@@ -168,14 +168,22 @@ export const CollectionsProvider = ({ children }) => {
         
         results.forEach(({ userId, games }) => {
           if (games.length > 0) {
-            // Check if games actually changed by comparing game IDs
+            // Check if games actually changed by comparing game IDs, BGG IDs, and titles
             const currentGames = prev[userId] || [];
-            const currentIds = currentGames.map(g => g.id).sort().join(',');
-            const newIds = games.map(g => g.id).sort().join(',');
+            // Create stable sorted keys for comparison
+            const currentKey = currentGames
+              .map(g => `${g.id}:${g.bggId || ''}:${g.title || ''}`)
+              .sort()
+              .join('|');
+            const newKey = games
+              .map(g => `${g.id}:${g.bggId || ''}:${g.title || ''}`)
+              .sort()
+              .join('|');
             
-            if (currentIds !== newIds) {
+            if (currentKey !== newKey) {
               updates[userId] = games;
               hasChanges = true;
+              console.log(`[Collections] Changes detected for user ${userId}`);
             }
           }
         });

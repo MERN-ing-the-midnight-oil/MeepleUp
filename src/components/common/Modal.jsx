@@ -10,14 +10,21 @@ import {
   Platform,
   ScrollView,
   Dimensions,
+  useWindowDimensions,
 } from 'react-native';
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+import { useResponsive } from '../../utils/responsive';
 
 const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
+  const { width, height } = useWindowDimensions();
+  const { isMobile, isTablet } = useResponsive();
+  
   // For fullScreen modals, use "none" animation to prevent flickering on re-renders
   // Regular modals still use "slide" for better UX
   const animationType = fullScreen ? 'none' : 'slide';
+  
+  // Responsive modal width
+  const modalWidth = isMobile ? '95%' : isTablet ? '85%' : '90%';
+  const maxModalWidth = isMobile ? width * 0.95 : isTablet ? 600 : 700;
   
     return (
     <RNModal
@@ -33,7 +40,11 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
       >
         <View style={styles.overlay}>
           <Pressable style={styles.overlayPressable} onPress={fullScreen ? undefined : onClose} />
-          <View style={[styles.content, fullScreen && styles.contentFullScreen]}>
+          <View style={[
+            styles.content, 
+            fullScreen && styles.contentFullScreen,
+            !fullScreen && { width: modalWidth, maxWidth: maxModalWidth }
+          ]}>
             {fullScreen ? (
               <>
                 <View style={styles.fullScreenHeader}>
@@ -91,7 +102,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   scrollView: {
-    maxHeight: SCREEN_HEIGHT * 0.6,
+    maxHeight: '60%',
   },
   scrollContent: {
     paddingBottom: 20,
@@ -100,10 +111,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 20,
-    width: '90%',
-    maxHeight: SCREEN_HEIGHT * 0.8,
+    maxHeight: '80%',
     zIndex: 1,
     position: 'relative',
+    // Responsive padding
+    ...(Platform.OS === 'web' ? {} : {
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+    }),
   },
   contentFullScreen: {
     width: '100%',
@@ -136,33 +151,49 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
     minWidth: 60,
+    minHeight: 44, // Better touch target
     alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   backButtonText: {
     fontSize: 16,
     color: '#4a90e2',
     fontWeight: '500',
+    // Responsive font size
+    ...(Platform.OS === 'web' ? {
+      fontSize: 'clamp(14px, 1.5vw, 16px)',
+    } : {}),
   },
   title: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600',
     color: '#d45d5d',
     backgroundColor: '#f3f3f3',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 10,
+    flex: 1,
+    // Responsive font size
+    ...(Platform.OS === 'web' ? {
+      fontSize: 'clamp(16px, 2vw, 20px)',
+    } : {}),
   },
   fullScreenTitle: {
     flex: 1,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#333',
     textAlign: 'center',
     marginHorizontal: 8,
+    // Responsive font size
+    ...(Platform.OS === 'web' ? {
+      fontSize: 'clamp(16px, 2vw, 18px)',
+    } : {}),
   },
   closeButton: {
     padding: 8,
-    minWidth: 40,
+    minWidth: 44, // Better touch target
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -171,6 +202,10 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 28,
     fontWeight: '300',
+    // Responsive font size
+    ...(Platform.OS === 'web' ? {
+      fontSize: 'clamp(24px, 3vw, 28px)',
+    } : {}),
   },
 });
 

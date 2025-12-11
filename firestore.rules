@@ -35,6 +35,15 @@ service cloud.firestore {
         request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId;
     }
     
+    // Check if user is organizer or co-organizer (has role='organizer' in members subcollection)
+    function isOrganizerOrCoOrganizer(groupId) {
+      return isAuthenticated() && (
+        request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId ||
+        exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)).data.role == 'organizer'
+      );
+    }
+    
     // Users can read/write their own profile
     // Allow any authenticated user to read any user profile (for displaying member info in groups)
     match /users/{userId} {
@@ -48,6 +57,13 @@ service cloud.firestore {
         allow create: if isAuthenticated(); // Anyone can create notifications for a user
         allow update, delete: if isOwner(userId);
       }
+      
+      // Photo upload tracking subcollection - tracks monthly photo uploads per user
+      match /photoUploads/{yearMonth} {
+        allow read: if isAuthenticated();
+        allow create, update: if isOwner(userId);
+        allow delete: if false; // Don't allow deletion of tracking data
+      }
     }
     
     // Gaming Groups
@@ -60,7 +76,8 @@ service cloud.firestore {
       );
       allow create: if isAuthenticated();
       allow update, delete: if isAuthenticated() && (
-        request.auth.uid == resource.data.organizerId
+        request.auth.uid == resource.data.organizerId ||
+        isOrganizerOrCoOrganizer(groupId)
       );
       
       // Group members - allow members to update their own member document (including RSVP fields)
@@ -68,51 +85,55 @@ service cloud.firestore {
         // Allow reading if user is authenticated and either:
         // - They are reading their own member document, OR
         // - They are a member of the group (in memberIds) OR the organizer
-        // Note: Using get() here reads the group document
-        function canReadGroup() {
+        // Check membership: if user has their own member document OR is in memberIds/organizer
+        function isGroupMemberOrOrganizer() {
+          // Option 1: Check if current user has a member document (they're definitely a member)
+          // Option 2: Check group document memberIds and organizerId
           let groupDoc = get(/databases/$(database)/documents/gamingGroups/$(groupId));
-          return request.auth.uid in (groupDoc.data.memberIds || []) ||
+          let memberIds = groupDoc.data.memberIds || [];
+          return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+                 request.auth.uid in memberIds ||
                  request.auth.uid == groupDoc.data.organizerId;
         }
         allow read: if isAuthenticated() && (
           isOwner(userId) ||
-          canReadGroup()
+          isGroupMemberOrOrganizer()
         );
         allow create: if isAuthenticated() && (
           isOwner(userId) ||
-          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          isOrganizerOrCoOrganizer(groupId)
         );
         // Allow members to update their own member document (including rsvpStatus, rsvpStatuses, rsvpUpdatedAt)
-        // Organizers can update any member's data
+        // Organizers and co-organizers can update any member's data
         allow update: if isAuthenticated() && (
           isOwner(userId) ||
-          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          isOrganizerOrCoOrganizer(groupId)
         );
         allow delete: if isAuthenticated() && (
           isOwner(userId) ||
-          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          isOrganizerOrCoOrganizer(groupId)
         );
       }
       
       // Discussion Forum Posts
       match /posts/{postId} {
-        allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
-        );
-        allow create: if isAuthenticated() && 
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
+        // Helper function to check if user can access posts
+        function canAccessPosts() {
+          let groupDoc = get(/databases/$(database)/documents/gamingGroups/$(groupId));
+          return request.auth.uid in (groupDoc.data.memberIds || []) ||
+                 request.auth.uid == groupDoc.data.organizerId;
+        }
+        allow read: if isAuthenticated() && canAccessPosts();
+        allow create: if isAuthenticated() && canAccessPosts();
         allow update, delete: if isAuthenticated() && (
           resource.data.userId == request.auth.uid ||
-          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          isOrganizerOrCoOrganizer(groupId)
         );
         
         // Post Comments
         match /comments/{commentId} {
-          allow read: if isAuthenticated() && (
-            request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
-          );
-          allow create: if isAuthenticated() && 
-            request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
+          allow read: if isAuthenticated() && canAccessPosts();
+          allow create: if isAuthenticated() && canAccessPosts();
           allow update, delete: if isAuthenticated() && (
             resource.data.userId == request.auth.uid ||
             request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
@@ -123,7 +144,8 @@ service cloud.firestore {
       // Game Interests
       match /gameInterests/{interestId} {
         allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
         );
         allow create: if isAuthenticated() && 
           request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
@@ -138,18 +160,87 @@ service cloud.firestore {
         );
       }
       
-      // Game Proposals/Nominations
-      match /nominations/{proposalId} {
+      // Game Status (which games users are bringing/want-to-play)
+      match /gameStatus/{statusId} {
         allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])
-        );
-        allow create: if isAuthenticated() && 
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []);
-        allow update, delete: if isAuthenticated() && (
-          resource.data.proposedBy == request.auth.uid ||
-          resource.data.nominatedBy == request.auth.uid ||
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
           request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
         );
+        allow create: if isAuthenticated() && 
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) &&
+          request.resource.data.userId == request.auth.uid;
+        allow update: if isAuthenticated() && (
+          resource.data.userId == request.auth.uid ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        ) && (
+          request.resource.data.userId == resource.data.userId
+        );
+        allow delete: if isAuthenticated() && (
+          resource.data.userId == request.auth.uid ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+      }
+      
+      // Game Proposals/Nominations
+      // Documents can be either:
+      // 1. Proposal documents: document ID = gameId, has nominatedBy field
+      // 2. Rating documents: document ID = gameId_userId, has userId and rating fields
+      match /nominations/{proposalId} {
+        allow read: if isAuthenticated() && (
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+        allow create: if isAuthenticated() && 
+          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) &&
+          // For rating documents (has userId field), ensure userId matches authenticated user
+          (!request.resource.data.userId || request.resource.data.userId == request.auth.uid);
+        allow update, delete: if isAuthenticated() && (
+          // Allow if user is the one who proposed (proposal documents)
+          resource.data.proposedBy == request.auth.uid ||
+          resource.data.nominatedBy == request.auth.uid ||
+          // Allow if user is the one who rated (rating documents)
+          resource.data.userId == request.auth.uid ||
+          // Allow organizer to update/delete any nomination
+          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+        );
+      }
+
+      // Private conversations between members
+      match /privateConversations/{conversationId} {
+        function conversationDoc() {
+          return get(/databases/$(database)/documents/gamingGroups/$(groupId)/privateConversations/$(conversationId));
+        }
+        function canAccessConversation() {
+          return isGroupMember(groupId) &&
+            request.auth.uid in (conversationDoc().data.participants || request.resource.data.participants || []);
+        }
+        allow read: if isAuthenticated() && canAccessConversation();
+        allow create: if isAuthenticated() && canAccessConversation();
+        allow update, delete: if isAuthenticated() && canAccessConversation();
+
+        // Messages inside a conversation
+        match /messages/{messageId} {
+          function canAccessMessages() {
+            return isGroupMember(groupId) &&
+              request.auth.uid in (conversationDoc().data.participants || []);
+          }
+          allow read: if isAuthenticated() && canAccessMessages();
+          allow create: if isAuthenticated() && canAccessMessages() &&
+            request.resource.data.senderId == request.auth.uid;
+          // Allow sender to edit their message, or participants to mark read only
+          allow update: if isAuthenticated() && canAccessMessages() &&
+            (
+              resource.data.senderId == request.auth.uid ||
+              (
+                request.resource.data.diff(resource.data).changedKeys().hasOnly(['read']) &&
+                request.resource.data.senderId == resource.data.senderId &&
+                request.resource.data.content == resource.data.content &&
+                request.resource.data.createdAt == resource.data.createdAt
+              )
+            );
+          allow delete: if isAuthenticated() && canAccessMessages() &&
+            resource.data.senderId == request.auth.uid;
+        }
       }
     }
     

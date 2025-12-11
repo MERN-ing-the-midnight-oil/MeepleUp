@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -21,8 +22,10 @@ import {
 } from '../services/messaging';
 import { formatDate } from '../utils/helpers';
 import { db } from '../config/firebase';
+import { blockUser, reportUser } from '../services/blocking';
+import UserProfileModal from './UserProfileModal';
 
-const PrivateMessaging = ({ eventId, members }) => {
+const PrivateMessaging = ({ eventId, members, onBackToTabletalk }) => {
   const { user } = useAuth();
   const userId = user?.uid || user?.id;
   
@@ -33,6 +36,10 @@ const PrivateMessaging = ({ eventId, members }) => {
   const [loading, setLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [memberData, setMemberData] = useState({});
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileUserId, setSelectedProfileUserId] = useState(null);
+  const [selectedProfileUserName, setSelectedProfileUserName] = useState(null);
+  const [selectedProfileAvatarUrl, setSelectedProfileAvatarUrl] = useState(null);
 
   // Load member data
   useEffect(() => {
@@ -116,7 +123,7 @@ const PrivateMessaging = ({ eventId, members }) => {
       return;
     }
 
-    const unsubscribe = subscribeToMessages(eventId, selectedConversation.id, (msgs) => {
+    const unsubscribe = subscribeToMessages(eventId, selectedConversation.id, userId, (msgs) => {
       setMessages(msgs);
       // Mark as read when viewing
       markMessagesAsRead(eventId, selectedConversation.id, userId);
@@ -193,11 +200,21 @@ const PrivateMessaging = ({ eventId, members }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Private Messages</Text>
-          {unreadCount > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
-            </View>
-          )}
+          <View style={styles.headerRight}>
+            {unreadCount > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
+              </View>
+            )}
+            {onBackToTabletalk && (
+              <TouchableOpacity
+                onPress={onBackToTabletalk}
+                style={styles.backToTabletalkButton}
+              >
+                <Text style={styles.backToTabletalkText}>← Tabletalk</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <FlatList
@@ -207,6 +224,12 @@ const PrivateMessaging = ({ eventId, members }) => {
             <TouchableOpacity
               style={styles.conversationItem}
               onPress={() => setSelectedConversation(item)}
+              onLongPress={() => {
+                setSelectedProfileUserId(item.otherUser?.id);
+                setSelectedProfileUserName(item.otherUser?.name);
+                setSelectedProfileAvatarUrl(item.otherUser?.avatarUrl);
+                setShowProfileModal(true);
+              }}
             >
               <View style={styles.conversationContent}>
                 <Text style={styles.conversationName}>
@@ -284,9 +307,21 @@ const PrivateMessaging = ({ eventId, members }) => {
         >
           <Text style={styles.backButtonText}>← Back</Text>
         </TouchableOpacity>
-        <Text style={styles.conversationHeaderTitle}>
-          {selectedConversation.otherUser?.name || 'Unknown User'}
-        </Text>
+        <TouchableOpacity
+          style={styles.conversationHeaderTitleContainer}
+          onPress={() => {
+            if (selectedConversation.otherUser?.id) {
+              setSelectedProfileUserId(selectedConversation.otherUser.id);
+              setSelectedProfileUserName(selectedConversation.otherUser.name);
+              setSelectedProfileAvatarUrl(selectedConversation.otherUser.avatarUrl);
+              setShowProfileModal(true);
+            }
+          }}
+        >
+          <Text style={styles.conversationHeaderTitle}>
+            {selectedConversation.otherUser?.name || 'Unknown User'}
+          </Text>
+        </TouchableOpacity>
         <View style={styles.backButton} />
       </View>
 
@@ -350,6 +385,20 @@ const PrivateMessaging = ({ eventId, members }) => {
           <Text style={styles.sendButtonText}>Send</Text>
         </TouchableOpacity>
       </View>
+
+      {/* User Profile Modal for blocking/reporting */}
+      <UserProfileModal
+        isOpen={showProfileModal}
+        onClose={() => {
+          setShowProfileModal(false);
+          setSelectedProfileUserId(null);
+          setSelectedProfileUserName(null);
+          setSelectedProfileAvatarUrl(null);
+        }}
+        userId={selectedProfileUserId}
+        userName={selectedProfileUserName}
+        avatarUrl={selectedProfileAvatarUrl}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -371,6 +420,20 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  backToTabletalkButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  backToTabletalkText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
   },
   unreadBadge: {
     backgroundColor: '#ff4444',
@@ -480,11 +543,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#007AFF',
   },
+  conversationHeaderTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   conversationHeaderTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333',
-    flex: 1,
     textAlign: 'center',
   },
   messagesContainer: {

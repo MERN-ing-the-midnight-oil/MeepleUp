@@ -45,7 +45,7 @@ const WebNavigation = () => {
                     <span className="gear-icon-wrapper">
                       <GearIcon
                         size={isActive(item.path) ? 18 : 14}
-                        color={isActive(item.path) ? '#dc2626' : '#666'}
+                        color={isActive(item.path) ? 'var(--meeple-red)' : 'var(--text-secondary)'}
                       />
                     </span>
                   </>

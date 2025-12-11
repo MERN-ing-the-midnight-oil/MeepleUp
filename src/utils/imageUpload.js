@@ -22,20 +22,28 @@ export const requestImagePickerPermissions = async () => {
 
 /**
  * Pick an image from the device
+ * @param {Object} options - Image picker options
+ * @param {boolean} options.allowsEditing - Allow editing (default: true)
+ * @param {Array<number>} options.aspect - Aspect ratio [width, height] (default: [1, 1] for square)
+ * @param {number} options.quality - Initial quality 0-1 (default: 1.0)
  * @returns {Promise<Object|null>} Image picker result or null if cancelled
  */
-export const pickImage = async () => {
+export const pickImage = async (options = {}) => {
   try {
     // Request permissions
     await requestImagePickerPermissions();
 
+    const {
+      allowsEditing = true,
+      aspect = [1, 1],
+      quality = 1.0,
+    } = options;
+
     // Launch image picker
-    // Note: mediaTypes defaults to images, so we can omit it
-    // If you need to specify, use: mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'images'
     const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      aspect: [1, 1], // Square aspect ratio for profile pictures
-      quality: 1.0, // Get full quality first, we'll compress after resizing
+      allowsEditing,
+      aspect,
+      quality,
     });
 
     if (result.canceled) {
@@ -213,13 +221,25 @@ export const deleteImageFromFirebase = async (url) => {
 /**
  * Complete flow: Pick image and upload to Firebase
  * @param {string} userId - User ID
- * @param {number} maxSize - Maximum dimension for resizing (default: 512 for profile pics)
- * @param {number} quality - Compression quality 0-1 (default: 0.4 for aggressive compression)
+ * @param {Object} options - Upload options
+ * @param {number} options.maxSize - Maximum dimension for resizing (default: 512 for profile pics, 1200 for posts)
+ * @param {number} options.quality - Compression quality 0-1 (default: 0.4 for aggressive compression, 0.7 for posts)
+ * @param {string} options.path - Storage path (default: 'profile-pictures', use 'post-photos' for posts)
+ * @param {boolean} options.allowsEditing - Allow editing (default: true for profile, false for posts)
+ * @param {Array<number>} options.aspect - Aspect ratio [width, height] (default: [1, 1] for square, null for posts)
  * @returns {Promise<string|null>} Download URL or null if cancelled
  */
-export const pickAndUploadImage = async (userId, maxSize = 512, quality = 0.4) => {
+export const pickAndUploadImage = async (userId, options = {}) => {
   try {
-    const image = await pickImage();
+    const {
+      maxSize = 512,
+      quality = 0.4,
+      path = 'profile-pictures',
+      allowsEditing = true,
+      aspect = [1, 1],
+    } = options;
+
+    const image = await pickImage({ allowsEditing, aspect, quality: 1.0 });
     if (!image) {
       return null; // User cancelled
     }
@@ -227,7 +247,7 @@ export const pickAndUploadImage = async (userId, maxSize = 512, quality = 0.4) =
     // Resize and compress the image before upload
     const processedUri = await resizeAndCompressImage(image.uri, maxSize, quality);
     
-    const downloadURL = await uploadImageToFirebase(processedUri, userId);
+    const downloadURL = await uploadImageToFirebase(processedUri, userId, path);
     return downloadURL;
   } catch (error) {
     console.error('Error in pickAndUploadImage:', error);

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, Text, StyleSheet } from 'react-native';
+import { theme, commonStyles } from '../../utils/theme';
 
 const Button = ({ label, onPress, style, disabled, title, variant = 'primary', textStyle }) => {
     return (
@@ -30,30 +31,22 @@ const Button = ({ label, onPress, style, disabled, title, variant = 'primary', t
 
 const styles = StyleSheet.create({
   button: {
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
+    ...commonStyles.button,
   },
   primary: {
-    backgroundColor: '#4a90e2',
+    ...commonStyles.buttonPrimary,
   },
   outline: {
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: '#4a90e2',
+    ...commonStyles.buttonOutline,
   },
   danger: {
-    backgroundColor: '#d32f2f',
+    backgroundColor: theme.colors.error,
   },
   label: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
+    ...commonStyles.buttonText,
   },
   outlineLabel: {
-    color: '#4a90e2',
+    ...commonStyles.buttonTextOutline,
   },
   dangerLabel: {
     color: '#fff',

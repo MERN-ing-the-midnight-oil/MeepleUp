@@ -7,12 +7,15 @@ import {
   Image,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { db } from '../config/firebase';
 import Modal from './common/Modal';
 import GameCard from './GameCard';
+import { blockUser, unblockUser, isUserBlocked, reportUser } from '../services/blocking';
+import Input from './common/Input';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -31,15 +34,36 @@ const UserProfileModal = ({
   const [view, setView] = useState('profile'); // 'profile', 'library', 'message'
   const [userGames, setUserGames] = useState([]);
   const [messageText, setMessageText] = useState('');
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportDescription, setReportDescription] = useState('');
+  const [reporting, setReporting] = useState(false);
+  const [blocking, setBlocking] = useState(false);
 
   useEffect(() => {
     if (isOpen && userId) {
       fetchUserProfile();
       fetchUserGames();
+      checkIfBlocked();
       setView('profile');
       setMessageText('');
+      setShowReportModal(false);
+      setReportReason('');
+      setReportDescription('');
     }
   }, [isOpen, userId]);
+
+  const checkIfBlocked = async () => {
+    if (!userId || !currentUser) return;
+    const currentUserId = currentUser?.uid || currentUser?.id;
+    try {
+      const blocked = await isUserBlocked(currentUserId, userId);
+      setIsBlocked(blocked);
+    } catch (error) {
+      console.error('Error checking if user is blocked:', error);
+    }
+  };
 
   const fetchUserProfile = async () => {
     if (!userId) return;
@@ -97,6 +121,83 @@ const UserProfileModal = ({
     // TODO: Implement messaging functionality
     // For now, show an alert
     alert('Messaging feature coming soon!');
+  };
+
+  const handleBlockUser = async () => {
+    if (!userId || !currentUser) return;
+    const currentUserId = currentUser?.uid || currentUser?.id;
+
+    Alert.alert(
+      isBlocked ? 'Unblock User' : 'Block User',
+      isBlocked
+        ? `Are you sure you want to unblock ${userProfile?.name || 'this user'}?`
+        : `Are you sure you want to block ${userProfile?.name || 'this user'}? You won't see their messages or posts.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: isBlocked ? 'Unblock' : 'Block',
+          style: isBlocked ? 'default' : 'destructive',
+          onPress: async () => {
+            setBlocking(true);
+            try {
+              if (isBlocked) {
+                await unblockUser(currentUserId, userId);
+                setIsBlocked(false);
+                Alert.alert('Success', 'User has been unblocked.');
+              } else {
+                await blockUser(currentUserId, userId);
+                setIsBlocked(true);
+                Alert.alert('User Blocked', 'This user has been blocked. You won\'t see their messages or posts.');
+              }
+            } catch (error) {
+              console.error('Error blocking/unblocking user:', error);
+              Alert.alert('Error', 'Failed to block/unblock user. Please try again.');
+            } finally {
+              setBlocking(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReportUser = () => {
+    setShowReportModal(true);
+  };
+
+  const handleSubmitReport = async () => {
+    if (!reportReason.trim()) {
+      Alert.alert('Required Field', 'Please select a reason for reporting.');
+      return;
+    }
+
+    if (!userId || !currentUser) return;
+    const currentUserId = currentUser?.uid || currentUser?.id;
+
+    setReporting(true);
+    try {
+      await reportUser(
+        currentUserId,
+        userId,
+        reportReason,
+        reportDescription,
+        { type: 'profile' }
+      );
+      Alert.alert(
+        'Report Submitted',
+        'Thank you for your report. We will review it and take appropriate action.',
+        [{ text: 'OK', onPress: () => {
+          setShowReportModal(false);
+          setReportReason('');
+          setReportDescription('');
+        }}]
+      );
+    } catch (error) {
+      console.error('Error reporting user:', error);
+      Alert.alert('Error', 'Failed to submit report. Please try again.');
+    } finally {
+      setReporting(false);
+    }
   };
 
   const isCurrentUser = currentUser?.uid === userId || currentUser?.id === userId;
@@ -295,6 +396,72 @@ const UserProfileModal = ({
           <Text style={styles.backButtonText}>← Back to Profile</Text>
         </TouchableOpacity>
       )}
+
+      {/* Report Modal */}
+      <Modal
+        isOpen={showReportModal}
+        onClose={() => {
+          setShowReportModal(false);
+          setReportReason('');
+          setReportDescription('');
+        }}
+        title="Report User"
+      >
+        <ScrollView style={styles.reportModalContent}>
+          <Text style={styles.reportModalText}>
+            Help us keep the community safe. Please select a reason for reporting {userProfile?.name || 'this user'}.
+          </Text>
+
+          <Text style={styles.reportLabel}>Reason *</Text>
+          <View style={styles.reportReasonsContainer}>
+            {[
+              'Harassment or bullying',
+              'Spam or scams',
+              'Inappropriate content',
+              'Hate speech',
+              'Impersonation',
+              'Other'
+            ].map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                style={[
+                  styles.reportReasonOption,
+                  reportReason === reason && styles.reportReasonOptionSelected,
+                ]}
+                onPress={() => setReportReason(reason)}
+              >
+                <Text
+                  style={[
+                    styles.reportReasonText,
+                    reportReason === reason && styles.reportReasonTextSelected,
+                  ]}
+                >
+                  {reason}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.reportLabel}>Additional Details (Optional)</Text>
+          <Input
+            value={reportDescription}
+            onChangeText={setReportDescription}
+            placeholder="Please provide any additional information that may help us review this report..."
+            multiline
+            style={styles.reportDescriptionInput}
+          />
+
+          <TouchableOpacity
+            style={[styles.submitReportButton, !reportReason.trim() && styles.submitReportButtonDisabled]}
+            onPress={handleSubmitReport}
+            disabled={!reportReason.trim() || reporting}
+          >
+            <Text style={styles.submitReportButtonText}>
+              {reporting ? 'Submitting...' : 'Submit Report'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </Modal>
     </Modal>
   );
 };
@@ -474,6 +641,102 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#4a90e2',
     fontWeight: '500',
+  },
+  blockedBanner: {
+    backgroundColor: '#fff3cd',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#ffc107',
+  },
+  blockedBannerText: {
+    fontSize: 14,
+    color: '#856404',
+    textAlign: 'center',
+  },
+  safetyActionsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  safetyButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  safetyButtonBlocked: {
+    backgroundColor: '#e8f5e9',
+    borderColor: '#4caf50',
+  },
+  reportButton: {
+    backgroundColor: '#fff3e0',
+    borderColor: '#ff9800',
+  },
+  safetyButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+  },
+  reportModalContent: {
+    padding: 16,
+  },
+  reportModalText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  reportLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  reportReasonsContainer: {
+    marginBottom: 20,
+  },
+  reportReasonOption: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginBottom: 8,
+    backgroundColor: '#fff',
+  },
+  reportReasonOptionSelected: {
+    borderColor: '#d45d5d',
+    backgroundColor: '#fff5f5',
+  },
+  reportReasonText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  reportReasonTextSelected: {
+    color: '#d45d5d',
+    fontWeight: '600',
+  },
+  reportDescriptionInput: {
+    marginBottom: 20,
+    minHeight: 100,
+  },
+  submitReportButton: {
+    backgroundColor: '#d45d5d',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  submitReportButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  submitReportButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
