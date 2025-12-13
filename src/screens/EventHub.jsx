@@ -31,7 +31,7 @@ import { formatDate, formatTime } from '../utils/helpers';
 import { getStarRating } from '../utils/gameBadges';
 import { Linking } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { notifyDiscussionActivity } from '../utils/notifications';
+import { notifyDiscussionActivity, notifyGameOwner } from '../utils/notifications';
 import RSVPManagementScreen from '../components/RSVPManagementScreen';
 import UserProfileModal from '../components/UserProfileModal';
 import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
@@ -39,6 +39,7 @@ import PrivateMessaging from '../components/PrivateMessaging';
 import { getBlockedUsers } from '../services/blocking';
 import { pickAndUploadImage } from '../utils/imageUpload';
 import { checkPhotoUploadLimit, incrementPhotoUploadCount } from '../utils/photoUploadTracking';
+import { theme, commonStyles } from '../utils/theme';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -111,11 +112,33 @@ const EventHub = () => {
   const params = useParamsHook();
   const { eventId } = params?.eventId ? params : (route?.params || {});
 
+  // Determine initial tab from URL
+  const getInitialTab = () => {
+    if (Platform.OS === 'web') {
+      // Check for hash (#gameplan) or query param (?tab=gameplan)
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash;
+        const searchParams = new URLSearchParams(window.location.search);
+        if (hash === '#gameplan' || searchParams.get('tab') === 'gameplan') {
+          return TABS.GAMES;
+        }
+      }
+    } else {
+      // On mobile, check route params
+      const routeParams = route?.params || {};
+      if (routeParams.tab === 'gameplan') {
+        return TABS.GAMES;
+      }
+    }
+    return TABS.EVENT;
+  };
+
   const {
     getEventById,
     getMembershipStatus,
     membershipStatus,
-    regenerateJoinCode,
+    addJoinCode,
+    deleteJoinCode,
     updateContactRequest,
     contactStatus,
     leaveEvent,
@@ -130,8 +153,9 @@ const EventHub = () => {
   const { user } = useAuth();
   const { getUserCollection, getEventCollection, syncGamesForUsers, collections } = useCollections();
 
-  const [activeTab, setActiveTab] = useState(TABS.EVENT);
-  const [regenerateBusy, setRegenerateBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState(getInitialTab);
+  const [addCodeBusy, setAddCodeBusy] = useState(false);
+  const [deletingCodes, setDeletingCodes] = useState(new Set()); // Track which codes are being deleted
   const [showEditSchedule, setShowEditSchedule] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
     selectedDates: [], // Array of { date: Date, startTime: Date, endTime: Date, location: string, address: string, note: string }
@@ -143,6 +167,16 @@ const EventHub = () => {
   const [editingDateIndex, setEditingDateIndex] = useState(null);
   const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'start' | 'end' | 'usualStart' | 'usualEnd', dateIndex: number }
   const [selectedDateDetail, setSelectedDateDetail] = useState(null); // { date, startTime, endTime, location, address, note, index }
+  const [isEditingDateDetail, setIsEditingDateDetail] = useState(false);
+  const [editingDateDetailForm, setEditingDateDetailForm] = useState({
+    date: null,
+    startTime: null,
+    endTime: null,
+    location: '',
+    address: '',
+    note: '',
+  });
+  const [showDateDetailTimePicker, setShowDateDetailTimePicker] = useState({ type: null }); // { type: 'date' | 'startTime' | 'endTime' }
   const [highlightedDateIndex, setHighlightedDateIndex] = useState(null); // Index of date to highlight
   const scheduleScrollRef = useRef(null);
   const dateEntryPositions = useRef({}); // Map of index to Y position
@@ -204,6 +238,8 @@ const EventHub = () => {
   // Collapsible sections state
   const [isInviteGuestsExpanded, setIsInviteGuestsExpanded] = useState(false);
   const [isMembersExpanded, setIsMembersExpanded] = useState(false);
+  // Past events modal state
+  const [showPastEventsModal, setShowPastEventsModal] = useState(false);
 
   const event = getEventById(eventId);
   const userId = user?.uid || user?.id || null;
@@ -234,6 +270,88 @@ const EventHub = () => {
       .sort();
     return ids.join(',');
   }, [members]);
+
+  // Check for hash/query param to set initial tab (e.g., #gameplan)
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      const searchParams = new URLSearchParams(window.location.search);
+      if (hash === '#gameplan' || searchParams.get('tab') === 'gameplan') {
+        setActiveTab(TABS.GAMES);
+      }
+    } else {
+      // On mobile, check route params
+      const routeParams = route?.params || {};
+      if (routeParams.tab === 'gameplan') {
+        setActiveTab(TABS.GAMES);
+      }
+    }
+  }, [route]);
+
+  // Separate past and future events
+  const { futureEvents, pastEvents } = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0); // Compare dates only (ignore time)
+    
+    const future = [];
+    const past = [];
+    
+    if (event?.eventDates && Array.isArray(event.eventDates)) {
+      event.eventDates.forEach((ed, idx) => {
+        const date = safeParseDate(ed.date);
+        if (date && !isNaN(date.getTime())) {
+          const eventDate = new Date(date);
+          eventDate.setHours(0, 0, 0, 0);
+          if (eventDate >= now) {
+            future.push({ ...ed, originalIndex: idx });
+          } else {
+            past.push({ ...ed, originalIndex: idx });
+          }
+        }
+      });
+    } else if (event?.scheduledFor) {
+      // Handle backward-compatible single scheduledFor date
+      const date = safeParseDate(event.scheduledFor);
+      if (date && !isNaN(date.getTime())) {
+        const eventDate = new Date(date);
+        eventDate.setHours(0, 0, 0, 0);
+        const ed = {
+          date: event.scheduledFor,
+          startTime: event.scheduledFor,
+          location: event.location || event.generalLocation || '',
+          address: event.address || event.exactLocation || '',
+          note: '',
+          originalIndex: 0,
+        };
+        if (eventDate >= now) {
+          future.push(ed);
+        } else {
+          past.push(ed);
+        }
+      }
+    }
+    
+    return { futureEvents: future, pastEvents: past };
+  }, [event?.eventDates, event?.scheduledFor, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
+
+  // Initialize date detail form when selectedDateDetail changes
+  useEffect(() => {
+    if (selectedDateDetail) {
+      setEditingDateDetailForm({
+        date: selectedDateDetail.date ? new Date(selectedDateDetail.date) : null,
+        startTime: selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime())
+          ? new Date(selectedDateDetail.startTime)
+          : null,
+        endTime: selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime())
+          ? new Date(selectedDateDetail.endTime)
+          : null,
+        location: selectedDateDetail.location || '',
+        address: selectedDateDetail.address || selectedDateDetail.exactLocation || '',
+        note: selectedDateDetail.note || '',
+      });
+      setIsEditingDateDetail(false);
+    }
+  }, [selectedDateDetail]);
 
   // Initialize schedule form when event loads
   useEffect(() => {
@@ -470,7 +588,10 @@ const EventHub = () => {
                         console.log(`[EventHub] Cached avatar URL in member document for ${member.userId}`);
                       } catch (updateError) {
                         // Silently fail - this is just a cache optimization
-                        console.error(`[EventHub] Error updating member avatar cache for ${member.userId}:`, updateError);
+                        // Only log if it's not a permission error (permission errors are expected if user is not organizer)
+                        if (updateError.code !== 'permission-denied') {
+                          console.error(`[EventHub] Error updating member avatar cache for ${member.userId}:`, updateError);
+                        }
                       }
                     }
                   } else {
@@ -779,6 +900,64 @@ const EventHub = () => {
     }
   };
 
+  const handleSaveDateDetail = async () => {
+    if (!isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers and co-organizers can edit date details.');
+      return;
+    }
+
+    if (!selectedDateDetail || selectedDateDetail.index === undefined) {
+      Alert.alert('Error', 'Invalid date selection.');
+      return;
+    }
+
+    if (!editingDateDetailForm.date) {
+      Alert.alert('Error', 'Date is required.');
+      return;
+    }
+
+    try {
+      // Get current event dates
+      const currentEventDates = event?.eventDates || [];
+      
+      // Create updated eventDates array
+      const updatedEventDates = [...currentEventDates];
+      
+      // Update the specific date at the index
+      updatedEventDates[selectedDateDetail.index] = {
+        date: editingDateDetailForm.date.toISOString(),
+        startTime: editingDateDetailForm.startTime ? editingDateDetailForm.startTime.toISOString() : null,
+        endTime: editingDateDetailForm.endTime ? editingDateDetailForm.endTime.toISOString() : null,
+        location: editingDateDetailForm.location || '',
+        address: editingDateDetailForm.address || '',
+        exactLocation: editingDateDetailForm.address || '', // Backward compatibility
+        note: editingDateDetailForm.note || '',
+      };
+
+      // Update the event schedule
+      await updateEventSchedule(event.id, userId, {
+        eventDates: updatedEventDates,
+      });
+
+      // Update local state
+      setSelectedDateDetail({
+        date: editingDateDetailForm.date,
+        startTime: editingDateDetailForm.startTime,
+        endTime: editingDateDetailForm.endTime,
+        location: editingDateDetailForm.location,
+        address: editingDateDetailForm.address,
+        note: editingDateDetailForm.note,
+        index: selectedDateDetail.index,
+      });
+      
+      setIsEditingDateDetail(false);
+      Alert.alert('Success', 'Date details updated successfully.');
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to update date details. Please try again.');
+      console.error(error);
+    }
+  };
+
   const handleEditSchedule = async () => {
     if (!isOrganizerOrCoOrganizer) {
       Alert.alert('Error', 'Only organizers can edit the schedule.');
@@ -952,32 +1131,59 @@ const EventHub = () => {
     }
   };
 
-  const handleRegenerateJoinCode = () => {
-    if (regenerateBusy) {
+  const handleAddJoinCode = async () => {
+    if (addCodeBusy) {
+      return;
+    }
+
+    try {
+      setAddCodeBusy(true);
+      const newCode = await addJoinCode(event.id);
+      Alert.alert(
+        'New code created',
+        `Your new join code is: ${newCode}`,
+      );
+    } catch (error) {
+      Alert.alert('Could not create code', 'Please try again in a moment.');
+      console.error(error);
+    } finally {
+      setAddCodeBusy(false);
+    }
+  };
+
+  const handleDeleteJoinCode = (codeToDelete) => {
+    const joinCodes = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+    
+    // Don't allow deleting the last code
+    if (joinCodes.length <= 1) {
+      Alert.alert(
+        'Cannot delete',
+        'You must keep at least one active join code.',
+      );
       return;
     }
 
     Alert.alert(
-      'Create a fresh invite code?',
-      'Anyone with the old code will no longer be able to join once you refresh it.',
+      'Delete join code?',
+      `Anyone with the code "${codeToDelete}" will no longer be able to join.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Generate new code',
+          text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
-              setRegenerateBusy(true);
-              const newCode = regenerateJoinCode(event.id);
-              Alert.alert(
-                'New code ready',
-                `Your new join code is: ${newCode}`,
-              );
+              setDeletingCodes(prev => new Set(prev).add(codeToDelete));
+              await deleteJoinCode(event.id, codeToDelete);
             } catch (error) {
-              Alert.alert('Could not refresh', 'Please try again in a moment.');
+              Alert.alert('Could not delete code', 'Please try again in a moment.');
               console.error(error);
             } finally {
-              setRegenerateBusy(false);
+              setDeletingCodes(prev => {
+                const next = new Set(prev);
+                next.delete(codeToDelete);
+                return next;
+              });
             }
           },
         },
@@ -1179,8 +1385,26 @@ const EventHub = () => {
             </TouchableOpacity>
             {isInviteGuestsExpanded && (
               <View style={styles.inviteBlock}>
-                <Text style={styles.inviteLabel}>Current join code</Text>
-                <Text style={styles.inviteCode}>{event.joinCode}</Text>
+                <Text style={styles.inviteLabel}>Active join codes</Text>
+                {(event.joinCodes || (event.joinCode ? [event.joinCode] : [])).map((code, index) => {
+                  const isDeleting = deletingCodes.has(code);
+                  return (
+                    <View key={index} style={styles.joinCodeRow}>
+                      <Text style={styles.inviteCode}>{code}</Text>
+                      {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
+                        <TouchableOpacity
+                          onPress={() => handleDeleteJoinCode(code)}
+                          disabled={isDeleting}
+                          style={[styles.deleteCodeButton, isDeleting && styles.deleteCodeButtonDisabled]}
+                        >
+                          <Text style={styles.deleteCodeButtonText}>
+                            {isDeleting ? 'Deleting...' : 'Delete'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
                 <Button
                   label="Share invite code"
                   onPress={handleShareInvite}
@@ -1188,10 +1412,10 @@ const EventHub = () => {
                 />
                 {isOrganizerOrCoOrganizer && (
                 <Button
-                  label={regenerateBusy ? 'Refreshing...' : 'Refresh invite code'}
-                  onPress={handleRegenerateJoinCode}
+                  label={addCodeBusy ? 'Creating...' : 'Create new code'}
+                  onPress={handleAddJoinCode}
                   style={styles.primaryAction}
-                  disabled={regenerateBusy}
+                  disabled={addCodeBusy}
                   variant="outline"
                 />
                 )}
@@ -1471,7 +1695,7 @@ const EventHub = () => {
         {isOrganizerOrCoOrganizer && (
           <View style={styles.editScheduleButtonContainer}>
             <Button
-              label="Edit Schedule"
+              label="Edit Calendar"
               onPress={() => setShowEditSchedule(true)}
               variant="outline"
               style={styles.editButton}
@@ -1480,9 +1704,10 @@ const EventHub = () => {
         )}
         
         <View style={styles.scheduleInfo}>
-          {event.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0 ? (
+          {futureEvents.length > 0 ? (
             <View>
-              {event.eventDates.map((ed, index) => {
+              {futureEvents.map((ed) => {
+                const index = ed.originalIndex;
                 const date = safeParseDate(ed.date);
                 const startTime = safeParseDate(ed.startTime);
                 const endTime = safeParseDate(ed.endTime);
@@ -1675,108 +1900,113 @@ const EventHub = () => {
                           )}
                         </View>
                       )}
+                      
+                      {/* Gameplan Button */}
+                      <View style={styles.dateGameplanButtonContainer}>
+                        <Button
+                          label="Gameplan"
+                          onPress={(e) => {
+                            e?.stopPropagation?.();
+                            e?.preventDefault?.();
+                            const currentEventId = event?.id || eventId;
+                            if (Platform.OS === 'web' && navigate && currentEventId) {
+                              navigate(`/event/${currentEventId}/browse/${index}`);
+                            } else if (navigation?.navigate && currentEventId) {
+                              navigation.navigate('BrowseAndPropose', {
+                                eventId: currentEventId,
+                                dateIndex: index
+                              });
+                            }
+                          }}
+                          variant="outline"
+                          style={styles.dateGameplanButton}
+                          textStyle={styles.dateGameplanButtonText}
+                        />
+                      </View>
                     </View>
                   </View>
                 );
               })}
             </View>
-          ) : event.scheduledFor ? (
-            (() => {
-              const date = safeParseDate(event.scheduledFor);
-              const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
-              const showRSVPForDate = isMember && rsvpSettings.enabled;
-              const dateRSVP = date ? getRSVPForDate(userId, date) : null;
-              
-              return (
-                <View style={styles.dateEntryContainer}>
-                  <View style={styles.dateEntryContent}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.dateTimeEntry,
-                        pressed && styles.dateTimeEntryPressed,
-                      ]}
-                      onPress={() => {
-                        if (date && !isNaN(date.getTime())) {
-                          const startTime = safeParseDate(event.scheduledFor);
-                          setSelectedDateDetail({
-                            date,
-                            startTime: startTime && !isNaN(startTime.getTime()) ? startTime : null,
-                            endTime: null,
-                            location: event.location || event.generalLocation || '',
-                            address: isMember ? (event.address || event.exactLocation || '') : null,
-                            note: '',
-                            index: 0,
-                          });
-                        }
-                      }}
-                    >
-                      <Text style={styles.scheduleValueBoldRed}>
-                        {(() => {
-                          if (!date || isNaN(date.getTime())) {
-                            return 'Date and time to be announced';
-                          }
-                          const dateStr = formatDate(date.toISOString());
-                          const timeStr = formatTime(date.toISOString());
-                          return `${dateStr} (${timeStr})`;
-                        })()}
-                      </Text>
-                      {(event.location || event.generalLocation) && (
-                        <Text style={styles.scheduleLocationBoldRed}>{event.location || event.generalLocation}</Text>
-                      )}
-                    </Pressable>
-                    {showRSVPForDate && date && (
-                      <View style={styles.dateRSVPContainer}>
-                        <Text style={styles.dateRSVPLabel}>Your RSVP:</Text>
-                        <View style={styles.dateRSVPButtons}>
-                          <Button
-                            label="Going"
-                            onPress={() => handleRSVP('going', date)}
-                            variant={dateRSVP === 'going' ? 'primary' : 'outline'}
-                            style={styles.dateRSVPButton}
-                            textStyle={styles.dateRSVPButtonText}
-                          />
-                          {rsvpSettings.allowMaybe && (
-                            <Button
-                              label="Maybe"
-                              onPress={() => handleRSVP('maybe', date)}
-                              variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
-                              style={styles.dateRSVPButton}
-                              textStyle={styles.dateRSVPButtonText}
-                            />
-                          )}
-                          <Button
-                            label="Can't Make It"
-                            onPress={() => handleRSVP('not-going', date)}
-                            variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
-                            style={styles.dateRSVPButton}
-                            textStyle={styles.dateRSVPButtonText}
-                          />
-                        </View>
-                        {dateRSVP && (
-                          <Text style={styles.dateRSVPStatus}>
-                            Status: {getRSVPStatusLabel(dateRSVP)}
-                          </Text>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              );
-            })()
+          ) : (event.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0) || event.scheduledFor ? (
+            // No future events, but there are past events - show empty message
+            <Text style={styles.scheduleValue}>No upcoming dates scheduled</Text>
           ) : (
             <Text style={styles.scheduleValue}>Date and time to be announced</Text>
           )}
         </View>
 
-        {isOrganizerOrCoOrganizer && (
+        {/* Past Events Button */}
+        {pastEvents.length > 0 && (
+          <View style={styles.pastEventsButtonContainer}>
+            <Button
+              label={`Past Events (${pastEvents.length})`}
+              onPress={() => setShowPastEventsModal(true)}
+              variant="outline"
+              style={styles.pastEventsButton}
+            />
+          </View>
+        )}
+      </View>
+
+      {/* Past Events Modal */}
+      <Modal
+        isOpen={showPastEventsModal}
+        onClose={() => setShowPastEventsModal(false)}
+        title="Past Events"
+      >
+        <ScrollView style={styles.pastEventsModalContent}>
+          {pastEvents.map((ed) => {
+            const index = ed.originalIndex;
+            const date = safeParseDate(ed.date);
+            const startTime = safeParseDate(ed.startTime);
+            const endTime = safeParseDate(ed.endTime);
+            
+            if (!date || isNaN(date.getTime())) return null;
+            
+            const dateStr = formatDate(date.toISOString());
+            let timeStr = '';
+            if (startTime && !isNaN(startTime.getTime()) && endTime && !isNaN(endTime.getTime())) {
+              timeStr = `${formatTime(startTime.toISOString())} - ${formatTime(endTime.toISOString())}`;
+            } else if (startTime && !isNaN(startTime.getTime())) {
+              timeStr = formatTime(startTime.toISOString());
+            }
+            
+            const location = ed.location || ed.generalLocation || event.location || event.generalLocation || '';
+            const address = ed.address || ed.exactLocation || (isMember ? (event.address || event.exactLocation) : null);
+            const note = ed.note || '';
+            
+            return (
+              <View key={index} style={styles.pastEventEntry}>
+                <Text style={styles.pastEventDate}>
+                  {dateStr}{timeStr ? ` (${timeStr})` : ''}
+                </Text>
+                {location && (
+                  <Text style={styles.pastEventLocation}>{location}</Text>
+                )}
+                {address && (
+                  <Text style={styles.pastEventAddress}>{address}</Text>
+                )}
+                {note && (
+                  <Text style={styles.pastEventNote}>{note}</Text>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
+      </Modal>
+
+      {/* Edit Schedule Button (outside of scheduleInfo for organizers) */}
+      {isOrganizerOrCoOrganizer && (
+        <View style={styles.section}>
           <Button
             label="Edit Schedule"
             onPress={() => setShowEditSchedule(true)}
             variant="outline"
             style={styles.editButton}
           />
-        )}
-      </View>
+        </View>
+      )}
 
       {/* Archive Section - Combined with Event Details */}
       {isOrganizerOrCoOrganizer && (
@@ -3192,7 +3422,14 @@ const EventHub = () => {
         });
       },
       (error) => {
-        console.error('Error loading game interests:', error);
+        // Handle permission errors gracefully
+        if (error.code === 'permission-denied') {
+          console.warn('[EventHub] Permission denied loading game interests - user may not be a member yet');
+          setGameInterests({});
+        } else {
+          console.error('Error loading game interests:', error);
+          setGameInterests({});
+        }
       }
     );
 
@@ -3361,11 +3598,12 @@ const EventHub = () => {
       return;
     }
     
-    const loadProposals = async () => {
-      try {
-        const proposalsSnapshot = await db.collection('gamingGroups').doc(event.id)
-          .collection('nominations').get(); // Keep collection name as 'nominations' for backward compatibility
-          
+    // Use onSnapshot for real-time updates, but handle permission errors gracefully
+    const proposalsRef = db.collection('gamingGroups').doc(event.id)
+      .collection('nominations');
+    
+    const unsubscribe = proposalsRef.onSnapshot(
+      (proposalsSnapshot) => {
         const proposalsMap = new Map();
         const userProps = new Set();
         
@@ -3391,6 +3629,7 @@ const EventHub = () => {
               gameName: data.gameName || 'Unknown Game',
               gameImage: data.gameImage || null,
               proposedBy: data.nominatedBy || null, // Keep field name for backward compatibility
+              gameOwnerId: data.gameOwnerId || null,
               ratings: {},
             });
           } else {
@@ -3403,6 +3642,7 @@ const EventHub = () => {
                 gameName: data.gameName || existing.gameName || 'Unknown Game',
                 gameImage: data.gameImage || existing.gameImage || null,
                 proposedBy: data.nominatedBy || existing.proposedBy,
+                gameOwnerId: data.gameOwnerId || existing.gameOwnerId || null,
               });
             }
           }
@@ -3466,15 +3706,22 @@ const EventHub = () => {
           // Same proposals, return previous Set to prevent re-render
           return prev;
         });
-      } catch (error) {
-        console.error('Error loading proposals:', error);
-        // Set empty arrays on error to prevent stale data
-        setProposedGames([]);
-        setUserProposals(new Set());
+      },
+      (error) => {
+        // Handle permission errors gracefully
+        if (error.code === 'permission-denied') {
+          console.warn('[EventHub] Permission denied loading proposals - user may not be a member yet');
+          setProposedGames([]);
+          setUserProposals(new Set());
+        } else {
+          console.error('Error loading proposals:', error);
+          setProposedGames([]);
+          setUserProposals(new Set());
+        }
       }
-    };
+    );
 
-    loadProposals();
+    return () => unsubscribe();
   }, [event?.id, db, isMember, userId]);
 
   // Games Tab Component - Rebuilt from scratch
@@ -3939,9 +4186,12 @@ const EventHub = () => {
       });
     };
 
-    // Get available event dates for date selector
+    // Get available event dates for date selector (only future dates)
     const eventDates = useMemo(() => {
       if (!event) return [];
+      
+      const now = new Date();
+      now.setHours(0, 0, 0, 0); // Compare dates only (ignore time)
       
       if (event.eventDates && Array.isArray(event.eventDates)) {
         return event.eventDates.map((ed, index) => {
@@ -3954,18 +4204,29 @@ const EventHub = () => {
             endTime: safeParseDate(ed.endTime),
             location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
           };
-        }).filter(ed => ed.date !== null);
+        }).filter(ed => {
+          if (!ed.date) return false;
+          // Filter out past dates
+          const eventDate = new Date(ed.date);
+          eventDate.setHours(0, 0, 0, 0);
+          return eventDate >= now;
+        });
       } else if (event.scheduledFor) {
         const date = safeParseDate(event.scheduledFor);
         if (date && !isNaN(date.getTime())) {
-          return [{
-            index: 0,
-            date,
-            dateString: event.scheduledFor,
-            startTime: date,
-            endTime: date,
-            location: event.location || event.generalLocation || '',
-          }];
+          const eventDate = new Date(date);
+          eventDate.setHours(0, 0, 0, 0);
+          // Only include if it's a future date
+          if (eventDate >= now) {
+            return [{
+              index: 0,
+              date,
+              dateString: event.scheduledFor,
+              startTime: date,
+              endTime: date,
+              location: event.location || event.generalLocation || '',
+            }];
+          }
         }
       }
       
@@ -4106,9 +4367,6 @@ const EventHub = () => {
       }));
     }, [confirmedAttendees, collections, memberNames, selectedGameNightDateIndex, isMember, userId, members]);
 
-    // State for tracking which proposed game is expanded for rating
-    const [expandedProposedGameId, setExpandedProposedGameId] = useState(null);
-
     return (
       <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
         {/* Game Night Dates Section (navigation to Browse & Propose) */}
@@ -4121,8 +4379,9 @@ const EventHub = () => {
             
             {eventDates.length > 0 ? (
               <View style={styles.dateListContainer}>
-                  {eventDates.map((ed, index) => {
+                  {eventDates.map((ed, filteredIndex) => {
                   const currentEventId = eventId || event?.id;
+                  const originalIndex = ed.index; // Use the original index from the eventDates array
                   const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
                   const myRSVPs = memberRSVPs?.[userId] || {};
                   const rsvp = typeof myRSVPs === 'string' ? myRSVPs : myRSVPs[dateKey];
@@ -4140,24 +4399,25 @@ const EventHub = () => {
 
                     return (
                       <TouchableOpacity
-                        key={index}
+                        key={originalIndex}
                       style={styles.dateListItem}
                                       onPress={() => {
                         console.log('[EventHub] Date selector clicked:', { 
-                          index, 
+                          originalIndex,
+                          filteredIndex,
                           currentEventId, 
                           platform: Platform.OS,
                           hasNavigate: !!navigate,
                           hasNavigation: !!navigation?.navigate
                         });
                         if (Platform.OS === 'web' && navigate && currentEventId) {
-                          console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${index}`);
-                          navigate(`/event/${currentEventId}/browse/${index}`);
+                          console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
+                          navigate(`/event/${currentEventId}/browse/${originalIndex}`);
                         } else if (navigation?.navigate && currentEventId) {
-                          console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: index });
+                          console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: originalIndex });
                           navigation.navigate('BrowseAndPropose', { 
                             eventId: currentEventId, 
-                            dateIndex: index 
+                            dateIndex: originalIndex 
                           });
                         }
                       }}
@@ -4191,7 +4451,6 @@ const EventHub = () => {
             )}
           </View>
         )}
-
 
 
         {/* Planning Games Modal */}
@@ -4288,7 +4547,7 @@ const EventHub = () => {
     );
     };
     return GamesTabComponent;
-  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, event, members, user, memberNames, memberRSVPs, selectedGameNightDateIndex, proposedGames, userProposals, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
+  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, event, members, user, memberNames, memberAvatars, memberRSVPs, selectedGameNightDateIndex, proposedGames, userProposals, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
 
 
   return (
@@ -4504,7 +4763,24 @@ const EventHub = () => {
                                     <TouchableOpacity
                                       style={styles.proposeGameButton}
                                       onPress={async () => {
-                                        if (!event?.id || !db || !userId) return;
+                                        console.log('[ProposeGame] Button clicked');
+                                        console.log('[ProposeGame] Initial checks:', {
+                                          hasEvent: !!event,
+                                          eventId: event?.id,
+                                          hasDb: !!db,
+                                          hasUserId: !!userId,
+                                          userId,
+                                          userProposalsCount: userProposals.size,
+                                        });
+                                        
+                                        if (!event?.id || !db || !userId) {
+                                          console.error('[ProposeGame] Missing required data:', {
+                                            eventId: event?.id,
+                                            hasDb: !!db,
+                                            userId,
+                                          });
+                                          return;
+                                        }
                                         
                                         if (userProposals.size >= 5) {
                                           Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
@@ -4512,18 +4788,91 @@ const EventHub = () => {
                                         }
                                         
                                         try {
+                                          // Check if user is a member
+                                          const groupDoc = await db.collection('gamingGroups').doc(event.id).get();
+                                          const groupData = groupDoc.data();
+                                          const memberIds = groupData?.memberIds || [];
+                                          const isUserMember = memberIds.includes(userId) || groupData?.organizerId === userId;
+                                          
+                                          console.log('[ProposeGame] Membership check:', {
+                                            eventId: event.id,
+                                            userId,
+                                            memberIds,
+                                            organizerId: groupData?.organizerId,
+                                            isUserMember,
+                                            isOrganizer: groupData?.organizerId === userId,
+                                            isInMemberIds: memberIds.includes(userId),
+                                          });
+                                          
+                                          if (!isUserMember) {
+                                            console.error('[ProposeGame] User is not a member of the group');
+                                            Alert.alert('Error', 'You must be a member of this MeepleUp to propose games.');
+                                            return;
+                                          }
+                                          
+                                          // Identify game owner - check _ownerId first, then search collections
+                                          let gameOwnerId = game._ownerId;
+                                          let gameOwnerName = game._ownerName;
+                                          
+                                          // If not found, search collections to find the owner
+                                          if (!gameOwnerId) {
+                                            for (const [ownerUserId, ownerGames] of Object.entries(collections || {})) {
+                                              if (Array.isArray(ownerGames)) {
+                                                const ownerGame = ownerGames.find(g => (g.bggId || g.id) === gameId);
+                                                if (ownerGame) {
+                                                  gameOwnerId = ownerUserId;
+                                                  gameOwnerName = memberNames[ownerUserId] || ownerUserId;
+                                                  break;
+                                                }
+                                              }
+                                            }
+                                          } else if (!gameOwnerName) {
+                                            gameOwnerName = memberNames[gameOwnerId] || gameOwnerId;
+                                          }
+                                          
+                                          // Get proposer name
+                                          const proposerName = memberNames[userId] || user?.name || userId;
+                                          
                                           const proposalDoc = {
                                             gameId,
                                             gameName: game.title || 'Unknown Game',
                                             gameImage: game.image || game.thumbnail || null,
                                             nominatedBy: userId, // Keep field name for backward compatibility
+                                            gameOwnerId: gameOwnerId || null,
                                             createdAt: firebase.firestore.Timestamp.now(),
                                           };
+                                          
+                                          console.log('[ProposeGame] Attempting to save proposal:', {
+                                            eventId: event.id,
+                                            gameId,
+                                            proposalDoc,
+                                            documentPath: `gamingGroups/${event.id}/nominations/${gameId}`,
+                                          });
                                           
                                           await db.collection('gamingGroups').doc(event.id)
                                             .collection('nominations')
                                             .doc(gameId)
                                             .set(proposalDoc, { merge: true });
+                                          
+                                          console.log('[ProposeGame] Proposal saved successfully');
+                                          
+                                          // Notify game owner if they exist and are different from proposer
+                                          if (gameOwnerId && gameOwnerId !== userId) {
+                                            try {
+                                              await notifyGameOwner(
+                                                gameOwnerId,
+                                                userId,
+                                                proposerName,
+                                                gameId,
+                                                game.title || 'Unknown Game',
+                                                event.id
+                                              );
+                                              console.log('[ProposeGame] Game owner notified');
+                                            } catch (notifyError) {
+                                              console.error('[ProposeGame] Error notifying game owner:', notifyError);
+                                              // Don't fail the proposal if notification fails
+                                            }
+                                          }
                                           
                                           // Update local state
                                           setUserProposals(prev => new Set([...prev, gameId]));
@@ -4535,14 +4884,23 @@ const EventHub = () => {
                                               gameName: game.title || 'Unknown Game',
                                               gameImage: game.image || game.thumbnail || null,
                                               proposedBy: userId,
+                                              gameOwnerId: gameOwnerId || null,
                                               ratings: {},
                                             }];
                                           });
                                           
                                           Alert.alert('Game Proposed', `${game.title || 'Game'} has been proposed!`);
                                         } catch (error) {
-                                          console.error('Error proposing game:', error);
-                                          Alert.alert('Error', 'Failed to propose game. Please try again.');
+                                          console.error('[ProposeGame] Error proposing game:', error);
+                                          console.error('[ProposeGame] Error details:', {
+                                            code: error.code,
+                                            message: error.message,
+                                            stack: error.stack,
+                                            eventId: event?.id,
+                                            userId,
+                                            gameId,
+                                          });
+                                          Alert.alert('Error', `Failed to propose game: ${error.message || 'Please try again.'}`);
                                         }
                                       }}
                                     >
@@ -5009,85 +5367,268 @@ const EventHub = () => {
       {/* Date Detail Modal */}
       <Modal
         isOpen={selectedDateDetail !== null}
-        onClose={() => setSelectedDateDetail(null)}
+        onClose={() => {
+          setSelectedDateDetail(null);
+          setIsEditingDateDetail(false);
+        }}
         title="Event Date Details"
       >
         {selectedDateDetail && (
           <View style={styles.dateDetailModalContent}>
-            <View style={styles.dateDetailSection}>
-              <Text style={styles.dateDetailLabel}>Date</Text>
-              <Text style={styles.dateDetailValue}>
-                {formatDate(selectedDateDetail.date.toISOString())}
-              </Text>
-            </View>
+            {isEditingDateDetail && isOrganizerOrCoOrganizer ? (
+              // Edit mode for organizers/co-organizers
+              <>
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>Date</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowDateDetailTimePicker({ type: 'date' })}
+                    style={styles.datePickerButton}
+                  >
+                    <Text style={styles.datePickerButtonText}>
+                      {editingDateDetailForm.date
+                        ? formatDate(editingDateDetailForm.date.toISOString())
+                        : 'Select date'}
+                    </Text>
+                  </TouchableOpacity>
+                  {Platform.OS !== 'web' && showDateDetailTimePicker.type === 'date' && (
+                    <DateTimePicker
+                      value={editingDateDetailForm.date || new Date()}
+                      mode="date"
+                      display="default"
+                      onChange={(event, date) => {
+                        if (date) {
+                          setEditingDateDetailForm(prev => ({ ...prev, date }));
+                        }
+                        setShowDateDetailTimePicker({ type: null });
+                      }}
+                    />
+                  )}
+                  {Platform.OS === 'web' && showDateDetailTimePicker.type === 'date' && (
+                    <CalendarDatePicker
+                      selectedDate={editingDateDetailForm.date}
+                      onDateSelect={(date) => {
+                        setEditingDateDetailForm(prev => ({ ...prev, date }));
+                        setShowDateDetailTimePicker({ type: null });
+                      }}
+                      onClose={() => setShowDateDetailTimePicker({ type: null })}
+                    />
+                  )}
+                </View>
 
-            {selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime()) && (
-              <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailLabel}>Start Time</Text>
-                <Text style={styles.dateDetailValue}>
-                  {formatTime(selectedDateDetail.startTime.toISOString())}
-                </Text>
-              </View>
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>Start Time</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowDateDetailTimePicker({ type: 'startTime' })}
+                    style={styles.datePickerButton}
+                  >
+                    <Text style={styles.datePickerButtonText}>
+                      {editingDateDetailForm.startTime
+                        ? formatTime(editingDateDetailForm.startTime.toISOString())
+                        : 'Select start time'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDateDetailTimePicker.type === 'startTime' && (
+                    <DateTimePicker
+                      value={editingDateDetailForm.startTime || new Date()}
+                      mode="time"
+                      display="default"
+                      is24Hour={false}
+                      onChange={(event, date) => {
+                        if (date) {
+                          setEditingDateDetailForm(prev => ({ ...prev, startTime: date }));
+                        }
+                        setShowDateDetailTimePicker({ type: null });
+                      }}
+                    />
+                  )}
+                </View>
+
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>End Time</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowDateDetailTimePicker({ type: 'endTime' })}
+                    style={styles.datePickerButton}
+                  >
+                    <Text style={styles.datePickerButtonText}>
+                      {editingDateDetailForm.endTime
+                        ? formatTime(editingDateDetailForm.endTime.toISOString())
+                        : 'Select end time'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showDateDetailTimePicker.type === 'endTime' && (
+                    <DateTimePicker
+                      value={editingDateDetailForm.endTime || new Date()}
+                      mode="time"
+                      display="default"
+                      is24Hour={false}
+                      onChange={(event, date) => {
+                        if (date) {
+                          setEditingDateDetailForm(prev => ({ ...prev, endTime: date }));
+                        }
+                        setShowDateDetailTimePicker({ type: null });
+                      }}
+                    />
+                  )}
+                </View>
+
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>Location</Text>
+                  <Input
+                    value={editingDateDetailForm.location}
+                    onChangeText={(text) =>
+                      setEditingDateDetailForm(prev => ({ ...prev, location: text }))
+                    }
+                    placeholder="Enter location"
+                    style={styles.modalInput}
+                  />
+                </View>
+
+                {isMember && (
+                  <View style={styles.dateDetailSection}>
+                    <Text style={styles.dateDetailLabel}>Address</Text>
+                    <Input
+                      value={editingDateDetailForm.address}
+                      onChangeText={(text) =>
+                        setEditingDateDetailForm(prev => ({ ...prev, address: text }))
+                      }
+                      placeholder="Enter address"
+                      style={styles.modalInput}
+                    />
+                  </View>
+                )}
+
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>Notes</Text>
+                  <Input
+                    value={editingDateDetailForm.note}
+                    onChangeText={(text) =>
+                      setEditingDateDetailForm(prev => ({ ...prev, note: text }))
+                    }
+                    placeholder="Add notes about parking, snacks, etc."
+                    multiline
+                    numberOfLines={4}
+                    style={styles.modalInput}
+                  />
+                </View>
+
+                <View style={styles.dateDetailActions}>
+                  <Button
+                    label="Save"
+                    onPress={handleSaveDateDetail}
+                    style={styles.modalButton}
+                  />
+                  <Button
+                    label="Cancel"
+                    onPress={() => {
+                      setIsEditingDateDetail(false);
+                      // Reset form to original values
+                      setEditingDateDetailForm({
+                        date: selectedDateDetail.date ? new Date(selectedDateDetail.date) : null,
+                        startTime: selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime())
+                          ? new Date(selectedDateDetail.startTime)
+                          : null,
+                        endTime: selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime())
+                          ? new Date(selectedDateDetail.endTime)
+                          : null,
+                        location: selectedDateDetail.location || '',
+                        address: selectedDateDetail.address || selectedDateDetail.exactLocation || '',
+                        note: selectedDateDetail.note || '',
+                      });
+                    }}
+                    variant="outline"
+                    style={styles.modalButton}
+                  />
+                </View>
+              </>
+            ) : (
+              // View mode
+              <>
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>Date</Text>
+                  <Text style={styles.dateDetailValue}>
+                    {formatDate(selectedDateDetail.date.toISOString())}
+                  </Text>
+                </View>
+
+                {selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime()) && (
+                  <View style={styles.dateDetailSection}>
+                    <Text style={styles.dateDetailLabel}>Start Time</Text>
+                    <Text style={styles.dateDetailValue}>
+                      {formatTime(selectedDateDetail.startTime.toISOString())}
+                    </Text>
+                  </View>
+                )}
+
+                {selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime()) && (
+                  <View style={styles.dateDetailSection}>
+                    <Text style={styles.dateDetailLabel}>End Time</Text>
+                    <Text style={styles.dateDetailValue}>
+                      {formatTime(selectedDateDetail.endTime.toISOString())}
+                    </Text>
+                  </View>
+                )}
+
+                {selectedDateDetail.location && (
+                  <View style={styles.dateDetailSection}>
+                    <Text style={styles.dateDetailLabel}>Location</Text>
+                    <Text style={styles.dateDetailValue}>
+                      {selectedDateDetail.location}
+                    </Text>
+                  </View>
+                )}
+
+                {isMember && (selectedDateDetail.address || selectedDateDetail.exactLocation) && (
+                  <View style={styles.dateDetailSection}>
+                    <Text style={styles.dateDetailLabel}>Address</Text>
+                    <Text style={styles.dateDetailValue}>
+                      {selectedDateDetail.address || selectedDateDetail.exactLocation}
+                    </Text>
+                  </View>
+                )}
+
+                {!selectedDateDetail.location && !selectedDateDetail.address && !selectedDateDetail.exactLocation && (
+                  <View style={styles.dateDetailSection}>
+                    <Text style={styles.dateDetailValue}>
+                      Location to be announced
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.dateDetailSection}>
+                  <Text style={styles.dateDetailLabel}>Notes</Text>
+                  <Text
+                    style={
+                      selectedDateDetail.note
+                        ? styles.dateDetailValue
+                        : styles.dateDetailPlaceholder
+                    }
+                  >
+                    {selectedDateDetail.note ||
+                      (isOrganizerOrCoOrganizer
+                        ? 'No notes yet. Add logistics like parking or snacks in Edit Schedule.'
+                        : 'No notes yet.')}
+                  </Text>
+                </View>
+
+                <View style={styles.dateDetailActions}>
+                  {isOrganizerOrCoOrganizer && (
+                    <Button
+                      label="Edit"
+                      onPress={() => setIsEditingDateDetail(true)}
+                      style={styles.modalButton}
+                    />
+                  )}
+                  <Button
+                    label="Close"
+                    onPress={() => {
+                      setSelectedDateDetail(null);
+                      setIsEditingDateDetail(false);
+                    }}
+                    style={styles.modalButton}
+                  />
+                </View>
+              </>
             )}
-
-            {selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime()) && (
-              <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailLabel}>End Time</Text>
-                <Text style={styles.dateDetailValue}>
-                  {formatTime(selectedDateDetail.endTime.toISOString())}
-                </Text>
-              </View>
-            )}
-
-            {selectedDateDetail.location && (
-              <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailLabel}>Location</Text>
-                <Text style={styles.dateDetailValue}>
-                  {selectedDateDetail.location}
-                </Text>
-              </View>
-            )}
-
-            {isMember && (selectedDateDetail.address || selectedDateDetail.exactLocation) && (
-              <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailLabel}>Address</Text>
-                <Text style={styles.dateDetailValue}>
-                  {selectedDateDetail.address || selectedDateDetail.exactLocation}
-                </Text>
-              </View>
-            )}
-
-            {!selectedDateDetail.location && !selectedDateDetail.address && !selectedDateDetail.exactLocation && (
-              <View style={styles.dateDetailSection}>
-                <Text style={styles.dateDetailValue}>
-                  Location to be announced
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.dateDetailSection}>
-              <Text style={styles.dateDetailLabel}>Notes</Text>
-              <Text
-                style={
-                  selectedDateDetail.note
-                    ? styles.dateDetailValue
-                    : styles.dateDetailPlaceholder
-                }
-              >
-                {selectedDateDetail.note ||
-                  (isOrganizerOrCoOrganizer
-                    ? 'No notes yet. Add logistics like parking or snacks in Edit Schedule.'
-                    : 'No notes yet.')}
-              </Text>
-            </View>
-
-            <View style={styles.dateDetailActions}>
-              <Button
-                label="Close"
-                onPress={() => setSelectedDateDetail(null)}
-                style={styles.modalButton}
-              />
-            </View>
           </View>
         )}
       </Modal>
@@ -5154,50 +5695,50 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.bgColor,
     flexDirection: 'column',
   },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 4,
-    backgroundColor: '#fff',
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.xs,
+    paddingBottom: theme.spacing.xs,
+    backgroundColor: theme.colors.surfaceColor,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.woodMedium,
     alignItems: 'center',
     flexShrink: 0,
   },
   title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#d45d5d',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.meepleRed,
     textAlign: 'center',
   },
   tabs: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.surfaceColor,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.woodMedium,
     flexShrink: 0,
   },
   tab: {
     flex: 1,
-    paddingVertical: 16,
+    paddingVertical: theme.spacing.lg,
     alignItems: 'center',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
   tabActive: {
-    borderBottomColor: '#d45d5d',
+    borderBottomColor: theme.colors.meepleRed,
   },
   tabText: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   tabTextActive: {
-    color: '#d45d5d',
-    fontWeight: '600',
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   discussionScrollContent: {
     paddingBottom: 100,
@@ -5206,61 +5747,57 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabContentContainer: {
-    paddingBottom: 20,
+    paddingBottom: theme.spacing.xl,
   },
   section: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    margin: 20,
-    marginBottom: 20,
+    ...commonStyles.card,
+    margin: theme.spacing.xl,
+    marginBottom: theme.spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: theme.spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2f2f2f',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
     flex: 1,
   },
   collapsibleHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-    backgroundColor: '#f8f9fa',
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xs,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.woodLight,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.woodMedium,
   },
   expandIcon: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 8,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
+    marginLeft: theme.spacing.sm,
   },
   privateMessageToggle: {
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    marginBottom: 8,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
     alignSelf: 'flex-start',
   },
   privateMessageToggleText: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '500',
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   sectionCopy: {
-    fontSize: 14,
-    color: '#444',
-    lineHeight: 20,
-    marginBottom: 6,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textPrimary,
+    lineHeight: theme.typography.fontSize.sm * theme.typography.lineHeight.normal,
+    marginBottom: theme.spacing.sm,
   },
   defaultSettingRow: {
     marginBottom: 20,
@@ -5269,10 +5806,10 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
   },
   defaultSettingLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.sm,
   },
   defaultSettingDisplay: {
     flexDirection: 'row',
@@ -5281,16 +5818,16 @@ const styles = StyleSheet.create({
   },
   defaultSettingValueContainer: {
     flex: 1,
-    marginRight: 12,
+    marginRight: theme.spacing.md,
   },
   defaultSettingValue: {
-    fontSize: 16,
-    color: '#2f2f2f',
-    marginBottom: 4,
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
   },
   defaultSettingSubValue: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
   },
   editIconButton: {
     padding: 8,
@@ -5316,22 +5853,22 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   scheduleLabel: {
-    fontSize: 18,
+    fontSize: theme.typography.fontSize.lg,
     textTransform: 'uppercase',
-    color: '#666',
+    color: theme.colors.textSecondary,
     letterSpacing: 1,
-    marginBottom: 4,
-    fontWeight: '600',
+    marginBottom: theme.spacing.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   scheduleValue: {
-    fontSize: 16,
-    color: '#2f2f2f',
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   highlight: {
-    fontWeight: '600',
-    color: '#1f4f8c',
-    marginTop: 4,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.feltGreen,
+    marginTop: theme.spacing.xs,
   },
   dateTimeEntry: {
     marginBottom: 12,
@@ -5404,6 +5941,22 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  datePickerButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginTop: 8,
+  },
+  datePickerButtonText: {
+    fontSize: 16,
+    color: '#2f2f2f',
+    fontWeight: '500',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -5450,6 +6003,48 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#e8e8e8',
     overflow: 'hidden',
+  },
+  pastEventsButtonContainer: {
+    paddingHorizontal: theme.spacing.xl,
+    paddingBottom: theme.spacing.md,
+  },
+  pastEventsButton: {
+    width: '100%',
+  },
+  pastEventsModalContent: {
+    maxHeight: 500,
+    padding: theme.spacing.md,
+  },
+  pastEventEntry: {
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.woodLight,
+  },
+  pastEventDate: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
+  },
+  pastEventLocation: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+  },
+  pastEventAddress: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+    fontStyle: 'italic',
+  },
+  pastEventNote: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.sm,
+    fontStyle: 'italic',
   },
   dateEntryContent: {
     padding: 12,
@@ -5570,6 +6165,20 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  dateGameplanButtonContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  dateGameplanButton: {
+    padding: 10,
+    minHeight: 40,
+  },
+  dateGameplanButtonText: {
+    fontSize: 14,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   rsvpLimitInfo: {
     marginTop: 8,
@@ -6077,6 +6686,34 @@ const styles = StyleSheet.create({
     color: '#1f2a75',
     letterSpacing: 2,
     marginTop: 4,
+    flex: 1,
+  },
+  joinCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#c7d4ff',
+  },
+  deleteCodeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#d45d5d',
+    borderRadius: 6,
+    marginLeft: 12,
+  },
+  deleteCodeButtonDisabled: {
+    opacity: 0.5,
+  },
+  deleteCodeButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   primaryAction: {
     marginTop: 16,
@@ -7144,7 +7781,6 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   proposedGameHeader: {
-    flexDirection: 'row',
     marginBottom: 16,
   },
   proposedGameThumbnail: {
@@ -7180,6 +7816,96 @@ const styles = StyleSheet.create({
   proposedGameSubtext: {
     fontSize: 12,
     color: '#666',
+  },
+  proposedGameImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  proposedGameImagePlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  proposedGameImageText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#999',
+  },
+  proposedGameMeta: {
+    marginTop: 8,
+    gap: 4,
+  },
+  ratingSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  allRatingsContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  allRatingsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  ratingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  ratingItemUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  ratingItemAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  ratingItemAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ratingItemAvatarInitial: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  ratingItemName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    flex: 1,
+  },
+  ratingItemValue: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '500',
+    marginLeft: 8,
   },
   ratingButtonsContainer: {
     flexDirection: 'column',

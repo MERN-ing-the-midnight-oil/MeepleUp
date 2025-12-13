@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useResponsive } from '../../utils/responsive';
+import { theme, commonStyles } from '../../utils/theme';
 
 const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
   const { width, height } = useWindowDimensions();
@@ -25,6 +26,10 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
   // Responsive modal width
   const modalWidth = isMobile ? '95%' : isTablet ? '85%' : '90%';
   const maxModalWidth = isMobile ? width * 0.95 : isTablet ? 600 : 700;
+  
+  // Calculate max height for ScrollView (accounting for header and padding)
+  // Use a percentage that works well with the content container's maxHeight: 80%
+  const maxScrollHeight = Platform.OS === 'web' ? '60vh' : height * 0.6;
   
     return (
     <RNModal
@@ -70,7 +75,7 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
                   contentContainerStyle={styles.scrollContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={true}
-                  style={styles.scrollView}
+                  style={[styles.scrollView, { maxHeight: maxScrollHeight }]}
                   nestedScrollEnabled={true}
                 >
                   {children}
@@ -102,22 +107,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   scrollView: {
-    maxHeight: '60%',
+    // maxHeight will be set dynamically
+    flexShrink: 1,
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: theme.spacing.sm,
   },
   content: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
+    backgroundColor: theme.colors.surfaceColor,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.xl,
     maxHeight: '80%',
+    minHeight: 200,
     zIndex: 1,
     position: 'relative',
+    flexDirection: 'column',
     // Responsive padding
     ...(Platform.OS === 'web' ? {} : {
-      paddingHorizontal: 16,
-      paddingVertical: 16,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.lg,
     }),
   },
   contentFullScreen: {
@@ -132,46 +140,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: theme.spacing.lg,
   },
   fullScreenHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingTop: Platform.OS === 'ios' ? 50 : 12,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    paddingTop: Platform.OS === 'ios' ? 50 : theme.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    backgroundColor: '#fff',
+    borderBottomColor: theme.colors.woodMedium,
+    backgroundColor: theme.colors.surfaceColor,
     zIndex: 10,
     position: 'relative',
     width: '100%',
   },
   backButton: {
-    padding: 8,
+    padding: theme.spacing.sm,
     minWidth: 60,
     minHeight: 44, // Better touch target
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
   backButtonText: {
-    fontSize: 16,
-    color: '#4a90e2',
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.medium,
     // Responsive font size
     ...(Platform.OS === 'web' ? {
       fontSize: 'clamp(14px, 1.5vw, 16px)',
     } : {}),
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#d45d5d',
-    backgroundColor: '#f3f3f3',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 10,
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.meepleRed,
+    backgroundColor: theme.colors.woodLight,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.md,
     flex: 1,
     // Responsive font size
     ...(Platform.OS === 'web' ? {
@@ -180,18 +188,18 @@ const styles = StyleSheet.create({
   },
   fullScreenTitle: {
     flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
     textAlign: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: theme.spacing.sm,
     // Responsive font size
     ...(Platform.OS === 'web' ? {
       fontSize: 'clamp(16px, 2vw, 18px)',
     } : {}),
   },
   closeButton: {
-    padding: 8,
+    padding: theme.spacing.sm,
     minWidth: 44, // Better touch target
     minHeight: 44,
     alignItems: 'center',
@@ -199,7 +207,7 @@ const styles = StyleSheet.create({
   },
   closeText: {
     fontSize: 28,
-    color: '#666',
+    color: theme.colors.textSecondary,
     lineHeight: 28,
     fontWeight: '300',
     // Responsive font size

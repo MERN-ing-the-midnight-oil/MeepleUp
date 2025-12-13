@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Pressable, Text } from 'react-native';
 import { useEvents } from '../context/EventsContext';
 import { useAuth } from '../context/AuthContext';
+import { theme, commonStyles } from '../utils/theme';
 
 /**
  * Standalone RSVP Buttons Component
@@ -146,40 +147,40 @@ const RSVPButtons = ({
 
 const styles = StyleSheet.create({
   rsvpButtonsContainer: {
-    padding: 12,
+    padding: theme.spacing.md,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    backgroundColor: '#f9f9f9',
+    borderTopColor: theme.colors.woodMedium,
+    backgroundColor: theme.colors.woodLight,
   },
   rsvpButtons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: theme.spacing.sm,
   },
   rsvpButton: {
     flex: 1,
-    padding: 12,
-    borderRadius: 8,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 44,
   },
   rsvpButtonPrimary: {
-    backgroundColor: '#4a90e2',
+    backgroundColor: theme.colors.meepleRed,
   },
   rsvpButtonOutline: {
     backgroundColor: 'transparent',
     borderWidth: 2,
-    borderColor: '#4a90e2',
+    borderColor: theme.colors.meepleRed,
   },
   rsvpButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   rsvpButtonTextPrimary: {
     color: '#fff',
   },
   rsvpButtonTextOutline: {
-    color: '#4a90e2',
+    color: theme.colors.meepleRed,
   },
 });
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Button from './common/Button';
 import Input from './common/Input';
+import { theme } from '../utils/theme';
 
 /**
  * Shared Join Form Component
@@ -72,30 +73,30 @@ const JoinForm = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 32,
+    marginBottom: theme.spacing['2xl'],
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.sm,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 20,
-    lineHeight: 22,
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xl,
+    lineHeight: theme.typography.fontSize.base * theme.typography.lineHeight.normal,
   },
   error: {
-    color: '#d32f2f',
-    fontSize: 14,
-    marginBottom: 16,
+    color: theme.colors.error,
+    fontSize: theme.typography.fontSize.sm,
+    marginBottom: theme.spacing.lg,
     textAlign: 'center',
   },
   joinCodeFields: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.lg,
   },
   joinCodeInput: {
     flex: 1,

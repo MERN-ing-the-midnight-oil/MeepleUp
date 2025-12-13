@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Switch } from 'react-native';
 import Button from './common/Button';
 import Input from './common/Input';
+import { theme } from '../utils/theme';
 
 /**
  * Simple Create Event Form Component
@@ -140,63 +141,63 @@ const CreateEventForm = ({
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
+    padding: theme.spacing.xl,
   },
   fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-    marginTop: 16,
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.sm,
+    marginTop: theme.spacing.lg,
   },
   requiredAsterisk: {
-    color: '#d45d5d',
+    color: theme.colors.meepleRed,
   },
   input: {
-    marginBottom: 16,
+    marginBottom: theme.spacing.lg,
   },
   error: {
-    color: '#d32f2f',
-    fontSize: 14,
-    marginBottom: 16,
+    color: theme.colors.error,
+    fontSize: theme.typography.fontSize.sm,
+    marginBottom: theme.spacing.lg,
     textAlign: 'center',
   },
   rsvpSection: {
-    marginTop: 20,
-    paddingTop: 20,
+    marginTop: theme.spacing.xl,
+    paddingTop: theme.spacing.xl,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.woodMedium,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.lg,
   },
   settingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: theme.spacing.lg,
   },
   settingLabel: {
-    fontSize: 16,
-    color: '#333',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
   },
   hint: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: -12,
-    marginBottom: 16,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
+    marginTop: -theme.spacing.md,
+    marginBottom: theme.spacing.lg,
   },
   actions: {
-    marginTop: 8,
+    marginTop: theme.spacing.sm,
   },
   submitButton: {
-    marginBottom: 12,
+    marginBottom: theme.spacing.md,
   },
   cancelButton: {
-    marginBottom: 12,
+    marginBottom: theme.spacing.md,
   },
 });
 

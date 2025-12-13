@@ -11,6 +11,8 @@ import GameDetailsModal from '../components/GameDetailsModal';
 import UserProfileModal from '../components/UserProfileModal';
 import Modal from '../components/common/Modal';
 import { formatDate, formatTime } from '../utils/helpers';
+import { theme, commonStyles } from '../utils/theme';
+import { getGameDetails } from '../utils/api';
 
 // Platform-specific navigation hooks
 let useNavigationHook;
@@ -105,6 +107,7 @@ const BrowseAndProposeScreen = () => {
   const [ratingModalGame, setRatingModalGame] = useState(null);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
+  const [gamesWithBggData, setGamesWithBggData] = useState({}); // { gameId: bggData }
   
   // Get event dates
   const eventDates = useMemo(() => {
@@ -264,6 +267,92 @@ const BrowseAndProposeScreen = () => {
     return result;
   }, [confirmedAttendees, collections, memberNames, selectedDate]);
 
+  // Load BGG data for aggregated games to get thumbnails and images
+  useEffect(() => {
+    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) {
+      setGamesWithBggData({});
+      return;
+    }
+
+    const loadBggData = async () => {
+      const bggDataMap = {};
+      
+      // Load BGG data for games that don't already have it
+      const gamesToLoad = aggregatedGames.filter(game => {
+        const gameId = game.bggId || game.id;
+        return gameId && !game._bggData && !gamesWithBggData[gameId];
+      });
+
+      if (gamesToLoad.length === 0) return;
+
+      console.log('[BrowseAndProposeScreen] Loading BGG data for', gamesToLoad.length, 'games');
+
+      // Load BGG data in parallel
+      const loadPromises = gamesToLoad.map(async (game) => {
+        const gameId = game.bggId || game.id;
+        if (!gameId) return null;
+
+        try {
+          const bggData = await getGameDetails(gameId);
+          if (bggData) {
+            return { gameId, bggData };
+          }
+        } catch (error) {
+          console.error(`[BrowseAndProposeScreen] Error loading BGG data for game ${gameId}:`, error);
+        }
+        return null;
+      });
+
+      const results = await Promise.all(loadPromises);
+      results.forEach(result => {
+        if (result) {
+          bggDataMap[result.gameId] = result.bggData;
+        }
+      });
+
+      if (Object.keys(bggDataMap).length > 0) {
+        setGamesWithBggData(prev => ({ ...prev, ...bggDataMap }));
+      }
+    };
+
+    loadBggData();
+  }, [aggregatedGames]);
+
+  // Enrich aggregated games with BGG data
+  const enrichedGames = useMemo(() => {
+    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) {
+      return [];
+    }
+
+    return aggregatedGames.map(game => {
+      const gameId = game.bggId || game.id;
+      const bggData = game._bggData || (gameId ? gamesWithBggData[gameId] : null);
+      
+      if (bggData) {
+        // Use thumbnail/image from BGG data if game doesn't have one stored
+        const enrichedGame = {
+          ...game,
+          _bggData: bggData,
+        };
+        
+        // Backfill thumbnail if missing
+        if (bggData.thumbnail && !game.thumbnail && !game.bggThumbnail) {
+          enrichedGame.thumbnail = bggData.thumbnail;
+          enrichedGame.bggThumbnail = bggData.thumbnail;
+        }
+        
+        // Backfill image if missing
+        if (bggData.image && !game.image) {
+          enrichedGame.image = bggData.image;
+        }
+        
+        return enrichedGame;
+      }
+      
+      return game;
+    });
+  }, [aggregatedGames, gamesWithBggData]);
+
   // Helper to get rating label
   const getRatingLabel = (rating) => {
     const ratingLabels = {
@@ -276,15 +365,15 @@ const BrowseAndProposeScreen = () => {
     return ratingLabels[rating] || '';
   };
   
-  // Paginated games
+  // Paginated games (using enriched games with BGG data)
   const paginatedGames = useMemo(() => {
-    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) return [];
+    if (!Array.isArray(enrichedGames) || enrichedGames.length === 0) return [];
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
-    return aggregatedGames.slice(startIndex, endIndex);
-  }, [aggregatedGames, currentPage]);
+    return enrichedGames.slice(startIndex, endIndex);
+  }, [enrichedGames, currentPage]);
   
-  const totalPages = Array.isArray(aggregatedGames) ? Math.ceil(aggregatedGames.length / ITEMS_PER_PAGE) : 0;
+  const totalPages = Array.isArray(enrichedGames) ? Math.ceil(enrichedGames.length / ITEMS_PER_PAGE) : 0;
   
   // Load event data
   useEffect(() => {
@@ -466,7 +555,25 @@ const BrowseAndProposeScreen = () => {
   }, []);
   
   const handleProposeGame = async (game) => {
-    if (!event?.id || !db || !userId) return;
+    console.log('[BrowseAndPropose] Propose game button clicked');
+    console.log('[BrowseAndPropose] Initial checks:', {
+      hasEvent: !!event,
+      eventId: event?.id,
+      hasDb: !!db,
+      hasUserId: !!userId,
+      userId,
+      userProposalsCount: userProposals.size,
+      gameId: game.bggId || game.id,
+    });
+    
+    if (!event?.id || !db || !userId) {
+      console.error('[BrowseAndPropose] Missing required data:', {
+        eventId: event?.id,
+        hasDb: !!db,
+        userId,
+      });
+      return;
+    }
     
     const gameId = game.bggId || game.id;
     
@@ -476,6 +583,45 @@ const BrowseAndProposeScreen = () => {
     }
     
     try {
+      // Check if user is a member - check member document first, then group document
+      let hasMemberDoc = false;
+      try {
+        const memberDoc = await db.collection('gamingGroups').doc(event.id)
+          .collection('members').doc(userId).get();
+        hasMemberDoc = memberDoc.exists;
+        console.log('[BrowseAndPropose] Member document check:', {
+          exists: hasMemberDoc,
+          data: hasMemberDoc ? memberDoc.data() : null,
+        });
+      } catch (memberDocError) {
+        console.warn('[BrowseAndPropose] Error checking member document:', memberDocError);
+      }
+      
+      // Also check group document for memberIds
+      const groupDoc = await db.collection('gamingGroups').doc(event.id).get();
+      const groupData = groupDoc.data();
+      const memberIds = groupData?.memberIds || [];
+      const isInMemberIds = memberIds.includes(userId);
+      const isOrganizer = groupData?.organizerId === userId;
+      const isUserMember = hasMemberDoc || isInMemberIds || isOrganizer;
+      
+      console.log('[BrowseAndPropose] Membership check:', {
+        eventId: event.id,
+        userId,
+        hasMemberDoc,
+        memberIds,
+        organizerId: groupData?.organizerId,
+        isUserMember,
+        isOrganizer,
+        isInMemberIds,
+      });
+      
+      if (!isUserMember) {
+        console.error('[BrowseAndPropose] User is not a member of the group');
+        Alert.alert('Error', 'You must be a member of this MeepleUp to propose games.');
+        return;
+      }
+      
       const proposalDoc = {
         gameId,
         gameName: game.title || 'Unknown Game',
@@ -484,10 +630,19 @@ const BrowseAndProposeScreen = () => {
         createdAt: firebase.firestore.Timestamp.now(),
       };
       
+      console.log('[BrowseAndPropose] Attempting to save proposal:', {
+        eventId: event.id,
+        gameId,
+        proposalDoc,
+        documentPath: `gamingGroups/${event.id}/nominations/${gameId}`,
+      });
+      
       await db.collection('gamingGroups').doc(event.id)
         .collection('nominations')
         .doc(gameId)
         .set(proposalDoc, { merge: true });
+      
+      console.log('[BrowseAndPropose] Proposal saved successfully');
       
       setUserProposals(prev => new Set([...prev, gameId]));
       setProposedGames(prev => {
@@ -504,8 +659,16 @@ const BrowseAndProposeScreen = () => {
       
       Alert.alert('Success', 'Game proposed successfully!');
     } catch (error) {
-      console.error('Error proposing game:', error);
-      Alert.alert('Error', 'Failed to propose game. Please try again.');
+      console.error('[BrowseAndPropose] Error proposing game:', error);
+      console.error('[BrowseAndPropose] Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+        eventId: event?.id,
+        userId,
+        gameId: game.bggId || game.id,
+      });
+      Alert.alert('Error', `Failed to propose game: ${error.message || 'Please try again.'}`);
     }
   };
   
@@ -727,7 +890,7 @@ const BrowseAndProposeScreen = () => {
                         style={styles.rateButton}
                         onPress={() => handleOpenRatingModal(proposal)}
                       >
-                        <Text style={styles.rateButtonText}>Rate this game</Text>
+                        <Text style={styles.rateButtonText}>Weigh in on this game</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -741,10 +904,10 @@ const BrowseAndProposeScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Browse Collections</Text>
           <Text style={styles.sectionCopy}>
-            {Array.isArray(aggregatedGames) ? aggregatedGames.length : 0} {Array.isArray(aggregatedGames) && aggregatedGames.length === 1 ? 'game' : 'games'} from {Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0} {Array.isArray(confirmedAttendees) && confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
+            {Array.isArray(enrichedGames) ? enrichedGames.length : 0} {Array.isArray(enrichedGames) && enrichedGames.length === 1 ? 'game' : 'games'} from {Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0} {Array.isArray(confirmedAttendees) && confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
           </Text>
           
-          {!Array.isArray(aggregatedGames) || aggregatedGames.length === 0 ? (
+          {!Array.isArray(enrichedGames) || enrichedGames.length === 0 ? (
             <Text style={styles.emptyText}>No games found from confirmed attendees for this date.</Text>
           ) : (
             <>
@@ -767,15 +930,8 @@ const BrowseAndProposeScreen = () => {
                           game={game} 
                           preloadedBggData={game._bggData}
                           disableModal={true}
+                          inGrid={true}
                         />
-                        {/* Owner Names */}
-                        {owners.length > 0 && (
-                          <View style={styles.gameOwnerNames}>
-                            <Text style={styles.gameOwnerNamesText} numberOfLines={2}>
-                              {owners.join(', ')}
-                            </Text>
-                          </View>
-                        )}
                       </Pressable>
                       {!isProposedByUser && canPropose && (
                         <TouchableOpacity
@@ -837,6 +993,7 @@ const BrowseAndProposeScreen = () => {
             setShowGameDetails(false);
             setSelectedGame(null);
           }}
+          owners={selectedGame._owners || []}
         />
       )}
 
@@ -918,31 +1075,31 @@ const BrowseAndProposeScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.bgColor,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceColor,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    ...(Platform.OS === 'web' ? { paddingTop: 20 } : {}),
+    borderBottomColor: theme.colors.woodMedium,
+    ...(Platform.OS === 'web' ? { paddingTop: theme.spacing.xl } : {}),
   },
   backButton: {
-    padding: 8,
+    padding: theme.spacing.sm,
   },
   backButtonText: {
-    fontSize: 16,
-    color: '#dc2626',
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
   },
   headerSpacer: {
     width: 60,
@@ -951,77 +1108,61 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
+    padding: theme.spacing.lg,
   },
   section: {
-    marginBottom: 32,
+    marginBottom: theme.spacing['2xl'],
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.sm,
   },
   sectionCopy: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.lg,
   },
   loadingText: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
     textAlign: 'center',
-    marginTop: 40,
+    marginTop: theme.spacing['2xl'],
   },
   errorText: {
-    fontSize: 16,
-    color: '#e74c3c',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.error,
     textAlign: 'center',
-    marginTop: 40,
+    marginTop: theme.spacing['2xl'],
   },
   eventDetailsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...commonStyles.card,
   },
   eventName: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
   },
   eventDetailRow: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginBottom: theme.spacing.sm,
   },
   eventDetailLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
     width: 120,
   },
   eventDetailValue: {
-    fontSize: 14,
-    color: '#333',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textPrimary,
     flex: 1,
   },
   proposedGameItem: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    ...commonStyles.card,
+    marginBottom: theme.spacing.lg,
   },
   proposedGameHeader: {
     flexDirection: 'row',
@@ -1036,30 +1177,30 @@ const styles = StyleSheet.create({
   proposedGameThumbnailPlaceholder: {
     width: 60,
     height: 60,
-    borderRadius: 8,
-    backgroundColor: '#e0e0e0',
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.woodMedium,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: theme.spacing.md,
   },
   proposedGameThumbnailText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#999',
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textSecondary,
   },
   proposedGameInfo: {
     flex: 1,
     justifyContent: 'center',
   },
   proposedGameTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
   },
   proposedGameSubtext: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
   },
   proposedByContainer: {
     flexDirection: 'row',
@@ -1255,29 +1396,17 @@ const styles = StyleSheet.create({
   gamesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
     justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.xs,
     marginBottom: 16,
   },
   gameCardWrapper: {
-    width: '31%',
-    position: 'relative',
-    marginBottom: 12,
+    width: '32%',
+    marginBottom: theme.spacing.sm,
     alignSelf: 'flex-start',
   },
   selectableGameCardWrapper: {
-    marginBottom: 8,
-  },
-  gameOwnerNames: {
-    backgroundColor: '#f0f0f0',
-    padding: 6,
-    borderRadius: 4,
-    marginTop: 4,
-  },
-  gameOwnerNamesText: {
-    fontSize: 11,
-    color: '#666',
-    textAlign: 'center',
+    width: '100%',
   },
   proposeGameButton: {
     backgroundColor: '#4a90e2',

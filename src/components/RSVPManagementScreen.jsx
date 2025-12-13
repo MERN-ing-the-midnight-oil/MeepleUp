@@ -16,6 +16,7 @@ import Button from './common/Button';
 import Input from './common/Input';
 import Modal from './common/Modal';
 import UserProfileModal from './UserProfileModal';
+import { theme, commonStyles } from '../utils/theme';
 
 const RSVPManagementScreen = ({ eventId, onClose }) => {
   const { user } = useAuth();
@@ -624,48 +625,48 @@ const RSVPManagementScreen = ({ eventId, onClose }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.bgColor,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: theme.spacing.xl,
   },
   header: {
-    padding: 20,
-    backgroundColor: '#fff',
+    padding: theme.spacing.xl,
+    backgroundColor: theme.colors.surfaceColor,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.woodMedium,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
   },
   section: {
-    backgroundColor: '#fff',
-    padding: 20,
-    marginTop: 12,
+    backgroundColor: theme.colors.surfaceColor,
+    padding: theme.spacing.xl,
+    marginTop: theme.spacing.md,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.woodMedium,
     overflow: 'visible',
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: theme.spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
   },
   editButton: {
     paddingHorizontal: 12,

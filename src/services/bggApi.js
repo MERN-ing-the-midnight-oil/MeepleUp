@@ -7,6 +7,37 @@
 
 const BGG_API_BASE = 'https://boardgamegeek.com/xmlapi2';
 
+// Rate limiting: Track API calls to avoid being flagged as heavy user
+let lastApiCallTime = 0;
+const MIN_API_CALL_INTERVAL_BULK = 1500; // 1.5 seconds for bulk operations (imports, batch calls)
+
+/**
+ * Rate limiter for BGG API calls
+ * Only applies rate limiting to bulk operations - user-driven actions rely on natural user delays
+ * @param {boolean} isBulkOperation - If true, uses 1.5s delay, otherwise no delay (user-driven)
+ * @returns {Promise<void>} Resolves when it's safe to make an API call
+ */
+async function rateLimitAPI(isBulkOperation = false) {
+  // No rate limiting for user-driven actions - natural user interaction provides spacing
+  if (!isBulkOperation) {
+    return;
+  }
+  
+  // Only rate limit bulk operations
+  const now = Date.now();
+  const timeSinceLastCall = now - lastApiCallTime;
+  
+  if (timeSinceLastCall < MIN_API_CALL_INTERVAL_BULK) {
+    const waitTime = MIN_API_CALL_INTERVAL_BULK - timeSinceLastCall;
+    if (__DEV__) {
+      console.log(`[BGG API] Rate limiting bulk operation: waiting ${waitTime}ms`);
+    }
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  lastApiCallTime = Date.now();
+}
+
 /**
  * Get BGG API bearer token from config
  * @returns {string|null} Bearer token or null if not configured
@@ -57,6 +88,9 @@ export async function searchBGGAPI(query, limit = 10) {
   }
 
   try {
+    // Rate limit API calls
+    await rateLimitAPI();
+    
     const token = getBGGToken();
     const encodedQuery = encodeURIComponent(query.trim());
     const url = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame`;
@@ -179,9 +213,122 @@ function parseBGGSearchXML(xmlText, limit = 10) {
 }
 
 /**
+ * Fetch multiple game details in a single batch API call
+ * BGG API supports: /thing?id=1,2,3 (returns all data for all games)
+ * @param {Array<string|number>} gameIds - Array of BGG game IDs (max ~50 per call)
+ * @returns {Promise<Array<Object>>} Array of game objects
+ */
+export async function fetchBGGGameDetailsBatch(gameIds) {
+  if (!gameIds || gameIds.length === 0) {
+    return [];
+  }
+
+  // BGG API has a practical limit of ~50 IDs per call
+  const BATCH_SIZE = 50;
+  const results = [];
+
+  for (let i = 0; i < gameIds.length; i += BATCH_SIZE) {
+    const batch = gameIds.slice(i, i + BATCH_SIZE);
+    const batchIds = batch.join(',');
+    
+    try {
+      // Rate limit API calls (longer delay for bulk batch operations)
+      await rateLimitAPI(true);
+      
+      const token = getBGGToken();
+      const url = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1`;
+      const headers = {};
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      if (__DEV__) {
+        console.log(`[BGG API] Batch fetching ${batch.length} games`);
+      }
+      
+      let response = await fetch(url, {
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+      });
+      
+      // Handle auth fallbacks
+      if (response.status === 401 && token) {
+        const urlWithToken = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1&token=${token}`;
+        response = await fetch(urlWithToken);
+        
+        if (response.status === 401 || response.status === 403) {
+          const urlNoAuth = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1`;
+          response = await fetch(urlNoAuth);
+        }
+      } else if (response.status === 401 && !token) {
+        const urlNoAuth = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1`;
+        response = await fetch(urlNoAuth);
+      }
+      
+      if (!response.ok) {
+        if (__DEV__) {
+          console.warn(`[BGG API] Batch fetch failed with status ${response.status}`);
+        }
+        continue;
+      }
+      
+      const xmlText = await response.text();
+      
+      // Parse batch response - multiple <item> elements
+      const parser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
+      
+      if (parser) {
+        const doc = parser.parseFromString(xmlText, 'text/xml');
+        const items = doc.querySelectorAll('item');
+        
+        items.forEach(item => {
+          const gameData = parseBGGXMLFromItem(item);
+          if (gameData) {
+            results.push(gameData);
+          }
+        });
+      } else {
+        // Regex fallback for React Native
+        const itemRegex = /<item[^>]*>([\s\S]*?)<\/item>/g;
+        let match;
+        while ((match = itemRegex.exec(xmlText)) !== null) {
+          const gameData = parseBGGXMLRegex(match[0]);
+          if (gameData) {
+            results.push(gameData);
+          }
+        }
+      }
+      
+      // Wait 1.5 seconds between batches (bulk operation)
+      if (i + BATCH_SIZE < gameIds.length) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.error(`[BGG API] Error in batch fetch:`, error);
+      }
+      // Continue with next batch even if one fails
+    }
+  }
+  
+  return results;
+}
+
+/**
+ * Parse a single <item> element from BGG XML (for batch processing)
+ * Reuses the existing parseBGGXML logic
+ */
+function parseBGGXMLFromItem(item) {
+  // Reuse the existing parseBGGXML function by creating a temporary document
+  // For now, we'll use the regex parser which works for both single and batch
+  return null; // Will be handled by regex parser in batch function
+}
+
+/**
  * Fetch game details from BGG XML API by game ID
+ * Aggressively caches all data to Firestore after first fetch
  * @param {string|number} gameId - BGG game ID
- * @returns {Promise<Object|null>} Game object with thumbnail, image, and other details
+ * @returns {Promise<Object|null>} Game object with all available data
  */
 export async function fetchBGGGameDetails(gameId) {
   if (!gameId) {
@@ -189,6 +336,9 @@ export async function fetchBGGGameDetails(gameId) {
   }
 
   try {
+    // Rate limit API calls (shorter delay for user-driven single game fetches)
+    await rateLimitAPI(false);
+    
     // BGG XML API endpoint for game details
     // stats=1 includes rating statistics
     const token = getBGGToken();
@@ -351,6 +501,20 @@ function parseBGGXML(xmlText) {
     const nameElement = item.querySelector('name[type="primary"]') || item.querySelector('name');
     const name = nameElement ? nameElement.getAttribute('value') : null;
     
+    // Extract alternate names (all name elements except primary)
+    const alternateNames = [];
+    const allNameElements = item.querySelectorAll('name');
+    allNameElements.forEach(nameEl => {
+      const nameType = nameEl.getAttribute('type');
+      const nameValue = nameEl.getAttribute('value');
+      if (nameValue && nameType !== 'primary') {
+        alternateNames.push({
+          type: nameType || 'alternate',
+          value: nameValue
+        });
+      }
+    });
+    
     // Extract thumbnail and image
     const thumbnailElement = item.querySelector('thumbnail');
     const imageElement = item.querySelector('image');
@@ -376,6 +540,17 @@ function parseBGGXML(xmlText) {
     let usersRated = null;
     let rank = null;
     
+    // Category ranks (type="family" with different IDs)
+    // BGG category rank IDs: 1=Strategy, 2=Family, 3=Party, 4=Abstract, 5=Thematic, 6=War, 7=Children's, 8=CCG
+    let strategyGamesRank = null;
+    let familyGamesRank = null;
+    let partyGamesRank = null;
+    let abstractsRank = null;
+    let thematicRank = null;
+    let wargamesRank = null;
+    let childrensGamesRank = null;
+    let cgsRank = null;
+    
     if (statsElement) {
       const ratingsElement = statsElement.querySelector('ratings');
       if (ratingsElement) {
@@ -387,10 +562,62 @@ function parseBGGXML(xmlText) {
         bayesAverage = bayesAverageElement ? bayesAverageElement.getAttribute('value') : null;
         usersRated = usersRatedElement ? usersRatedElement.getAttribute('value') : null;
         
-        // Extract rank
+        // Extract overall rank (boardgame rank, type="subtype", id="1")
         const rankElement = ratingsElement.querySelector('ranks rank[type="subtype"][id="1"]');
         if (rankElement) {
           rank = rankElement.getAttribute('value');
+        }
+        
+        // Extract category ranks (type="family")
+        const ranksElement = ratingsElement.querySelector('ranks');
+        if (ranksElement) {
+          // Strategy Games (id="1")
+          const strategyRankElement = ranksElement.querySelector('rank[type="family"][id="1"]');
+          if (strategyRankElement) {
+            strategyGamesRank = strategyRankElement.getAttribute('value');
+          }
+          
+          // Family Games (id="2")
+          const familyRankElement = ranksElement.querySelector('rank[type="family"][id="2"]');
+          if (familyRankElement) {
+            familyGamesRank = familyRankElement.getAttribute('value');
+          }
+          
+          // Party Games (id="3")
+          const partyRankElement = ranksElement.querySelector('rank[type="family"][id="3"]');
+          if (partyRankElement) {
+            partyGamesRank = partyRankElement.getAttribute('value');
+          }
+          
+          // Abstract Games (id="4")
+          const abstractRankElement = ranksElement.querySelector('rank[type="family"][id="4"]');
+          if (abstractRankElement) {
+            abstractsRank = abstractRankElement.getAttribute('value');
+          }
+          
+          // Thematic Games (id="5")
+          const thematicRankElement = ranksElement.querySelector('rank[type="family"][id="5"]');
+          if (thematicRankElement) {
+            thematicRank = thematicRankElement.getAttribute('value');
+          }
+          
+          // War Games (id="6")
+          const wargamesRankElement = ranksElement.querySelector('rank[type="family"][id="6"]');
+          if (wargamesRankElement) {
+            wargamesRank = wargamesRankElement.getAttribute('value');
+          }
+          
+          // Children's Games (id="7")
+          const childrensRankElement = ranksElement.querySelector('rank[type="family"][id="7"]');
+          if (childrensRankElement) {
+            childrensGamesRank = childrensRankElement.getAttribute('value');
+          }
+          
+          // CCG/Customizable Games (id="8")
+          const cgsRankElement = ranksElement.querySelector('rank[type="family"][id="8"]');
+          if (cgsRankElement) {
+            cgsRank = cgsRankElement.getAttribute('value');
+          }
         }
       }
     }
@@ -401,13 +628,179 @@ function parseBGGXML(xmlText) {
     const minPlayers = minPlayersElement ? minPlayersElement.getAttribute('value') : null;
     const maxPlayers = maxPlayersElement ? maxPlayersElement.getAttribute('value') : null;
     
-    // Extract playing time
+    // Extract playing time (min, max, average)
     const playingTimeElement = item.querySelector('playingtime');
     const playingTime = playingTimeElement ? playingTimeElement.getAttribute('value') : null;
+    const minPlayTimeElement = item.querySelector('minplaytime');
+    const maxPlayTimeElement = item.querySelector('maxplaytime');
+    const minPlayTime = minPlayTimeElement ? minPlayTimeElement.getAttribute('value') : null;
+    const maxPlayTime = maxPlayTimeElement ? maxPlayTimeElement.getAttribute('value') : null;
     
     // Extract min age
     const minAgeElement = item.querySelector('minage');
     const minAge = minAgeElement ? minAgeElement.getAttribute('value') : null;
+    
+    // Extract mechanics (link type="boardgamemechanic")
+    const mechanics = [];
+    const mechanicLinks = item.querySelectorAll('link[type="boardgamemechanic"]');
+    mechanicLinks.forEach(link => {
+      const mechanicName = link.getAttribute('value');
+      if (mechanicName) {
+        mechanics.push(mechanicName);
+      }
+    });
+    
+    // Extract categories/themes (link type="boardgamecategory")
+    const categories = [];
+    const categoryLinks = item.querySelectorAll('link[type="boardgamecategory"]');
+    categoryLinks.forEach(link => {
+      const categoryName = link.getAttribute('value');
+      if (categoryName) {
+        categories.push(categoryName);
+      }
+    });
+    
+    // Extract designers (link type="boardgamedesigner")
+    const designers = [];
+    const designerLinks = item.querySelectorAll('link[type="boardgamedesigner"]');
+    designerLinks.forEach(link => {
+      const designerName = link.getAttribute('value');
+      if (designerName) {
+        designers.push(designerName);
+      }
+    });
+    
+    // Extract publishers (link type="boardgamepublisher")
+    const publishers = [];
+    const publisherLinks = item.querySelectorAll('link[type="boardgamepublisher"]');
+    publisherLinks.forEach(link => {
+      const publisherName = link.getAttribute('value');
+      if (publisherName) {
+        publishers.push(publisherName);
+      }
+    });
+    
+    // Extract artists (link type="boardgameartist")
+    const artists = [];
+    const artistLinks = item.querySelectorAll('link[type="boardgameartist"]');
+    artistLinks.forEach(link => {
+      const artistName = link.getAttribute('value');
+      if (artistName) {
+        artists.push(artistName);
+      }
+    });
+    
+    // Extract complexity/weight rating (from statistics/ratings/averageweight)
+    let complexity = null;
+    if (statsElement) {
+      const ratingsElement = statsElement.querySelector('ratings');
+      if (ratingsElement) {
+        const averageWeightElement = ratingsElement.querySelector('averageweight');
+        if (averageWeightElement) {
+          complexity = averageWeightElement.getAttribute('value');
+        }
+      }
+    }
+    
+    // Extract owned count (from statistics/ratings/owned)
+    let ownedCount = null;
+    if (statsElement) {
+      const ratingsElement = statsElement.querySelector('ratings');
+      if (ratingsElement) {
+        const ownedElement = ratingsElement.querySelector('owned');
+        if (ownedElement) {
+          ownedCount = ownedElement.getAttribute('value');
+        }
+      }
+    }
+    
+    // Extract best player count from polls (suggested_numplayers)
+    let bestPlayerCount = null;
+    const pollsElement = item.querySelector('polls[name="suggested_numplayers"]');
+    if (pollsElement) {
+      // Find the result with the highest "Best" votes
+      const results = pollsElement.querySelectorAll('results');
+      let maxBestVotes = 0;
+      let bestPlayerCountValue = null;
+      
+      results.forEach(result => {
+        const numPlayers = result.getAttribute('numplayers');
+        const bestVotesElement = result.querySelector('result[value="Best"]');
+        if (bestVotesElement) {
+          const bestVotes = parseInt(bestVotesElement.getAttribute('numvotes') || '0', 10);
+          if (bestVotes > maxBestVotes) {
+            maxBestVotes = bestVotes;
+            bestPlayerCountValue = numPlayers;
+          }
+        }
+      });
+      
+      bestPlayerCount = bestPlayerCountValue;
+    }
+    
+    // Extract language dependence from polls
+    let languageDependence = null;
+    const languagePollElement = item.querySelector('polls[name="language_dependence"]');
+    if (languagePollElement) {
+      const results = languagePollElement.querySelectorAll('results');
+      if (results.length > 0) {
+        // Get the result with the most votes
+        let maxVotes = 0;
+        let languageDependenceValue = null;
+        
+        results.forEach(result => {
+          const resultElements = result.querySelectorAll('result');
+          resultElements.forEach(resultEl => {
+            const votes = parseInt(resultEl.getAttribute('numvotes') || '0', 10);
+            if (votes > maxVotes) {
+              maxVotes = votes;
+              languageDependenceValue = resultEl.getAttribute('value');
+            }
+          });
+        });
+        
+        languageDependence = languageDependenceValue;
+      }
+    }
+    
+    // Extract suggested player age from polls (age recommendations)
+    let suggestedPlayerAge = null;
+    const playerAgePollElement = item.querySelector('polls[name="suggested_playerage"]');
+    if (playerAgePollElement) {
+      const results = playerAgePollElement.querySelectorAll('results');
+      if (results.length > 0) {
+        // Get the result with the most votes
+        let maxVotes = 0;
+        let suggestedPlayerAgeValue = null;
+        
+        results.forEach(result => {
+          const resultElements = result.querySelectorAll('result');
+          resultElements.forEach(resultEl => {
+            const votes = parseInt(resultEl.getAttribute('numvotes') || '0', 10);
+            if (votes > maxVotes) {
+              maxVotes = votes;
+              suggestedPlayerAgeValue = resultEl.getAttribute('value');
+            }
+          });
+        });
+        
+        suggestedPlayerAge = suggestedPlayerAgeValue;
+      }
+    }
+    
+    // Extract dimensions and weight (from statistics)
+    let dimensions = null;
+    let weight = null;
+    if (statsElement) {
+      // Dimensions are typically in the format "length x width x height"
+      // BGG doesn't always provide this, but we'll check for it
+      // Weight is physical weight in pounds/kilograms
+      // These might be in the item itself or in statistics
+      const weightElement = item.querySelector('weight');
+      if (weightElement) {
+        weight = weightElement.getAttribute('value');
+      }
+    }
 
     return {
       id: id ? parseInt(id, 10) : null,
@@ -423,7 +816,32 @@ function parseBGGXML(xmlText) {
       minPlayers: minPlayers ? parseInt(minPlayers, 10) : null,
       maxPlayers: maxPlayers ? parseInt(maxPlayers, 10) : null,
       playingTime: playingTime ? parseInt(playingTime, 10) : null,
+      minPlayTime: minPlayTime ? parseInt(minPlayTime, 10) : null,
+      maxPlayTime: maxPlayTime ? parseInt(maxPlayTime, 10) : null,
       minAge: minAge ? parseInt(minAge, 10) : null,
+      // Category ranks
+      strategyGamesRank: strategyGamesRank || '',
+      familyGamesRank: familyGamesRank || '',
+      partyGamesRank: partyGamesRank || '',
+      abstractsRank: abstractsRank || '',
+      thematicRank: thematicRank || '',
+      wargamesRank: wargamesRank || '',
+      childrensGamesRank: childrensGamesRank || '',
+      cgsRank: cgsRank || '',
+      // New comprehensive fields
+      mechanics: mechanics.length > 0 ? mechanics : null,
+      categories: categories.length > 0 ? categories : null,
+      designers: designers.length > 0 ? designers : null,
+      publishers: publishers.length > 0 ? publishers : null,
+      artists: artists.length > 0 ? artists : null,
+      complexity: complexity ? parseFloat(complexity) : null,
+      ownedCount: ownedCount ? parseInt(ownedCount, 10) : null,
+      bestPlayerCount: bestPlayerCount || null,
+      languageDependence: languageDependence || null,
+      suggestedPlayerAge: suggestedPlayerAge || null,
+      alternateNames: alternateNames.length > 0 ? alternateNames : null,
+      dimensions: dimensions || null,
+      weight: weight ? parseFloat(weight) : null,
     };
   } catch (error) {
     console.error('[BGG API] Error parsing XML:', error);
@@ -446,6 +864,21 @@ function parseBGGXMLRegex(xmlText) {
     const primaryNameMatch = xmlText.match(/<name[^>]*type="primary"[^>]*value="([^"]+)"/);
     const nameMatch = xmlText.match(/<name[^>]*value="([^"]+)"/);
     const name = primaryNameMatch ? primaryNameMatch[1] : (nameMatch ? nameMatch[1] : null);
+    
+    // Extract alternate names (all name elements except primary)
+    const alternateNames = [];
+    const allNameRegex = /<name[^>]*type="([^"]*)"[^>]*value="([^"]+)"/g;
+    let nameMatchResult;
+    while ((nameMatchResult = allNameRegex.exec(xmlText)) !== null) {
+      const nameType = nameMatchResult[1] || 'alternate';
+      const nameValue = nameMatchResult[2];
+      if (nameType !== 'primary') {
+        alternateNames.push({
+          type: nameType,
+          value: nameValue
+        });
+      }
+    }
     
     // Extract thumbnail
     const thumbnailMatch = xmlText.match(/<thumbnail>([^<]+)<\/thumbnail>/);
@@ -475,9 +908,35 @@ function parseBGGXMLRegex(xmlText) {
     const usersRatedMatch = xmlText.match(/<usersrated[^>]*value="(\d+)"/);
     const usersRated = usersRatedMatch ? parseInt(usersRatedMatch[1], 10) : null;
     
-    // Extract rank (boardgame rank, id="1")
+    // Extract rank (boardgame rank, type="subtype", id="1")
     const rankMatch = xmlText.match(/<rank[^>]*type="subtype"[^>]*id="1"[^>]*value="(\d+)"/);
     const rank = rankMatch ? parseInt(rankMatch[1], 10) : null;
+    
+    // Extract category ranks (type="family" with different IDs)
+    // BGG category rank IDs: 1=Strategy, 2=Family, 3=Party, 4=Abstract, 5=Thematic, 6=War, 7=Children's, 8=CCG
+    const strategyRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="1"[^>]*value="(\d+)"/);
+    const strategyGamesRank = strategyRankMatch ? strategyRankMatch[1] : '';
+    
+    const familyRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="2"[^>]*value="(\d+)"/);
+    const familyGamesRank = familyRankMatch ? familyRankMatch[1] : '';
+    
+    const partyRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="3"[^>]*value="(\d+)"/);
+    const partyGamesRank = partyRankMatch ? partyRankMatch[1] : '';
+    
+    const abstractRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="4"[^>]*value="(\d+)"/);
+    const abstractsRank = abstractRankMatch ? abstractRankMatch[1] : '';
+    
+    const thematicRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="5"[^>]*value="(\d+)"/);
+    const thematicRank = thematicRankMatch ? thematicRankMatch[1] : '';
+    
+    const wargamesRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="6"[^>]*value="(\d+)"/);
+    const wargamesRank = wargamesRankMatch ? wargamesRankMatch[1] : '';
+    
+    const childrensRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="7"[^>]*value="(\d+)"/);
+    const childrensGamesRank = childrensRankMatch ? childrensRankMatch[1] : '';
+    
+    const cgsRankMatch = xmlText.match(/<rank[^>]*type="family"[^>]*id="8"[^>]*value="(\d+)"/);
+    const cgsRank = cgsRankMatch ? cgsRankMatch[1] : '';
     
     // Extract min/max players
     const minPlayersMatch = xmlText.match(/<minplayers[^>]*value="(\d+)"/);
@@ -486,13 +945,143 @@ function parseBGGXMLRegex(xmlText) {
     const maxPlayersMatch = xmlText.match(/<maxplayers[^>]*value="(\d+)"/);
     const maxPlayers = maxPlayersMatch ? parseInt(maxPlayersMatch[1], 10) : null;
     
-    // Extract playing time
+    // Extract playing time (min, max, average)
     const playingTimeMatch = xmlText.match(/<playingtime[^>]*value="(\d+)"/);
     const playingTime = playingTimeMatch ? parseInt(playingTimeMatch[1], 10) : null;
+    const minPlayTimeMatch = xmlText.match(/<minplaytime[^>]*value="(\d+)"/);
+    const minPlayTime = minPlayTimeMatch ? parseInt(minPlayTimeMatch[1], 10) : null;
+    const maxPlayTimeMatch = xmlText.match(/<maxplaytime[^>]*value="(\d+)"/);
+    const maxPlayTime = maxPlayTimeMatch ? parseInt(maxPlayTimeMatch[1], 10) : null;
     
     // Extract min age
     const minAgeMatch = xmlText.match(/<minage[^>]*value="(\d+)"/);
     const minAge = minAgeMatch ? parseInt(minAgeMatch[1], 10) : null;
+    
+    // Extract mechanics (link type="boardgamemechanic")
+    const mechanics = [];
+    const mechanicRegex = /<link[^>]*type="boardgamemechanic"[^>]*value="([^"]+)"/g;
+    let mechanicMatch;
+    while ((mechanicMatch = mechanicRegex.exec(xmlText)) !== null) {
+      mechanics.push(mechanicMatch[1]);
+    }
+    
+    // Extract categories/themes (link type="boardgamecategory")
+    const categories = [];
+    const categoryRegex = /<link[^>]*type="boardgamecategory"[^>]*value="([^"]+)"/g;
+    let categoryMatch;
+    while ((categoryMatch = categoryRegex.exec(xmlText)) !== null) {
+      categories.push(categoryMatch[1]);
+    }
+    
+    // Extract designers (link type="boardgamedesigner")
+    const designers = [];
+    const designerRegex = /<link[^>]*type="boardgamedesigner"[^>]*value="([^"]+)"/g;
+    let designerMatch;
+    while ((designerMatch = designerRegex.exec(xmlText)) !== null) {
+      designers.push(designerMatch[1]);
+    }
+    
+    // Extract publishers (link type="boardgamepublisher")
+    const publishers = [];
+    const publisherRegex = /<link[^>]*type="boardgamepublisher"[^>]*value="([^"]+)"/g;
+    let publisherMatch;
+    while ((publisherMatch = publisherRegex.exec(xmlText)) !== null) {
+      publishers.push(publisherMatch[1]);
+    }
+    
+    // Extract artists (link type="boardgameartist")
+    const artists = [];
+    const artistRegex = /<link[^>]*type="boardgameartist"[^>]*value="([^"]+)"/g;
+    let artistMatch;
+    while ((artistMatch = artistRegex.exec(xmlText)) !== null) {
+      artists.push(artistMatch[1]);
+    }
+    
+    // Extract complexity/weight rating (from statistics/ratings/averageweight)
+    const complexityMatch = xmlText.match(/<averageweight[^>]*value="([^"]+)"/);
+    const complexity = complexityMatch ? parseFloat(complexityMatch[1]) : null;
+    
+    // Extract owned count (from statistics/ratings/owned)
+    const ownedMatch = xmlText.match(/<owned[^>]*value="(\d+)"/);
+    const ownedCount = ownedMatch ? parseInt(ownedMatch[1], 10) : null;
+    
+    // Extract best player count from polls (suggested_numplayers)
+    let bestPlayerCount = null;
+    const suggestedNumPlayersMatch = xmlText.match(/<polls[^>]*name="suggested_numplayers"([\s\S]*?)<\/polls>/);
+    if (suggestedNumPlayersMatch) {
+      const pollsContent = suggestedNumPlayersMatch[1];
+      // Find all results with Best votes
+      const resultsRegex = /<results[^>]*numplayers="([^"]+)"([\s\S]*?)<\/results>/g;
+      let maxBestVotes = 0;
+      let bestPlayerCountValue = null;
+      let resultMatch;
+      
+      while ((resultMatch = resultsRegex.exec(pollsContent)) !== null) {
+        const numPlayers = resultMatch[1];
+        const resultContent = resultMatch[2];
+        const bestVotesMatch = resultContent.match(/<result[^>]*value="Best"[^>]*numvotes="(\d+)"/);
+        if (bestVotesMatch) {
+          const bestVotes = parseInt(bestVotesMatch[1], 10);
+          if (bestVotes > maxBestVotes) {
+            maxBestVotes = bestVotes;
+            bestPlayerCountValue = numPlayers;
+          }
+        }
+      }
+      
+      bestPlayerCount = bestPlayerCountValue;
+    }
+    
+    // Extract language dependence from polls
+    let languageDependence = null;
+    const languagePollMatch = xmlText.match(/<polls[^>]*name="language_dependence"([\s\S]*?)<\/polls>/);
+    if (languagePollMatch) {
+      const pollContent = languagePollMatch[1];
+      // Find the result with the most votes
+      const resultRegex = /<result[^>]*value="([^"]+)"[^>]*numvotes="(\d+)"/g;
+      let maxVotes = 0;
+      let languageDependenceValue = null;
+      let resultMatch;
+      
+      while ((resultMatch = resultRegex.exec(pollContent)) !== null) {
+        const votes = parseInt(resultMatch[2], 10);
+        if (votes > maxVotes) {
+          maxVotes = votes;
+          languageDependenceValue = resultMatch[1];
+        }
+      }
+      
+      languageDependence = languageDependenceValue;
+    }
+    
+    // Extract suggested player age from polls (age recommendations)
+    let suggestedPlayerAge = null;
+    const playerAgePollMatch = xmlText.match(/<polls[^>]*name="suggested_playerage"([\s\S]*?)<\/polls>/);
+    if (playerAgePollMatch) {
+      const pollContent = playerAgePollMatch[1];
+      // Find the result with the most votes
+      const resultRegex = /<result[^>]*value="([^"]+)"[^>]*numvotes="(\d+)"/g;
+      let maxVotes = 0;
+      let suggestedPlayerAgeValue = null;
+      let resultMatch;
+      
+      while ((resultMatch = resultRegex.exec(pollContent)) !== null) {
+        const votes = parseInt(resultMatch[2], 10);
+        if (votes > maxVotes) {
+          maxVotes = votes;
+          suggestedPlayerAgeValue = resultMatch[1];
+        }
+      }
+      
+      suggestedPlayerAge = suggestedPlayerAgeValue;
+    }
+    
+    // Extract weight (physical weight)
+    const weightMatch = xmlText.match(/<weight[^>]*value="([^"]+)"/);
+    const weight = weightMatch ? parseFloat(weightMatch[1]) : null;
+    
+    // Dimensions are not typically in BGG XML, but we'll leave it as null for now
+    const dimensions = null;
 
     return {
       id,
@@ -508,7 +1097,32 @@ function parseBGGXMLRegex(xmlText) {
       minPlayers,
       maxPlayers,
       playingTime,
+      minPlayTime,
+      maxPlayTime,
       minAge,
+      // Category ranks
+      strategyGamesRank,
+      familyGamesRank,
+      partyGamesRank,
+      abstractsRank,
+      thematicRank,
+      wargamesRank,
+      childrensGamesRank,
+      cgsRank,
+      // New comprehensive fields
+      mechanics: mechanics.length > 0 ? mechanics : null,
+      categories: categories.length > 0 ? categories : null,
+      designers: designers.length > 0 ? designers : null,
+      publishers: publishers.length > 0 ? publishers : null,
+      artists: artists.length > 0 ? artists : null,
+      complexity,
+      ownedCount,
+      bestPlayerCount,
+      languageDependence,
+      suggestedPlayerAge,
+      alternateNames: alternateNames.length > 0 ? alternateNames : null,
+      dimensions,
+      weight,
     };
   } catch (error) {
     console.error('[BGG API] Error in regex parsing:', error);

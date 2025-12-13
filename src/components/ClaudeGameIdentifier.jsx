@@ -321,16 +321,19 @@ const ClaudeGameIdentifier = ({
   const [carouselIndex, setCarouselIndex] = useState(0);
   const carouselFlatListRef = useRef(null);
 
+  // Only request camera permissions when the camera modal is shown
   useEffect(() => {
-    if (!permission || permission.status === 'undetermined') {
-      requestPermission().catch((permError) => {
-        console.error('Camera permission request failed:', permError);
-        setError('Unable to access the camera. Check permissions in your device settings.');
-      });
-    } else if (!permission.granted && !permission.canAskAgain) {
-      setError('Camera access is blocked. Enable it in your device settings to identify games.');
+    if (showCameraModal) {
+      if (!permission || permission.status === 'undetermined') {
+        requestPermission().catch((permError) => {
+          console.error('Camera permission request failed:', permError);
+          setError('Unable to access the camera. Check permissions in your device settings.');
+        });
+      } else if (!permission.granted && !permission.canAskAgain) {
+        setError('Camera access is blocked. Enable it in your device settings to identify games.');
+      }
     }
-  }, [permission, requestPermission]);
+  }, [permission, requestPermission, showCameraModal]);
 
   // Reset torch when camera modal closes
   useEffect(() => {
@@ -450,8 +453,9 @@ const ClaudeGameIdentifier = ({
             console.log('[ClaudeGameIdentifier] Creating search promise for:', query);
           }
           
-          // First try Firestore search without BGG fallback
-          const backendSearchPromise = query ? searchGamesByName(query, false) : Promise.resolve([]);
+          // Use searchGamesByName with BGG fallback enabled
+          // This will check Firestore first, then BGG API if needed, and cache results
+          const searchPromise = query ? searchGamesByName(query, true) : Promise.resolve([]);
           
           // Add a timeout wrapper to prevent hanging
           const timeoutPromise = new Promise((_, reject) => {
@@ -459,18 +463,18 @@ const ClaudeGameIdentifier = ({
           });
           
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Searching backend first (no BGG fallback)...');
+            console.log('[ClaudeGameIdentifier] Searching (Firestore -> BGG API with caching)...');
           }
           
           try {
-            searchResults = await Promise.race([backendSearchPromise, timeoutPromise]);
+            searchResults = await Promise.race([searchPromise, timeoutPromise]);
             
             if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] Backend search completed, results:', searchResults.length);
+              console.log('[ClaudeGameIdentifier] Search completed, results:', searchResults.length);
             }
           } catch (raceError) {
             if (__DEV__) {
-              console.error('[ClaudeGameIdentifier] Backend search error:', raceError);
+              console.error('[ClaudeGameIdentifier] Search error:', raceError);
             }
             searchResults = [];
           }
@@ -478,34 +482,9 @@ const ClaudeGameIdentifier = ({
           // Ensure searchResults is an array
           if (!Array.isArray(searchResults)) {
             if (__DEV__) {
-              console.warn('[ClaudeGameIdentifier] Backend search returned non-array:', searchResults);
+              console.warn('[ClaudeGameIdentifier] Search returned non-array:', searchResults);
             }
             searchResults = [];
-          }
-          
-          // If no backend results, try BGG API
-          if (searchResults.length === 0 && query) {
-            if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] No backend results, trying BGG API...');
-            }
-            try {
-              const { searchBGGAPI } = await import('../services/bggApi');
-              const bggResults = await searchBGGAPI(query, 50);
-              if (bggResults && Array.isArray(bggResults) && bggResults.length > 0) {
-                if (__DEV__) {
-                  console.log(`[ClaudeGameIdentifier] BGG API found ${bggResults.length} games`);
-                }
-                searchResults = bggResults;
-              } else {
-                if (__DEV__) {
-                  console.log('[ClaudeGameIdentifier] BGG API also returned no results');
-                }
-              }
-            } catch (bggError) {
-              if (__DEV__) {
-                console.warn('[ClaudeGameIdentifier] BGG API search failed:', bggError);
-              }
-            }
           }
           
           if (__DEV__) {
@@ -638,14 +617,11 @@ const ClaudeGameIdentifier = ({
             let details = null;
             try {
               if (searchResults[0].id) {
-                // Always fetch from BGG API to ensure we get thumbnails
-                const { fetchBGGGameDetails } = await import('../services/bggApi');
-                const bggDetails = await fetchBGGGameDetails(searchResults[0].id);
+                // Use getGameDetails which checks Firestore first, then BGG API if needed
+                // This ensures proper caching and minimizes BGG API calls
+                const bggDetails = await getGameDetails(searchResults[0].id);
                 
-                // If BGG API doesn't have it, fall back to getGameDetails
-                if (!bggDetails || !bggDetails.thumbnail) {
-                  details = await getGameDetails(searchResults[0].id);
-                } else {
+                if (bggDetails) {
                   details = bggDetails;
                 }
               }
@@ -662,17 +638,46 @@ const ClaudeGameIdentifier = ({
             }
             
             updateCandidate(candidateId, (candidate) => {
+              // Try to get thumbnail from multiple sources (fallbackDetails already merged into details)
+              const thumbnail = details?.thumbnail || 
+                               searchResults[0]?.thumbnail || 
+                               null;
+              const image = details?.image || 
+                           searchResults[0]?.image || 
+                           null;
+              
+              const bggData = {
+                id: searchResults[0].id,
+                name: details?.name || searchResults[0].name,
+                thumbnail: thumbnail,
+                image: image,
+                yearPublished: details?.yearPublished || searchResults[0].yearPublished || '',
+                // Category ranks (fallbackDetails already merged into details)
+                strategyGamesRank: details?.strategyGamesRank || '',
+                familyGamesRank: details?.familyGamesRank || '',
+                partyGamesRank: details?.partyGamesRank || '',
+                abstractsRank: details?.abstractsRank || '',
+                thematicRank: details?.thematicRank || '',
+                wargamesRank: details?.wargamesRank || '',
+                childrensGamesRank: details?.childrensGamesRank || '',
+                cgsRank: details?.cgsRank || '',
+              };
+              
+              if (__DEV__) {
+                console.log('[ClaudeGameIdentifier] Setting bggData with thumbnail:', {
+                  hasThumbnail: !!bggData.thumbnail,
+                  thumbnail: bggData.thumbnail ? bggData.thumbnail.substring(0, 50) + '...' : null,
+                  hasImage: !!bggData.image,
+                  detailsThumbnail: details?.thumbnail ? 'yes' : 'no',
+                  searchResultThumbnail: searchResults[0]?.thumbnail ? 'yes' : 'no',
+                });
+              }
+              
               return {
                 ...candidate,
                 bggStatus: 'matched',
                 bggSearchResults: searchResults, // Store all results for carousel
-                bggData: {
-                  id: searchResults[0].id,
-                  name: details?.name || searchResults[0].name,
-                  thumbnail: details?.thumbnail || null,
-                  image: details?.image || null,
-                  yearPublished: details?.yearPublished || searchResults[0].yearPublished || '',
-                },
+                bggData,
               };
             });
           }
@@ -694,89 +699,103 @@ const ClaudeGameIdentifier = ({
               // Remove the original candidate (we'll replace it with multiple cards)
               setGameCandidates((prev) => prev.filter((c) => c.id !== candidateId));
               
-              // Load details for top 10 results and create candidate cards
+              // Load details for top 10 results using batch API call (much more efficient!)
               const topResults = searchResults.slice(0, 10);
-              Promise.all(
-                topResults.map(async (result, index) => {
-                  try {
-                    // Always fetch from BGG API first to ensure we get thumbnails
-                    const { fetchBGGGameDetails } = await import('../services/bggApi');
-                    let details = null;
-                    try {
-                      const bggDetails = await fetchBGGGameDetails(result.id);
-                      if (bggDetails && bggDetails.thumbnail) {
-                        details = bggDetails;
-                      } else {
-                        details = await getGameDetails(result.id);
-                        // Merge BGG API thumbnail if available
-                        if (bggDetails && bggDetails.thumbnail) {
-                          details.thumbnail = bggDetails.thumbnail;
-                          details.image = bggDetails.image || details.image;
-                        }
-                      }
-                    } catch (bggError) {
-                      // Fallback to getGameDetails if BGG API fails
-                      details = await getGameDetails(result.id);
+              const gameIds = topResults.map(r => r.id);
+              
+              // Use batch API call to fetch all games at once instead of individual calls
+              const { fetchBGGGameDetailsBatch } = await import('../services/bggApi');
+              fetchBGGGameDetailsBatch(gameIds)
+                .then((batchDetails) => {
+                  // Create a map of gameId -> details for quick lookup
+                  const detailsMap = new Map();
+                  batchDetails.forEach(detail => {
+                    if (detail && detail.id) {
+                      detailsMap.set(detail.id.toString(), detail);
                     }
-                    
-                    return {
-                      id: result.id,
-                      name: details?.name || result.name,
-                      thumbnail: details?.thumbnail || null,
-                      image: details?.image || null,
-                      yearPublished: details?.yearPublished || result.yearPublished || '',
-                      rank: details?.rank || result.rank || '0',
-                    };
-                  } catch (error) {
-                    console.warn('[ClaudeGameIdentifier] Error loading details for result:', result.id, error);
-                    return {
-                      id: result.id,
-                      name: result.name,
-                      thumbnail: null,
-                      image: null,
-                      yearPublished: result.yearPublished || '',
-                      rank: result.rank || '0',
-                    };
-                  }
-                })
-              ).then((enrichedResults) => {
-                if (sessionKey === activeSessionRef.current) {
-                  // Create a candidate card for each result
-                  const newCandidates = enrichedResults.map((result, index) => {
-                    // Create unique ID for each candidate card
-                    const newCandidateId = `${candidateId}-option-${index}`;
-                    
-                    return {
-                      id: newCandidateId,
-                      claudeTitle: result.name,
-                      claudeConfidence: currentCandidate.claudeConfidence || 'unknown',
-                      bggStatus: 'matched',
-                      bggData: {
-                        id: result.id,
-                        name: result.name,
-                        thumbnail: result.thumbnail,
-                        image: result.image,
-                        yearPublished: result.yearPublished,
-                      },
-                      status: 'pending',
-                      originalCandidateId: candidateId, // Track which original candidate this came from
-                    };
                   });
                   
-                  // Add all new candidates to staging area
-                  setGameCandidates((prev) => [...prev, ...newCandidates]);
+                  // Enrich results with batch-fetched details
+                  const enrichedResults = topResults.map(result => {
+                    const details = detailsMap.get(result.id.toString());
+                    if (details) {
+                      return {
+                        id: result.id,
+                        name: details.name || result.name,
+                        thumbnail: details.thumbnail || null,
+                        image: details.image || null,
+                        yearPublished: details.yearPublished || result.yearPublished || '',
+                        rank: details.rank || result.rank || '0',
+                        // Include all category ranks from batch fetch
+                        strategyGamesRank: details.strategyGamesRank || '',
+                        familyGamesRank: details.familyGamesRank || '',
+                        partyGamesRank: details.partyGamesRank || '',
+                        abstractsRank: details.abstractsRank || '',
+                        thematicRank: details.thematicRank || '',
+                        wargamesRank: details.wargamesRank || '',
+                        childrensGamesRank: details.childrensGamesRank || '',
+                        cgsRank: details.cgsRank || '',
+                      };
+                    } else {
+                      // Fallback if batch didn't return this game
+                      return {
+                        id: result.id,
+                        name: result.name,
+                        thumbnail: null,
+                        image: null,
+                        yearPublished: result.yearPublished || '',
+                        rank: result.rank || '0',
+                      };
+                    }
+                  });
                   
-                  if (__DEV__) {
-                    console.log('[ClaudeGameIdentifier] Created', newCandidates.length, 'candidate cards in staging area');
+                  if (sessionKey === activeSessionRef.current) {
+                    // Create a candidate card for each result
+                    const newCandidates = enrichedResults.map((result, index) => {
+                      // Create unique ID for each candidate card
+                      const newCandidateId = `${candidateId}-option-${index}`;
+                      
+                      return {
+                        id: newCandidateId,
+                        claudeTitle: result.name,
+                        claudeConfidence: currentCandidate.claudeConfidence || 'unknown',
+                        bggStatus: 'matched',
+                        bggData: {
+                          id: result.id,
+                          name: result.name,
+                          thumbnail: result.thumbnail,
+                          image: result.image,
+                          yearPublished: result.yearPublished,
+                          // Category ranks from batch fetch
+                          strategyGamesRank: result.strategyGamesRank || '',
+                          familyGamesRank: result.familyGamesRank || '',
+                          partyGamesRank: result.partyGamesRank || '',
+                          abstractsRank: result.abstractsRank || '',
+                          thematicRank: result.thematicRank || '',
+                          wargamesRank: result.wargamesRank || '',
+                          childrensGamesRank: result.childrensGamesRank || '',
+                          cgsRank: result.cgsRank || '',
+                        },
+                        status: 'pending',
+                        originalCandidateId: candidateId, // Track which original candidate this came from
+                      };
+                    });
+                    
+                    // Add all new candidates to staging area
+                    setGameCandidates((prev) => [...prev, ...newCandidates]);
+                    
+                    if (__DEV__) {
+                      console.log('[ClaudeGameIdentifier] Created', newCandidates.length, 'candidate cards using batch API (1 call instead of', gameIds.length, 'calls)');
+                    }
                   }
-                }
-              }).catch((error) => {
-                console.error('[ClaudeGameIdentifier] Error loading multiple results:', error);
-                // Fall back to first result if available
-                if (searchResults && searchResults.length > 0 && searchResults[0]) {
-                  handleSelectFromMultipleResults(searchResults[0], candidateId, sessionKey);
-                }
-              });
+                })
+                .catch((error) => {
+                  console.error('[ClaudeGameIdentifier] Error loading multiple results with batch API:', error);
+                  // Fall back to first result if available
+                  if (searchResults && searchResults.length > 0 && searchResults[0]) {
+                    handleSelectFromMultipleResults(searchResults[0], candidateId, sessionKey);
+                  }
+                });
             }
           }
           return;
@@ -817,19 +836,11 @@ const ClaudeGameIdentifier = ({
 
         try {
           if (primaryResult.id) {
-            // Always fetch from BGG API first to ensure we get thumbnails
-            const { fetchBGGGameDetails } = await import('../services/bggApi');
-            const bggDetails = await fetchBGGGameDetails(primaryResult.id);
+            // Use getGameDetails which checks Firestore first, then BGG API if needed
+            // This ensures proper caching and minimizes BGG API calls
+            const bggDetails = await getGameDetails(primaryResult.id);
             
-            // If BGG API doesn't have it, fall back to getGameDetails
-            if (!bggDetails || !bggDetails.thumbnail) {
-              details = await getGameDetails(primaryResult.id);
-              // Merge BGG API thumbnail if available
-              if (bggDetails && bggDetails.thumbnail) {
-                details.thumbnail = bggDetails.thumbnail;
-                details.image = bggDetails.image || details.image;
-              }
-            } else {
+            if (bggDetails) {
               details = bggDetails;
             }
           }
@@ -874,9 +885,25 @@ const ClaudeGameIdentifier = ({
                 bggData: {
                   id: primaryResult.id || candidate.bggData?.id || null,
                   name: details?.name || primaryResult.name || candidate.claudeTitle || 'Unknown',
-                  thumbnail: details?.thumbnail || primaryResult.thumbnail || null,
-                  image: details?.image || primaryResult.image || null,
+                  // Try multiple sources for thumbnail/image (fallbackDetails already merged into details)
+                  thumbnail: details?.thumbnail || 
+                           primaryResult.thumbnail || 
+                           candidate.bggData?.thumbnail || 
+                           null,
+                  image: details?.image || 
+                       primaryResult.image || 
+                       candidate.bggData?.image || 
+                       null,
                   yearPublished: details?.yearPublished || primaryResult.yearPublished || candidate.bggData?.yearPublished || '',
+                  // Category ranks (prefer details, then primaryResult, then existing bggData; fallbackDetails already merged into details)
+                  strategyGamesRank: details?.strategyGamesRank || primaryResult.strategyGamesRank || candidate.bggData?.strategyGamesRank || '',
+                  familyGamesRank: details?.familyGamesRank || primaryResult.familyGamesRank || candidate.bggData?.familyGamesRank || '',
+                  partyGamesRank: details?.partyGamesRank || primaryResult.partyGamesRank || candidate.bggData?.partyGamesRank || '',
+                  abstractsRank: details?.abstractsRank || primaryResult.abstractsRank || candidate.bggData?.abstractsRank || '',
+                  thematicRank: details?.thematicRank || primaryResult.thematicRank || candidate.bggData?.thematicRank || '',
+                  wargamesRank: details?.wargamesRank || primaryResult.wargamesRank || candidate.bggData?.wargamesRank || '',
+                  childrensGamesRank: details?.childrensGamesRank || primaryResult.childrensGamesRank || candidate.bggData?.childrensGamesRank || '',
+                  cgsRank: details?.cgsRank || primaryResult.cgsRank || candidate.bggData?.cgsRank || '',
                 },
               };
               // Preserve styling if it exists - ensure it's a valid object
@@ -1425,13 +1452,32 @@ const ClaudeGameIdentifier = ({
         bggThumbnail: candidate.bggData?.thumbnail || null,
         bggImage: candidate.bggData?.image || null,
         yearPublished: candidate.bggData?.yearPublished || null,
+        // Category ranks from BGG data
+        strategyGamesRank: candidate.bggData?.strategyGamesRank || '',
+        familyGamesRank: candidate.bggData?.familyGamesRank || '',
+        partyGamesRank: candidate.bggData?.partyGamesRank || '',
+        abstractsRank: candidate.bggData?.abstractsRank || '',
+        thematicRank: candidate.bggData?.thematicRank || '',
+        wargamesRank: candidate.bggData?.wargamesRank || '',
+        childrensGamesRank: candidate.bggData?.childrensGamesRank || '',
+        cgsRank: candidate.bggData?.cgsRank || '',
         // Styling removed - we use BGG thumbnails instead of AI-generated styling
       };
 
       setGameCandidates((prev) => {
-        const updated = prev.map((item) =>
-          item.id === candidateId ? { ...item, status: 'confirmed', collectionRecordId } : item
-        );
+        const updated = prev.map((item) => {
+          if (item.id === candidateId) {
+            // Explicitly preserve bggData to ensure thumbnails are maintained
+            return { 
+              ...item, 
+              status: 'confirmed', 
+              collectionRecordId,
+              // Ensure bggData is preserved - this is critical for thumbnail display
+              bggData: item.bggData || candidate.bggData || null
+            };
+          }
+          return item;
+        });
 
         // Don't auto-reset - let the user see their confirmed games
         // They can click "I'm done" or continue identifying more games
@@ -1686,6 +1732,15 @@ const ClaudeGameIdentifier = ({
                   thumbnail: suggestion.thumbnail,
                   image: suggestion.image,
                   yearPublished: suggestion.yearPublished,
+                  // Category ranks (from suggestion if available)
+                  strategyGamesRank: suggestion.strategyGamesRank || '',
+                  familyGamesRank: suggestion.familyGamesRank || '',
+                  partyGamesRank: suggestion.partyGamesRank || '',
+                  abstractsRank: suggestion.abstractsRank || '',
+                  thematicRank: suggestion.thematicRank || '',
+                  wargamesRank: suggestion.wargamesRank || '',
+                  childrensGamesRank: suggestion.childrensGamesRank || '',
+                  cgsRank: suggestion.cgsRank || '',
                 },
                 bggErrorMessage: null,
                 // Preserve styling if it exists
@@ -1844,6 +1899,15 @@ const ClaudeGameIdentifier = ({
                   thumbnail: details?.thumbnail || selectedMatch.thumbnail || null,
                   image: details?.image || selectedMatch.image || null,
                   yearPublished: details?.yearPublished || selectedMatch.yearPublished || '',
+                  // Category ranks (prefer details, then selectedMatch)
+                  strategyGamesRank: details?.strategyGamesRank || selectedMatch.strategyGamesRank || '',
+                  familyGamesRank: details?.familyGamesRank || selectedMatch.familyGamesRank || '',
+                  partyGamesRank: details?.partyGamesRank || selectedMatch.partyGamesRank || '',
+                  abstractsRank: details?.abstractsRank || selectedMatch.abstractsRank || '',
+                  thematicRank: details?.thematicRank || selectedMatch.thematicRank || '',
+                  wargamesRank: details?.wargamesRank || selectedMatch.wargamesRank || '',
+                  childrensGamesRank: details?.childrensGamesRank || selectedMatch.childrensGamesRank || '',
+                  cgsRank: details?.cgsRank || selectedMatch.cgsRank || '',
                 },
                 bggErrorMessage: null,
                 searchedTitle: null, // Clear searched title since we found a match
@@ -2071,19 +2135,31 @@ const ClaudeGameIdentifier = ({
           {confirmedDeleteButton}
 
           <View style={styles.gameThumbnailWrapper}>
-            {candidate.bggData?.thumbnail && typeof candidate.bggData.thumbnail === 'string' ? (
-              <Image 
-                source={{ uri: candidate.bggData.thumbnail }} 
-                style={styles.gameThumbnail}
-                onError={(error) => {
-                  console.warn('[ClaudeGameIdentifier] Image load error:', error);
-                }}
-              />
-            ) : (
-              <View style={styles.gameThumbnailPlaceholder}>
-                <Text style={styles.thumbnailFallbackText}>{firstChar}</Text>
-              </View>
-            )}
+            {(() => {
+              // Check multiple sources for thumbnail to ensure it displays for confirmed games
+              const thumbnail = candidate.bggData?.thumbnail || 
+                               candidate.bggThumbnail || 
+                               (candidate.bggData && candidate.bggData.image) || 
+                               null;
+              
+              if (thumbnail && typeof thumbnail === 'string') {
+                return (
+                  <Image 
+                    source={{ uri: thumbnail }} 
+                    style={styles.gameThumbnail}
+                    onError={(error) => {
+                      console.warn('[ClaudeGameIdentifier] Image load error:', error);
+                    }}
+                  />
+                );
+              } else {
+                return (
+                  <View style={styles.gameThumbnailPlaceholder}>
+                    <Text style={styles.thumbnailFallbackText}>{firstChar}</Text>
+                  </View>
+                );
+              }
+            })()}
           </View>
 
           <View style={styles.gameBody}>
@@ -2419,36 +2495,8 @@ const ClaudeGameIdentifier = ({
     }
   };
 
-  if (!permission) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4a90e2" />
-        <Text style={styles.centeredText}>Requesting camera access…</Text>
-      </View>
-    );
-  }
-
-  if (!permission.granted) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.permissionTitle}>Camera access is required</Text>
-        <Text style={styles.permissionText}>
-          Enable camera permissions in your device settings to identify board games from photos.
-        </Text>
-        <Button
-          label="Grant Permission"
-          onPress={() =>
-            requestPermission().catch((permError) => {
-              console.error('Camera permission request failed:', permError);
-            })
-          }
-          style={styles.permissionButton}
-        />
-      </View>
-    );
-  }
-
   // Camera Modal - Just camera and capture button
+  // Only check permissions when camera modal is shown - don't render permission UI unless modal is open
   const renderCameraModal = () => (
     <Modal
       animationType="slide"
@@ -2463,7 +2511,12 @@ const ClaudeGameIdentifier = ({
           </Pressable>
         </View>
         <View style={styles.cameraModalContent}>
-          {!permission?.granted ? (
+          {!permission ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color="#4a90e2" />
+              <Text style={styles.centeredText}>Requesting camera access…</Text>
+            </View>
+          ) : !permission.granted ? (
             <View style={styles.centered}>
               <Text style={styles.permissionTitle}>Camera access is required</Text>
               <Text style={styles.permissionText}>

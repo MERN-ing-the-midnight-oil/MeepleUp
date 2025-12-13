@@ -1,6 +1,8 @@
 Priorities
 
-Test group library and star rating system.
+Test group library and star rating system. (propose games)
+
+Have game optimizer for voted on games
 
 Add "start with google" start with email, start with apple
 
@@ -11,7 +13,7 @@ Publish on Android
 
 Add photos to "Tabletalk"
 
-
+test join codes
 
 
 Have an "agent" in meeple up that can tell you about games in terms of other games you own, and also it can suggest games based on who is at a meetup. If you click on a game, AI will tell you about the game in terms of games that everyone has played. (e.g. this game is like "Gems" the game you played with erik last month)

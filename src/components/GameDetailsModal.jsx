@@ -7,8 +7,9 @@ import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import { theme, commonStyles } from '../utils/theme';
 
-const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null }) => {
+const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [] }) => {
   const { user } = useAuth();
   const { updateGameInCollection, addGameToCollection, collections } = useCollections();
   const [bggData, setBggData] = useState(preloadedBggData);
@@ -44,9 +45,27 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   }, [game?.id, game?.bggId, game?.isFavorite, userId, collections]);
 
 
+  // Update bggData when preloadedBggData or game changes
+  useEffect(() => {
+    if (preloadedBggData) {
+      setBggData(preloadedBggData);
+    }
+  }, [preloadedBggData, game?.id, game?.bggId]);
+
   // Initialize badges and rating from preloaded data
   const initializedRef = useRef(false);
+  const lastGameIdRef = useRef(null);
+  
   useEffect(() => {
+    // Reset initialization when game changes
+    const currentGameId = game?.id || game?.bggId;
+    if (lastGameIdRef.current !== currentGameId) {
+      initializedRef.current = false;
+      lastGameIdRef.current = currentGameId;
+      setBadges([]);
+      setStarRating(0);
+    }
+    
     if (initializedRef.current) return;
     
     if (preloadedBggData && !badges.length) {
@@ -77,7 +96,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
         }
       });
     }
-  }, [preloadedBggData]);
+  }, [preloadedBggData, game?.id, game?.bggId, badges.length]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -340,6 +359,20 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
+            {/* Owner Information - Show who owns this game */}
+            {owners && Array.isArray(owners) && owners.length > 0 && (
+              <View style={styles.modalOwnerSection}>
+                <Text style={[styles.modalMetaLabel, { marginBottom: 8 }]}>Owned by:</Text>
+                <View style={styles.modalOwnersList}>
+                  {owners.map((owner, index) => (
+                    <View key={index} style={styles.modalOwnerItem}>
+                      <Text style={styles.modalOwnerText}>{owner}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
             {/* Favorite Section - Only show if user owns the game */}
             {userId && game && userOwnsGame && (
               <View style={styles.modalTeachingSection}>
@@ -376,37 +409,37 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
 const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.colors.surfaceColor,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'ios' ? 50 : 12,
+    borderBottomColor: theme.colors.woodMedium,
+    backgroundColor: theme.colors.surfaceColor,
+    paddingTop: Platform.OS === 'ios' ? 50 : theme.spacing.md,
   },
   modalCloseButton: {
-    padding: 8,
+    padding: theme.spacing.sm,
     minWidth: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalCloseText: {
     fontSize: 24,
-    color: '#666',
+    color: theme.colors.textSecondary,
     fontWeight: '300',
   },
   modalTitle: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
     textAlign: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: theme.spacing.sm,
   },
   modalHeaderSpacer: {
     width: 40,
@@ -623,6 +656,31 @@ const styles = StyleSheet.create({
   },
   favoriteButtonTextActive: {
     color: '#FF8C00',
+  },
+  modalOwnerSection: {
+    marginTop: 16,
+    marginBottom: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  modalOwnersList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  modalOwnerItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#e8f4fd',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4a90e2',
+  },
+  modalOwnerText: {
+    fontSize: 14,
+    color: '#4a90e2',
+    fontWeight: '500',
   },
 });
 

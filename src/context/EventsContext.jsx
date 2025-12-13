@@ -108,6 +108,22 @@ const normalizeEvent = (event) => {
   const deletedAt = event.deletedAt?.toDate?.()?.toISOString() || event.deletedAt || null;
   const isActive = event.isActive !== undefined ? event.isActive : (deletedAt === null);
 
+  // Handle joinCodes: support both new array format and old single string format
+  let joinCodes = [];
+  if (Array.isArray(event.joinCodes)) {
+    // New format: array of codes
+    joinCodes = event.joinCodes.filter(code => code && typeof code === 'string');
+  } else if (event.joinCode) {
+    // Old format: single code - convert to array
+    joinCodes = [event.joinCode];
+  }
+  // If no codes exist, generate one
+  if (joinCodes.length === 0) {
+    joinCodes = [generateJoinCode()];
+  }
+  // For backward compatibility, also set joinCode to the first code
+  const joinCode = joinCodes[0] || generateJoinCode();
+
   return {
     id: event.id || Date.now().toString(),
     name: event.name || 'New MeepleUp',
@@ -118,7 +134,8 @@ const normalizeEvent = (event) => {
     usualStartTime: event.usualStartTime || undefined,
     usualEndTime: event.usualEndTime || undefined,
     createdAt,
-    joinCode: event.joinCode || generateJoinCode(),
+    joinCode, // Backward compatibility: first code
+    joinCodes, // New format: array of all active codes
     location,
     address,
     // Backward compatibility: also include old field names
@@ -366,6 +383,7 @@ export const EventsProvider = ({ children }) => {
               usualEndTime: firestoreData.usualEndTime?.toDate?.()?.toISOString() || firestoreData.usualEndTime,
               createdAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
               joinCode: firestoreData.joinCode || '',
+              joinCodes: firestoreData.joinCodes || (firestoreData.joinCode ? [firestoreData.joinCode] : []),
               location: firestoreData.location?.name || '',
               address: firestoreData.location?.address || '',
               // Backward compatibility
@@ -458,15 +476,17 @@ export const EventsProvider = ({ children }) => {
   const createEvent = useCallback(
     async (eventData = {}) => {
       const organizerId = eventData.organizerId || user?.uid || user?.id || null;
-      const joinCode = eventData.joinCode || generateJoinCode();
-      const normalizedJoinCode = joinCode.trim().toLowerCase().replace(/[\s-]+/g, ' ');
+      // Initialize joinCodes array - use provided code or generate new one
+      const initialCode = eventData.joinCode || generateJoinCode();
+      const normalizedInitialCode = initialCode.trim().toLowerCase().replace(/[\s-]+/g, ' ');
+      const joinCodes = eventData.joinCodes || [normalizedInitialCode];
       
       const baseEvent = normalizeEvent({
         ...eventData,
         organizerId,
         members: eventData.members || (organizerId ? [organizerId] : []),
         createdAt: new Date().toISOString(),
-        joinCode: normalizedJoinCode,
+        joinCodes: joinCodes.map(code => code.trim().toLowerCase().replace(/[\s-]+/g, ' ')),
       });
 
       // Save to Firestore if available
@@ -481,7 +501,8 @@ export const EventsProvider = ({ children }) => {
             description: baseEvent.description || '',
             organizerId: baseEvent.organizerId,
             organizerName: user?.name || user?.email || '',
-            joinCode: normalizedJoinCode,
+            joinCode: baseEvent.joinCode, // Backward compatibility: first code
+            joinCodes: baseEvent.joinCodes || [baseEvent.joinCode], // Array of all active codes
             privacy: 'private', // All meepleups are private (public feature removed)
             location: {
               name: baseEvent.location || baseEvent.generalLocation || '',
@@ -754,13 +775,22 @@ export const EventsProvider = ({ children }) => {
                   .limit(100) // Get recent events to search through
                   .get();
                 
-                // Filter for matching joinCode and active status in memory
+                // Filter for matching joinCode/joinCodes and active status in memory
                 const matchingDocs = recentSnapshot.docs.filter(doc => {
                   const data = doc.data();
-                  const docJoinCode = (data.joinCode || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
-                  const matchesCode = docJoinCode === normalized;
                   const isActive = data.isActive !== false && !data.deletedAt;
-                  return matchesCode && isActive;
+                  if (!isActive) return false;
+                  
+                  // Check single joinCode field (backward compatibility)
+                  const docJoinCode = (data.joinCode || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
+                  if (docJoinCode === normalized) return true;
+                  
+                  // Check joinCodes array
+                  const joinCodes = data.joinCodes || [];
+                  return joinCodes.some(code => {
+                    const normalizedCode = (code || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
+                    return normalizedCode === normalized;
+                  });
                 });
                 
                 if (matchingDocs.length > 0) {
@@ -775,10 +805,26 @@ export const EventsProvider = ({ children }) => {
               }
             }
             
-            // Filter for active events in memory
+            // Filter for active events and check if code matches (for indexed query results)
             const activeDocs = snapshot.docs.filter(doc => {
               const data = doc.data();
-              return data.isActive !== false && !data.deletedAt;
+              const isActive = data.isActive !== false && !data.deletedAt;
+              if (!isActive) return false;
+              
+              // For indexed query, check if the primary joinCode matches
+              // (fallback already checked both joinCode and joinCodes)
+              if (!fallbackTried) {
+                const docJoinCode = (data.joinCode || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
+                if (docJoinCode === normalized) return true;
+                
+                // Also check joinCodes array
+                const joinCodes = data.joinCodes || [];
+                return joinCodes.some(code => {
+                  const normalizedCode = (code || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
+                  return normalizedCode === normalized;
+                });
+              }
+              return true; // Fallback already filtered
             });
             
             if (activeDocs.length > 0) {
@@ -794,6 +840,7 @@ export const EventsProvider = ({ children }) => {
                 scheduledFor: firestoreEvent.scheduledFor || firestoreEvent.nextEventDate || '',
                 createdAt: firestoreEvent.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
                 joinCode: firestoreEvent.joinCode || '',
+                joinCodes: firestoreEvent.joinCodes || (firestoreEvent.joinCode ? [firestoreEvent.joinCode] : []),
                 location: firestoreEvent.location?.name || '',
                 address: firestoreEvent.location?.address || '',
                 // Backward compatibility
@@ -931,21 +978,119 @@ export const EventsProvider = ({ children }) => {
     [getEventByJoinCode, joinEvent, user],
   );
 
-  const regenerateJoinCode = useCallback((eventId) => {
-    const nextCode = generateJoinCode();
-    setEvents((prev) =>
-      prev.map((event) =>
-        event.id === eventId
-          ? {
+  const addJoinCode = useCallback(
+    async (eventId) => {
+      const nextCode = generateJoinCode();
+      const normalizedCode = nextCode.trim().toLowerCase().replace(/[\s-]+/g, ' ');
+      
+      // Update local state
+      setEvents((prev) =>
+        prev.map((event) => {
+          if (event.id === eventId) {
+            const currentCodes = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+            const updatedCodes = [...currentCodes, normalizedCode];
+            return {
               ...event,
-              joinCode: nextCode,
+              joinCode: updatedCodes[0], // First code for backward compatibility
+              joinCodes: updatedCodes,
               lastUpdatedAt: new Date().toISOString(),
+            };
+          }
+          return event;
+        }),
+      );
+      
+      // Update Firestore
+      if (db && eventId) {
+        try {
+          const groupRef = db.collection('gamingGroups').doc(eventId);
+          const groupDoc = await groupRef.get();
+          
+          if (groupDoc.exists) {
+            const firestoreData = groupDoc.data();
+            const currentCodes = firestoreData.joinCodes || (firestoreData.joinCode ? [firestoreData.joinCode] : []);
+            const updatedCodes = [...currentCodes, normalizedCode];
+            
+            await groupRef.update({
+              joinCode: updatedCodes[0], // First code for backward compatibility
+              joinCodes: updatedCodes,
+              updatedAt: firebase.firestore.Timestamp.now(),
+            });
+          }
+        } catch (error) {
+          console.error('Error adding join code to Firestore:', error);
+          // Continue with local update even if Firestore update fails
+        }
+      }
+      
+      return normalizedCode;
+    },
+    [],
+  );
+
+  const deleteJoinCode = useCallback(
+    async (eventId, codeToDelete) => {
+      if (!codeToDelete) return;
+      
+      const normalizedToDelete = codeToDelete.trim().toLowerCase().replace(/[\s-]+/g, ' ');
+      
+      // Update local state
+      setEvents((prev) =>
+        prev.map((event) => {
+          if (event.id === eventId) {
+            const currentCodes = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+            const updatedCodes = currentCodes.filter(
+              code => code.trim().toLowerCase().replace(/[\s-]+/g, ' ') !== normalizedToDelete
+            );
+            
+            // Don't allow deleting the last code
+            if (updatedCodes.length === 0) {
+              return event; // Keep original if trying to delete last code
             }
-          : event,
-      ),
-    );
-    return nextCode;
-  }, []);
+            
+            return {
+              ...event,
+              joinCode: updatedCodes[0], // First code for backward compatibility
+              joinCodes: updatedCodes,
+              lastUpdatedAt: new Date().toISOString(),
+            };
+          }
+          return event;
+        }),
+      );
+      
+      // Update Firestore
+      if (db && eventId) {
+        try {
+          const groupRef = db.collection('gamingGroups').doc(eventId);
+          const groupDoc = await groupRef.get();
+          
+          if (groupDoc.exists) {
+            const firestoreData = groupDoc.data();
+            const currentCodes = firestoreData.joinCodes || (firestoreData.joinCode ? [firestoreData.joinCode] : []);
+            const updatedCodes = currentCodes.filter(
+              code => code.trim().toLowerCase().replace(/[\s-]+/g, ' ') !== normalizedToDelete
+            );
+            
+            // Don't allow deleting the last code
+            if (updatedCodes.length === 0) {
+              return; // Don't update if trying to delete last code
+            }
+            
+            await groupRef.update({
+              joinCode: updatedCodes[0], // First code for backward compatibility
+              joinCodes: updatedCodes,
+              updatedAt: firebase.firestore.Timestamp.now(),
+            });
+          }
+        } catch (error) {
+          console.error('Error deleting join code from Firestore:', error);
+          // Continue with local update even if Firestore update fails
+        }
+      }
+    },
+    [],
+  );
 
   const leaveEvent = useCallback(
     async (eventId, userId) => {
@@ -1153,8 +1298,12 @@ export const EventsProvider = ({ children }) => {
       const normalized = code.trim().toLowerCase().replace(/[\s-]+/g, ' ');
       return (
         events.find((event) => {
-          const eventCode = (event.joinCode || '').toLowerCase().replace(/\s+/g, ' ');
-          return eventCode === normalized;
+          // Check all codes in the joinCodes array
+          const codesToCheck = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+          return codesToCheck.some(eventCode => {
+            const normalizedEventCode = (eventCode || '').trim().toLowerCase().replace(/[\s-]+/g, ' ');
+            return normalizedEventCode === normalized;
+          });
         }) || null
       );
     },
@@ -1621,14 +1770,18 @@ export const EventsProvider = ({ children }) => {
         throw new Error('Event ID and user ID are required.');
       }
 
-      // Verify user is the organizer
+      // Verify user is the organizer or co-organizer
       const event = events.find((e) => e.id === eventId);
       if (!event) {
         throw new Error('Event not found.');
       }
 
-      if (event.organizerId !== userId) {
-        throw new Error('Only the organizer can update the schedule.');
+      const isOrganizer = event.organizerId === userId;
+      const currentUserMember = event.members?.find(m => m.userId === userId);
+      const isCoOrganizer = currentUserMember?.role === MEMBER_ROLES.ORGANIZER;
+      
+      if (!isOrganizer && !isCoOrganizer) {
+        throw new Error('Only the organizer or co-organizer can update the schedule.');
       }
 
       const updates = {};
@@ -1766,7 +1919,8 @@ export const EventsProvider = ({ children }) => {
       unarchiveEvent,
       joinEvent,
       joinEventWithCode,
-      regenerateJoinCode,
+      addJoinCode,
+      deleteJoinCode,
       leaveEvent,
       getEventById,
       getEventByJoinCode,
@@ -1796,7 +1950,8 @@ export const EventsProvider = ({ children }) => {
       unarchiveEvent,
       joinEvent,
       joinEventWithCode,
-      regenerateJoinCode,
+      addJoinCode,
+      deleteJoinCode,
       leaveEvent,
       getEventById,
       getEventByJoinCode,

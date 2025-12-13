@@ -397,6 +397,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     }
 
     // No results found in Firestore - try BGG API if fallback is enabled
+    // Note: For search, we'll allow BGG API calls since we don't know the publication year yet
+    // The filtering will happen when we fetch individual game details
     if (fallbackToBGG) {
       if (__DEV__) {
         console.log('[Game Search] No results in Firestore, trying BGG API...');
@@ -408,6 +410,23 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           if (__DEV__) {
             console.log(`[BGG API] Found ${bggResults.length} games`);
           }
+          
+          // Cache search results to Firestore for future searches (non-blocking)
+          // Only cache basic info - full details fetched when user selects a game
+          try {
+            const { cacheBGGSearchResults } = await import('../services/gameDatabase');
+            cacheBGGSearchResults(bggResults).catch(err => {
+              if (__DEV__) {
+                console.warn('[Game Search] Failed to cache search results:', err);
+              }
+            });
+          } catch (cacheError) {
+            // Non-critical - just log it
+            if (__DEV__) {
+              console.warn('[Game Search] Error caching search results:', cacheError);
+            }
+          }
+          
           return bggResults;
         }
       } catch (bggError) {
@@ -467,6 +486,15 @@ export const getGameDetails = async (gameId) => {
           playingTime: firestoreGame.playingTime || null,
           minAge: firestoreGame.minAge || null,
           description: firestoreGame.description || null,
+          // Category ranks
+          strategyGamesRank: firestoreGame.strategyGamesRank || '',
+          familyGamesRank: firestoreGame.familyGamesRank || '',
+          partyGamesRank: firestoreGame.partyGamesRank || '',
+          abstractsRank: firestoreGame.abstractsRank || '',
+          thematicRank: firestoreGame.thematicRank || '',
+          wargamesRank: firestoreGame.wargamesRank || '',
+          childrensGamesRank: firestoreGame.childrensGamesRank || '',
+          cgsRank: firestoreGame.cgsRank || '',
         };
         hasThumbnail = !!(gameData.thumbnail || gameData.image);
       }
@@ -496,6 +524,16 @@ export const getGameDetails = async (gameId) => {
           if (!gameData.playingTime && bggData.playingTime) gameData.playingTime = bggData.playingTime;
           if (!gameData.minAge && bggData.minAge) gameData.minAge = bggData.minAge;
           if (!gameData.description && bggData.description) gameData.description = bggData.description;
+          
+          // Update category ranks if they're missing
+          if (!gameData.strategyGamesRank && bggData.strategyGamesRank) gameData.strategyGamesRank = bggData.strategyGamesRank;
+          if (!gameData.familyGamesRank && bggData.familyGamesRank) gameData.familyGamesRank = bggData.familyGamesRank;
+          if (!gameData.partyGamesRank && bggData.partyGamesRank) gameData.partyGamesRank = bggData.partyGamesRank;
+          if (!gameData.abstractsRank && bggData.abstractsRank) gameData.abstractsRank = bggData.abstractsRank;
+          if (!gameData.thematicRank && bggData.thematicRank) gameData.thematicRank = bggData.thematicRank;
+          if (!gameData.wargamesRank && bggData.wargamesRank) gameData.wargamesRank = bggData.wargamesRank;
+          if (!gameData.childrensGamesRank && bggData.childrensGamesRank) gameData.childrensGamesRank = bggData.childrensGamesRank;
+          if (!gameData.cgsRank && bggData.cgsRank) gameData.cgsRank = bggData.cgsRank;
           
           // Cache BGG data to Firestore for future use (non-blocking)
           try {
@@ -548,6 +586,15 @@ export const getGameDetails = async (gameId) => {
             playingTime: bggData.playingTime || null,
             minAge: bggData.minAge || null,
             description: bggData.description || null,
+            // Category ranks
+            strategyGamesRank: bggData.strategyGamesRank || '',
+            familyGamesRank: bggData.familyGamesRank || '',
+            partyGamesRank: bggData.partyGamesRank || '',
+            abstractsRank: bggData.abstractsRank || '',
+            thematicRank: bggData.thematicRank || '',
+            wargamesRank: bggData.wargamesRank || '',
+            childrensGamesRank: bggData.childrensGamesRank || '',
+            cgsRank: bggData.cgsRank || '',
           };
           
           // Cache BGG data to Firestore for future use (non-blocking)
@@ -726,6 +773,26 @@ export const fetchBGGCollection = async (username, options = {}) => {
         await new Promise(resolve => setTimeout(resolve, retryDelay));
         retries++;
       } else if (response.status === 401) {
+        // If we have a token and got 401, try without token
+        if (token) {
+          if (__DEV__) {
+            console.log('[BGG Collection] Token auth failed (401), trying without token');
+          }
+          const responseNoAuth = await fetch(url);
+          if (responseNoAuth.status === 200) {
+            xmlText = await responseNoAuth.text();
+            break;
+          } else if (responseNoAuth.status === 202) {
+            // BGG is processing - wait and retry
+            if (__DEV__) {
+              console.log(`[BGG Collection] BGG is processing request (202). Waiting ${retryDelay}ms before retry...`);
+            }
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            retries++;
+            continue;
+          }
+        }
+        // If no token or retry without token also failed, throw error
         const body = await response.text();
         throw new Error(`Authentication failed (401). ${token ? 'Token may be invalid.' : 'Bearer token required. Make sure BGGbearerToken is set in your .env file.'}`);
       } else {

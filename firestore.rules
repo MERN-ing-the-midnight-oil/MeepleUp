@@ -186,14 +186,36 @@ service cloud.firestore {
       // 1. Proposal documents: document ID = gameId, has nominatedBy field
       // 2. Rating documents: document ID = gameId_userId, has userId and rating fields
       match /nominations/{proposalId} {
+        // Check if user has a member document (most reliable, doesn't require group read)
+        function hasMemberDocument() {
+          return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid));
+        }
+        
         allow read: if isAuthenticated() && (
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) ||
-          request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          // If member document exists, allow read (doesn't require group read)
+          hasMemberDocument() ||
+          // Otherwise check group document (requires read permission)
+          (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+          (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId)
         );
-        allow create: if isAuthenticated() && 
-          request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || []) &&
-          // For rating documents (has userId field), ensure userId matches authenticated user
-          (!request.resource.data.userId || request.resource.data.userId == request.auth.uid);
+        
+        allow create: if isAuthenticated() && (
+          // Check membership - prioritize member document check first
+          // Firestore rules should short-circuit, so if hasMemberDocument() is true,
+          // it won't evaluate the get() calls
+          exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+          (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+          (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId)
+        ) && (
+          // Ensure the nominatedBy or userId matches the authenticated user
+          (
+            // For proposal documents (has nominatedBy field), ensure nominatedBy matches authenticated user
+            (request.resource.data.nominatedBy != null && request.resource.data.nominatedBy == request.auth.uid) ||
+            // For rating documents (has userId field), ensure userId matches authenticated user
+            (request.resource.data.userId != null && request.resource.data.userId == request.auth.uid)
+          )
+        );
+        
         allow update, delete: if isAuthenticated() && (
           // Allow if user is the one who proposed (proposal documents)
           resource.data.proposedBy == request.auth.uid ||

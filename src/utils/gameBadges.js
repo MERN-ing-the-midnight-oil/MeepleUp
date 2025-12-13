@@ -1,10 +1,10 @@
 /**
  * Game Badge System
- * Awards badges based on BGG category rankings from CSV data
+ * Awards badges based on BGG category rankings
  */
 
 // Category definitions with their icons and display names
-// Field names match the CSV: abstractsRank, cgsRank, childrensGamesRank, etc.
+// Field names: abstractsRank, cgsRank, childrensGamesRank, etc.
 export const CATEGORIES = {
   strategyGames: {
     name: 'Strategy',

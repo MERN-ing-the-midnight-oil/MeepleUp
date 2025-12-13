@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, Pressable, Dimensions, useWindowDimensio
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import GameDetailsModal from './GameDetailsModal';
 import { getColumnCount, BREAKPOINTS } from '../utils/responsive';
+import { theme, commonStyles } from '../utils/theme';
 
 /**
  * Game Card Component with BGG Thumbnails
@@ -12,7 +13,7 @@ import { getColumnCount, BREAKPOINTS } from '../utils/responsive';
  * @param {Function} props.onDelete - Delete handler
  * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
  */
-const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8 }) => {
+const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false }) => {
   console.log(
     '[GameCard] Rendering for game:',
     game.title || game.id,
@@ -29,28 +30,28 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   
-  // Calculate responsive card width
+  // When inGrid is true or disableModal is true, we're in a grid layout and should use 100% width
+  // Otherwise, calculate responsive width
   const cardWidth = useMemo(() => {
+    if (inGrid || disableModal) {
+      return '100%'; // In grid layout, use full width of wrapper
+    }
     return getCardWidth(screenWidth, containerPadding, gap);
-  }, [screenWidth, containerPadding, gap]);
+  }, [screenWidth, containerPadding, gap, disableModal, inGrid]);
   
   // Create dynamic styles based on card width
   const dynamicStyles = useMemo(() => {
     return StyleSheet.create({
       card: {
-        backgroundColor: '#fff',
-        borderRadius: 12,
+        backgroundColor: theme.colors.cardSurface,
+        borderRadius: theme.borderRadius.lg,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: '#e0e0e0',
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowRadius: 4,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 2,
+        borderColor: theme.colors.woodMedium,
+        ...theme.shadows.card,
         position: 'relative',
         width: cardWidth,
-        marginBottom: 12,
+        marginBottom: theme.spacing.md,
         alignSelf: 'flex-start',
         flexShrink: 0,
       },
@@ -115,10 +116,22 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   }, [game.title, game.id]);
 
   // Memoize computed values to prevent unnecessary recalculations
-  const thumbnail = useMemo(
-    () => game.bggThumbnail || game.thumbnail || thumbnailUrl || null,
-    [game.bggThumbnail, game.thumbnail, thumbnailUrl],
-  );
+  // Use thumbnail from preloadedBggData if game doesn't have one stored
+  const thumbnail = useMemo(() => {
+    // First try stored thumbnail
+    if (game.bggThumbnail || game.thumbnail) {
+      return game.bggThumbnail || game.thumbnail;
+    }
+    // Then try from preloadedBggData
+    if (preloadedBggData?.thumbnail) {
+      return preloadedBggData.thumbnail;
+    }
+    // Then try thumbnailUrl (from initialization)
+    if (thumbnailUrl) {
+      return thumbnailUrl;
+    }
+    return null;
+  }, [game.bggThumbnail, game.thumbnail, preloadedBggData?.thumbnail, thumbnailUrl]);
 
   const title = useMemo(
     () => (typeof game.title === 'string' && game.title.length > 0 ? game.title : 'Unknown Game'),
@@ -282,96 +295,102 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: theme.spacing.xs,
+    right: theme.spacing.xs,
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: 'rgba(231, 76, 60, 0.9)',
+    backgroundColor: 'rgba(192, 57, 43, 0.9)', // meeple-red with opacity
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
   },
   deleteIcon: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.bold,
     lineHeight: 14,
   },
   thumbnailContainer: {
     width: '100%',
-    height: 140, // Reduced height for smaller cards
-    backgroundColor: '#f5f5f5',
+    height: 120, // Thumbnail height for grid cards
+    backgroundColor: theme.colors.woodLight,
     position: 'relative',
+    overflow: 'hidden',
   },
   crownContainer: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: 'rgba(255, 215, 0, 0.9)',
-    borderRadius: 12,
-    padding: 4,
+    top: theme.spacing.xs,
+    right: theme.spacing.xs,
+    backgroundColor: 'rgba(241, 196, 15, 0.9)', // meeple-yellow with opacity
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.xs,
     zIndex: 5,
   },
   crownIcon: {
-    fontSize: 16,
+    fontSize: theme.typography.fontSize.base,
   },
   thumbnail: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
   },
   thumbnailPlaceholder: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#e0e0e0',
+    backgroundColor: theme.colors.woodMedium,
     justifyContent: 'center',
     alignItems: 'center',
   },
   thumbnailPlaceholderText: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#999',
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textSecondary,
   },
   cardContent: {
-    padding: 8,
-    minHeight: 60,
+    padding: theme.spacing.sm,
+    minHeight: 70,
+    justifyContent: 'space-between',
   },
   cardContentExpanded: {
     minHeight: 'auto',
   },
   titleRow: {
-    marginBottom: 8,
+    marginBottom: theme.spacing.sm,
   },
   title: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#333',
-    lineHeight: 16,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    lineHeight: 18,
+    marginBottom: theme.spacing.xs,
   },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 'auto',
+    paddingTop: theme.spacing.xs,
   },
   year: {
-    fontSize: 10,
-    color: '#666',
-    fontWeight: '500',
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: theme.spacing.xs,
   },
   ratingText: {
-    fontSize: 10,
-    color: '#FFA500',
+    fontSize: 11,
+    color: theme.colors.meepleYellow,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   ratingNumber: {
-    fontSize: 9,
-    color: '#999',
-    fontWeight: '500',
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
   },
 });
 

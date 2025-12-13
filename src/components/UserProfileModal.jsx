@@ -16,6 +16,7 @@ import Modal from './common/Modal';
 import GameCard from './GameCard';
 import { blockUser, unblockUser, isUserBlocked, reportUser } from '../services/blocking';
 import Input from './common/Input';
+import { theme } from '../utils/theme';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -504,19 +505,19 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#d45d5d',
+    backgroundColor: theme.colors.meepleRed,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: theme.spacing.md,
   },
   avatarInitial: {
     fontSize: 40,
     color: '#fff',
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   name: {
-    fontSize: 24,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.semibold,
     color: '#333',
     marginBottom: 4,
   },

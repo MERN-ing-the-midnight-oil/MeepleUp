@@ -4,10 +4,14 @@ import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
+import TextListGameIdentifier from '../components/TextListGameIdentifier';
 import GameCard from '../components/GameCard';
 import BGGImport from '../components/BGGImport';
 import { getGameById } from '../services/gameDatabase';
+import { getGameDetails } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
+import { theme, commonStyles } from '../utils/theme';
+import { getColumnCount } from '../utils/responsive';
 // Note: BarcodeScanner has been archived (see src/archive/barcode-scanner/)
 // BGGImport will need to be converted separately if needed
 
@@ -19,12 +23,30 @@ const CollectionScreen = () => {
   
   const { width } = useWindowDimensions();
   const { user } = useAuth();
-  const { collections, getUserCollection, addGameToCollection, removeGameFromCollection } = useCollections();
+  const { collections, getUserCollection, addGameToCollection, removeGameFromCollection, updateGameInCollection } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'import'
   const [sortBy, setSortBy] = useState('category'); // 'rating', 'category', 'title'
   const [categorySortPreference, setCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
+  const [showTextListModal, setShowTextListModal] = useState(false);
+  
+  // Calculate responsive column count - use 2 columns on mobile when 3 would be too small
+  // Threshold: if screen width < 700px, use 2 columns for better card size; otherwise use 3
+  const numColumns = useMemo(() => {
+    if (width < 700) {
+      return 2; // 2 columns on mobile screens - cards will be ~48% width (bigger, less wasted space)
+    } else {
+      return 3; // 3 columns on tablets and larger - cards will be ~32% width
+    }
+  }, [width]);
+  
+  // Calculate card width percentage based on number of columns
+  const cardWidthPercent = useMemo(() => {
+    // For 2 columns: ~48% width (leaving space for gap)
+    // For 3 columns: ~32% width (leaving space for gaps)
+    return numColumns === 2 ? '48%' : '32%';
+  }, [numColumns]);
   
   // Responsive icon size - larger on bigger screens
   const iconSize = width > 768 ? 72 : 64;
@@ -66,37 +88,128 @@ const CollectionScreen = () => {
           rawCollection.map(async (game, index) => {
             console.log(`[CollectionScreen] Processing game ${index + 1}/${rawCollection.length}:`, game.title || game.id);
             
-            if (game.bggId) {
+            // Check if game needs backfill (missing thumbnails/images)
+            // We always fetch BGG data for rating/category display, but only do expensive operations if needed
+            const hasThumbnail = !!(game.thumbnail || game.bggThumbnail);
+            const hasImage = !!game.image;
+            const needsBackfill = !hasThumbnail || !hasImage;
+            
+            // Fetch BGG data for rating/category display, but optimize based on what's needed
+            let bggData = null;
+            let foundBggId = game.bggId;
+            
+            // If game already has thumbnail and image, we can skip BGG fetch entirely
+            // (unless we need it for rating/category - but that's optional)
+            if (game.bggId && needsBackfill) {
               try {
-                console.log(`[CollectionScreen] Fetching BGG data for game ${index + 1}, bggId:`, game.bggId);
-                const bggData = await getGameById(game.bggId);
-                if (bggData) {
-                  const rating = bggData.average ? getStarRating(bggData.average) : 0;
-                  // Get primary category from badges (first one found)
-                  const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
-                                        bggData.familyGamesRank ? 'Family' :
-                                        bggData.partyGamesRank ? 'Party' :
-                                        bggData.wargamesRank ? 'War' :
-                                        bggData.thematicRank ? 'Thematic' :
-                                        bggData.abstractsRank ? 'Abstract' :
-                                        bggData.childrensGamesRank ? 'Children' :
-                                        bggData.cgsRank ? 'CCG' : 'Other';
-                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) enriched, rating:`, rating, 'category:', primaryCategory, 'bggId:', game.bggId);
-                  return {
-                    ...game,
-                    _bggData: bggData,
-                    _rating: rating,
-                    _primaryCategory: primaryCategory,
-                  };
-                } else {
-                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - getGameById returned null for bggId:`, game.bggId);
+                console.log(`[CollectionScreen] Fetching BGG data for game ${index + 1}, bggId:`, game.bggId, 'needsBackfill:', needsBackfill);
+                // Use getGameDetails to ensure we get full-size images from BGG API
+                // This will fetch from Firestore first, then BGG API if image is missing
+                bggData = await getGameDetails(game.bggId);
+                if (!bggData) {
+                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - getGameDetails returned null for bggId:`, game.bggId);
                 }
               } catch (error) {
                 console.error(`[CollectionScreen] Error loading BGG data for game ${index + 1} (${game.title || game.id}):`, error);
               }
-            } else {
-              console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - no bggId`);
+            } else if (!game.bggId && game.title && game.title !== 'Unknown Game' && needsBackfill) {
+              // Only search for BGG ID if we need thumbnails/images (backfill)
+              // Don't search just to add bggId if thumbnails already exist
+              try {
+                console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - no bggId, searching BGG by title for backfill`);
+                const { searchGamesByName } = await import('../utils/api');
+                const searchResults = await searchGamesByName(game.title, true);
+                if (searchResults && searchResults.length > 0) {
+                  // Use the first (most relevant) result
+                  const match = searchResults[0];
+                  foundBggId = match.id;
+                  console.log(`[CollectionScreen] Found BGG match for "${game.title}": bggId=${foundBggId}`);
+                  
+                  // Get full details
+                  bggData = await getGameDetails(foundBggId);
+                  
+                  // Update game with bggId if we found one
+                  if (foundBggId && userIdentifier && game.id) {
+                    try {
+                      await updateGameInCollection(userIdentifier, game.id, { bggId: foundBggId });
+                      console.log(`[CollectionScreen] Added bggId to game ${game.title || game.id}`);
+                    } catch (updateError) {
+                      console.warn(`[CollectionScreen] Failed to add bggId to game ${game.title || game.id}:`, updateError);
+                    }
+                  }
+                } else {
+                  console.log(`[CollectionScreen] No BGG match found for "${game.title}"`);
+                }
+              } catch (searchError) {
+                console.warn(`[CollectionScreen] Error searching BGG for game "${game.title}":`, searchError);
+              }
+            } else if (game.bggId && !needsBackfill) {
+              // Game has thumbnails/images, but we still need BGG data for rating/category
+              // This should be fast if cached in Firestore
+              try {
+                bggData = await getGameDetails(game.bggId);
+                if (bggData) {
+                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - fetched BGG data for rating/category (cached)`);
+                }
+              } catch (error) {
+                // Non-critical - game will display without rating/category
+                console.warn(`[CollectionScreen] Could not fetch BGG data for rating (non-critical):`, error);
+              }
             }
+            
+            if (bggData) {
+              const rating = bggData.average ? getStarRating(bggData.average) : 0;
+              // Get primary category from badges (first one found)
+              const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
+                                    bggData.familyGamesRank ? 'Family' :
+                                    bggData.partyGamesRank ? 'Party' :
+                                    bggData.wargamesRank ? 'War' :
+                                    bggData.thematicRank ? 'Thematic' :
+                                    bggData.abstractsRank ? 'Abstract' :
+                                    bggData.childrensGamesRank ? 'Children' :
+                                    bggData.cgsRank ? 'CCG' : 'Other';
+              console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) enriched, rating:`, rating, 'category:', primaryCategory, 'bggId:', foundBggId, 'hasThumbnail:', !!bggData.thumbnail, 'hasImage:', !!bggData.image);
+              
+              // Backfill missing thumbnails/images for older games
+              const needsThumbnailUpdate = bggData.thumbnail && !game.thumbnail && !game.bggThumbnail;
+              const needsImageUpdate = bggData.image && !game.image;
+              
+              if (needsThumbnailUpdate || needsImageUpdate) {
+                const updates = {};
+                if (needsThumbnailUpdate) {
+                  updates.thumbnail = bggData.thumbnail;
+                  updates.bggThumbnail = bggData.thumbnail;
+                }
+                if (needsImageUpdate) {
+                  updates.image = bggData.image;
+                }
+                
+                // Update in Firestore and local collection
+                if (userIdentifier && game.id) {
+                  try {
+                    await updateGameInCollection(userIdentifier, game.id, updates);
+                    console.log(`[CollectionScreen] Backfilled thumbnail/image for game ${game.title || game.id}`, {
+                      thumbnail: needsThumbnailUpdate ? 'added' : 'already exists',
+                      image: needsImageUpdate ? 'added' : 'already exists'
+                    });
+                  } catch (updateError) {
+                    console.error(`[CollectionScreen] Failed to backfill thumbnail for game ${game.title || game.id}:`, updateError);
+                  }
+                }
+              }
+              
+              return {
+                ...game,
+                ...(foundBggId && !game.bggId ? { bggId: foundBggId } : {}),
+                ...(needsThumbnailUpdate ? { thumbnail: bggData.thumbnail, bggThumbnail: bggData.thumbnail } : {}),
+                ...(needsImageUpdate ? { image: bggData.image } : {}),
+                _bggData: bggData,
+                _rating: rating,
+                _primaryCategory: primaryCategory,
+              };
+            }
+            
+            // Fallback: return game without BGG data
             return {
               ...game,
               _rating: 0,
@@ -256,21 +369,33 @@ const CollectionScreen = () => {
   const renderGameCard = useCallback(({ item }) => {
     console.log('[CollectionScreen] renderGameCard called for:', item.title || item.id, 'has_bggData:', !!item._bggData);
     try {
+      // Calculate card width for FlatList - account for padding and gaps
+      const containerPadding = theme.spacing.md;
+      const gap = theme.spacing.md;
+      const rowPadding = theme.spacing.xs * 2; // padding on both sides of row
+      const totalPadding = containerPadding * 2 + rowPadding;
+      const totalGaps = gap * (numColumns - 1);
+      const availableWidth = width - totalPadding - totalGaps;
+      const cardWidthPixels = availableWidth / numColumns;
+      
       // Pass the already-loaded BGG data to avoid redundant API calls
       // Use item directly - React.memo in GameCard will handle prop comparison
       // Pass the current user's ID as the game owner since this is their collection
       return (
-        <GameCard 
-          game={item} 
-          onDelete={handleDeleteGame}
-          preloadedBggData={item._bggData}
-        />
+        <View style={{ width: cardWidthPixels }}>
+          <GameCard 
+            game={item} 
+            onDelete={handleDeleteGame}
+            preloadedBggData={item._bggData}
+            inGrid={true}
+          />
+        </View>
       );
     } catch (error) {
       console.error('[CollectionScreen] Error rendering GameCard for:', item.title || item.id, 'error:', error, 'stack:', error.stack);
       return null;
     }
-  }, [handleDeleteGame, userIdentifier]);
+  }, [handleDeleteGame, userIdentifier, numColumns, width]);
 
   // Render category header with sort toggle
   const renderCategoryHeader = useCallback((category, gameCount) => {
@@ -326,7 +451,10 @@ const CollectionScreen = () => {
               {games.length > 0 ? (
                 <View style={styles.categoryGamesGrid}>
                   {games.map((game, index) => (
-                    <View key={game.id || `game-${index}`} style={styles.gameCardWrapper}>
+                    <View 
+                      key={game.id || `game-${index}`} 
+                      style={[styles.gameCardWrapper, { width: cardWidthPercent }]}
+                    >
                       {renderGameCard({ item: game })}
                     </View>
                   ))}
@@ -339,7 +467,7 @@ const CollectionScreen = () => {
         })}
       </ScrollView>
     );
-  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader]);
+  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, cardWidthPercent]);
 
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
@@ -361,6 +489,23 @@ const CollectionScreen = () => {
     </Pressable>
   );
 
+  // Text List Import Button
+  const renderTextListButton = () => (
+    <Pressable
+      style={styles.menuOption}
+      onPress={() => setShowTextListModal(true)}
+    >
+      <View style={styles.menuOptionContent}>
+        <Text style={styles.menuOptionIcon}>📝</Text>
+        <View style={styles.menuOptionText}>
+          <Text style={styles.menuOptionTitle}>Type or paste your game list</Text>
+          <Text style={styles.menuOptionDescription}>Let us format your list and look up your titles for you</Text>
+        </View>
+        <Text style={styles.menuOptionArrow}>→</Text>
+      </View>
+    </Pressable>
+  );
+
   const renderHeader = () => {
     console.log('[CollectionScreen] renderHeader called, showMenu:', showMenu);
     if (!showMenu) {
@@ -377,6 +522,10 @@ const CollectionScreen = () => {
           </Text>
           
           {renderInventoryButton()}
+
+          <Text style={styles.orDivider}>OR</Text>
+
+          {renderTextListButton()}
 
           <Text style={styles.orDivider}>OR</Text>
 
@@ -480,8 +629,8 @@ const CollectionScreen = () => {
                     return null;
                   }
                 }}
-                numColumns={3}
-                columnWrapperStyle={styles.row}
+                numColumns={numColumns}
+                columnWrapperStyle={numColumns > 1 ? styles.row : undefined}
                 contentContainerStyle={styles.listContainer}
                 ListHeaderComponent={() => {
                   console.log('[CollectionScreen] Rendering ListHeaderComponent');
@@ -528,6 +677,10 @@ const CollectionScreen = () => {
                     </Text>
                     
                     {renderInventoryButton()}
+
+                    <Text style={styles.orDivider}>OR</Text>
+
+                    {renderTextListButton()}
 
                     <Text style={styles.orDivider}>OR</Text>
 
@@ -602,6 +755,17 @@ const CollectionScreen = () => {
         onCameraModalClose={handleCameraModalClose}
         onResultsModalClose={handleResultsModalClose}
       />
+
+      {/* Text List Import Modal */}
+      <TextListGameIdentifier
+        onAddToCollection={handleAddToCollection}
+        onRemoveFromCollection={handleRemoveFromCollection}
+        onDone={() => {
+          setShowTextListModal(false);
+        }}
+        showModal={showTextListModal}
+        onModalClose={() => setShowTextListModal(false)}
+      />
     </View>
   );
 };
@@ -609,44 +773,39 @@ const CollectionScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.bgColor,
   },
   scrollView: {
     flex: 1,
   },
   bggLogoTopContainer: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: theme.spacing.sm,
   },
   menuContainer: {
-    paddingVertical: 20,
+    paddingVertical: theme.spacing.xl,
   },
   menuTitle: {
-    fontSize: 16,
-    color: '#333',
-    lineHeight: 24,
-    marginBottom: 24,
-    paddingHorizontal: 4,
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    lineHeight: theme.typography.fontSize.base * theme.typography.lineHeight.normal,
+    marginBottom: theme.spacing['2xl'],
+    paddingHorizontal: theme.spacing.xs,
     textAlign: 'left',
   },
   orDivider: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
     textAlign: 'center',
-    marginVertical: 16,
+    marginVertical: theme.spacing.lg,
   },
   menuOption: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 12,
+    ...commonStyles.card,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing.md,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    borderColor: theme.colors.woodMedium,
   },
   menuOptionContent: {
     flexDirection: 'row',
@@ -656,30 +815,29 @@ const styles = StyleSheet.create({
   menuOptionContentMinimalPadding: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 4,
+    padding: theme.spacing.xs,
   },
   menuOptionIcon: {
-    width: 32,
-    height: 32,
-    marginRight: 16,
+    fontSize: theme.typography.fontSize['2xl'],
+    marginRight: theme.spacing.lg,
   },
   menuOptionText: {
     flex: 1,
   },
   menuOptionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
   },
   menuOptionDescription: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
   },
   menuOptionArrow: {
-    fontSize: 20,
-    color: '#999',
-    marginLeft: 12,
+    fontSize: theme.typography.fontSize.xl,
+    color: theme.colors.textSecondary,
+    marginLeft: theme.spacing.md,
   },
   // Gamescanner button - vertical layout
   gamescannerButtonContent: {
@@ -712,80 +870,80 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   backButtonText: {
-    fontSize: 16,
-    color: '#4a90e2',
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   viewTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
   },
   viewContent: {
     flex: 1,
     paddingBottom: 0,
   },
   sortContainer: {
-    marginBottom: 12,
-    paddingVertical: 8,
+    marginBottom: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: theme.colors.woodMedium,
   },
   sortRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    gap: 8,
+    marginTop: theme.spacing.sm,
+    gap: theme.spacing.sm,
   },
   sortLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-    marginRight: 4,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textSecondary,
+    marginRight: theme.spacing.xs,
   },
   sortButtons: {
     flexDirection: 'row',
-    gap: 6,
+    gap: theme.spacing.sm,
     flex: 1,
   },
   aiInventoryButton: {
     paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#4a90e2',
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.meepleRed,
     alignSelf: 'flex-start',
   },
   aiInventoryButtonText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
     color: '#fff',
   },
   sortButton: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 6,
+    borderRadius: theme.borderRadius.sm,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    backgroundColor: '#fff',
+    borderColor: theme.colors.woodMedium,
+    backgroundColor: theme.colors.surfaceColor,
   },
   sortButtonActive: {
-    borderColor: '#4a90e2',
-    backgroundColor: '#e8f4fd',
+    borderColor: theme.colors.meepleRed,
+    backgroundColor: theme.colors.woodLight,
   },
   sortButtonText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   sortButtonTextActive: {
-    color: '#4a90e2',
-    fontWeight: '600',
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   content: {
-    padding: 20,
+    padding: theme.spacing.xl,
   },
   headerContainer: {
-    padding: 20,
+    padding: theme.spacing.xl,
     paddingBottom: 0,
   },
   tabContent: {
@@ -803,145 +961,146 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
   },
   emptyText: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
     textAlign: 'center',
-    marginBottom: 32,
-    paddingHorizontal: 20,
+    marginBottom: theme.spacing['2xl'],
+    paddingHorizontal: theme.spacing.xl,
   },
   listContainer: {
     paddingBottom: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: theme.spacing.md,
   },
   row: {
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    gap: 8,
+    paddingHorizontal: theme.spacing.xs,
+    gap: theme.spacing.md,
+    marginBottom: theme.spacing.md,
   },
   gameCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    ...commonStyles.card,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.woodMedium,
   },
   gameCardImage: {
     width: '100%',
     height: 200,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    marginBottom: 12,
+    backgroundColor: theme.colors.woodLight,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
   imagePlaceholder: {
-    color: '#999',
+    color: theme.colors.textSecondary,
   },
   gameCardInfo: {
-    gap: 4,
+    gap: theme.spacing.xs,
   },
   gameCardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
   },
   gameCardMeta: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
   },
   gameCardBarcode: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
   },
   inventorySection: {
-    marginTop: 24,
-    paddingTop: 24,
+    marginTop: theme.spacing['2xl'],
+    paddingTop: theme.spacing['2xl'],
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.woodMedium,
   },
   inventoryHeader: {
-    marginBottom: 16,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    marginBottom: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.xl,
   },
   inventoryTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
   },
   categoryContent: {
     paddingBottom: 10,
   },
   categorySection: {
-    marginBottom: 24,
+    marginBottom: theme.spacing['2xl'],
   },
   categoryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceColor,
     borderBottomWidth: 2,
-    borderBottomColor: '#4a90e2',
-    marginBottom: 12,
+    borderBottomColor: theme.colors.meepleRed,
+    marginBottom: theme.spacing.md,
   },
   categoryTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
   },
   categorySortToggleContainer: {
     flexDirection: 'row',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
+    backgroundColor: theme.colors.woodLight,
+    borderRadius: theme.borderRadius.md,
     padding: 2,
     gap: 0,
   },
   categorySortToggleOption: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 6,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.sm,
     minWidth: 80,
     alignItems: 'center',
   },
   categorySortToggleOptionActive: {
-    backgroundColor: '#4a90e2',
+    backgroundColor: theme.colors.meepleRed,
   },
   categorySortToggleOptionText: {
     fontSize: 13,
-    fontWeight: '500',
-    color: '#666',
+    fontWeight: theme.typography.fontWeight.medium,
+    color: theme.colors.textSecondary,
   },
   categorySortToggleOptionTextActive: {
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
     color: '#fff',
   },
   categoryGamesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 12,
+    paddingHorizontal: theme.spacing.md,
     justifyContent: 'space-between',
+    gap: theme.spacing.md,
   },
   gameCardWrapper: {
-    width: '32%',
-    marginBottom: 8,
+    // Width will be set dynamically based on numColumns
+    marginBottom: theme.spacing.md,
+    alignSelf: 'flex-start',
   },
   emptyCategoryText: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
     fontStyle: 'italic',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.md,
   },
 });
 

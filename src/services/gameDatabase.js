@@ -96,7 +96,8 @@ export async function searchGamesByName(query, limit = 10) {
         new Promise((_, reject) => {
           setTimeout(() => {
             if (__DEV__) {
-              console.error(`[Game Database] ${queryName} timed out after 5 seconds${searchInfo}`);
+              // Use warn instead of error - timeouts are expected for games that don't exist
+              console.warn(`[Game Database] ${queryName} timed out after 5 seconds${searchInfo}`);
             }
             reject(new Error(`Firestore query timeout after 5 seconds: ${queryName}${searchInfo}`));
           }, 5000);
@@ -621,11 +622,36 @@ export async function updateGameWithBGGData(gameId, bggData) {
         minPlayers: bggData.minPlayers || null,
         maxPlayers: bggData.maxPlayers || null,
         playingTime: bggData.playingTime || null,
+        minPlayTime: bggData.minPlayTime || null,
+        maxPlayTime: bggData.maxPlayTime || null,
         minAge: bggData.minAge || null,
         average: bggData.average || '',
         bayesAverage: bggData.bayesAverage || '',
         usersRated: bggData.usersRated || '',
         rank: bggData.rank || '',
+        // Category ranks
+        strategyGamesRank: bggData.strategyGamesRank || '',
+        familyGamesRank: bggData.familyGamesRank || '',
+        partyGamesRank: bggData.partyGamesRank || '',
+        abstractsRank: bggData.abstractsRank || '',
+        thematicRank: bggData.thematicRank || '',
+        wargamesRank: bggData.wargamesRank || '',
+        childrensGamesRank: bggData.childrensGamesRank || '',
+        cgsRank: bggData.cgsRank || '',
+        // New comprehensive fields
+        mechanics: bggData.mechanics || null,
+        categories: bggData.categories || null,
+        designers: bggData.designers || null,
+        publishers: bggData.publishers || null,
+        artists: bggData.artists || null,
+        complexity: bggData.complexity || null,
+        ownedCount: bggData.ownedCount || null,
+        bestPlayerCount: bggData.bestPlayerCount || null,
+        languageDependence: bggData.languageDependence || null,
+        suggestedPlayerAge: bggData.suggestedPlayerAge || null,
+        alternateNames: bggData.alternateNames || null,
+        dimensions: bggData.dimensions || null,
+        weight: bggData.weight || null,
         // Mark that this was populated from BGG API
         bggDataCached: true,
         bggDataCachedAt: firebase.firestore.Timestamp.now(),
@@ -655,6 +681,12 @@ export async function updateGameWithBGGData(gameId, bggData) {
       if (!existingData.playingTime && bggData.playingTime) {
         updateData.playingTime = bggData.playingTime;
       }
+      if (!existingData.minPlayTime && bggData.minPlayTime) {
+        updateData.minPlayTime = bggData.minPlayTime;
+      }
+      if (!existingData.maxPlayTime && bggData.maxPlayTime) {
+        updateData.maxPlayTime = bggData.maxPlayTime;
+      }
       if (!existingData.minAge && bggData.minAge) {
         updateData.minAge = bggData.minAge;
       }
@@ -664,6 +696,73 @@ export async function updateGameWithBGGData(gameId, bggData) {
       if (bggData.bayesAverage) updateData.bayesAverage = bggData.bayesAverage;
       if (bggData.usersRated) updateData.usersRated = bggData.usersRated;
       if (bggData.rank) updateData.rank = bggData.rank;
+      
+      // Update category ranks if missing or if new data is available
+      if (!existingData.strategyGamesRank && bggData.strategyGamesRank) {
+        updateData.strategyGamesRank = bggData.strategyGamesRank;
+      }
+      if (!existingData.familyGamesRank && bggData.familyGamesRank) {
+        updateData.familyGamesRank = bggData.familyGamesRank;
+      }
+      if (!existingData.partyGamesRank && bggData.partyGamesRank) {
+        updateData.partyGamesRank = bggData.partyGamesRank;
+      }
+      if (!existingData.abstractsRank && bggData.abstractsRank) {
+        updateData.abstractsRank = bggData.abstractsRank;
+      }
+      if (!existingData.thematicRank && bggData.thematicRank) {
+        updateData.thematicRank = bggData.thematicRank;
+      }
+      if (!existingData.wargamesRank && bggData.wargamesRank) {
+        updateData.wargamesRank = bggData.wargamesRank;
+      }
+      if (!existingData.childrensGamesRank && bggData.childrensGamesRank) {
+        updateData.childrensGamesRank = bggData.childrensGamesRank;
+      }
+      if (!existingData.cgsRank && bggData.cgsRank) {
+        updateData.cgsRank = bggData.cgsRank;
+      }
+      
+      // Update new comprehensive fields (always update if available, as they may change)
+      if (bggData.mechanics !== undefined) {
+        updateData.mechanics = bggData.mechanics;
+      }
+      if (bggData.categories !== undefined) {
+        updateData.categories = bggData.categories;
+      }
+      if (bggData.designers !== undefined) {
+        updateData.designers = bggData.designers;
+      }
+      if (bggData.publishers !== undefined) {
+        updateData.publishers = bggData.publishers;
+      }
+      if (bggData.artists !== undefined) {
+        updateData.artists = bggData.artists;
+      }
+      if (bggData.complexity !== undefined && bggData.complexity !== null) {
+        updateData.complexity = bggData.complexity;
+      }
+      if (bggData.ownedCount !== undefined && bggData.ownedCount !== null) {
+        updateData.ownedCount = bggData.ownedCount;
+      }
+      if (bggData.bestPlayerCount !== undefined) {
+        updateData.bestPlayerCount = bggData.bestPlayerCount;
+      }
+      if (bggData.languageDependence !== undefined) {
+        updateData.languageDependence = bggData.languageDependence;
+      }
+      if (bggData.suggestedPlayerAge !== undefined) {
+        updateData.suggestedPlayerAge = bggData.suggestedPlayerAge;
+      }
+      if (bggData.alternateNames !== undefined) {
+        updateData.alternateNames = bggData.alternateNames;
+      }
+      if (bggData.dimensions !== undefined) {
+        updateData.dimensions = bggData.dimensions;
+      }
+      if (bggData.weight !== undefined && bggData.weight !== null) {
+        updateData.weight = bggData.weight;
+      }
       
       // Mark that BGG data was cached
       updateData.bggDataCached = true;
@@ -685,6 +784,118 @@ export async function updateGameWithBGGData(gameId, bggData) {
   } catch (error) {
     console.error('[Game Database] Error updating game with BGG data:', error);
     return false;
+  }
+}
+
+/**
+ * Save BGG API search results to Firestore with FULL DETAILS
+ * This fetches complete game information (thumbnails, images, descriptions, ratings, etc.)
+ * and caches EVERYTHING to Firestore so no additional BGG API calls are needed in the future.
+ * 
+ * Cached fields include:
+ * - Basic: id, name, nameLower, yearPublished, alternateNames
+ * - Media: thumbnail, image
+ * - Details: description, minPlayers, maxPlayers, playingTime, minPlayTime, maxPlayTime, minAge, suggestedPlayerAge
+ * - Ratings: average, bayesAverage, usersRated, rank, complexity, ownedCount
+ * - Category Ranks: strategyGamesRank, familyGamesRank, partyGamesRank, etc.
+ * - Game Mechanics & Categories: mechanics, categories
+ * - Publication Details: designers, publishers, artists
+ * - Player Info: bestPlayerCount, languageDependence
+ * - Physical Properties: dimensions, weight
+ * 
+ * @param {Array} searchResults - Array of game search results from BGG API (basic info only)
+ * @returns {Promise<number>} Number of games successfully cached with full details
+ */
+export async function cacheBGGSearchResults(searchResults) {
+  if (!searchResults || !Array.isArray(searchResults) || searchResults.length === 0) {
+    return 0;
+  }
+
+  if (!db) {
+    if (__DEV__) {
+      console.warn('[Game Database] Firestore db not initialized, cannot cache search results');
+    }
+    return 0;
+  }
+
+  try {
+    const gamesRef = db.collection(GAMES_COLLECTION);
+    let cachedCount = 0;
+
+    // First, cache basic info for all results (fast, non-blocking)
+    // This ensures games are searchable even if detail fetching fails
+    const basicCachePromises = searchResults.map(async (game) => {
+      try {
+        if (!game.id || !game.name) {
+          return false;
+        }
+
+        const docRef = gamesRef.doc(game.id.toString());
+        const doc = await docRef.get();
+
+        if (!doc.exists) {
+          await docRef.set({
+            id: game.id.toString(),
+            name: game.name || '',
+            nameLower: (game.name || '').toLowerCase(),
+            yearPublished: game.yearPublished || '',
+            // Placeholder fields - will be filled with full details below
+            rank: '',
+            average: '',
+            bayesAverage: '',
+            usersRated: '',
+            thumbnail: null,
+            image: null,
+            description: null,
+            minPlayers: null,
+            maxPlayers: null,
+            playingTime: null,
+            minAge: null,
+            strategyGamesRank: '',
+            familyGamesRank: '',
+            partyGamesRank: '',
+            abstractsRank: '',
+            thematicRank: '',
+            wargamesRank: '',
+            childrensGamesRank: '',
+            cgsRank: '',
+            bggDataCached: false,
+            searchResultCached: true,
+            searchResultCachedAt: firebase.firestore.Timestamp.now(),
+          });
+        } else {
+          // Update name if missing or different
+          const existingData = doc.data();
+          if (!existingData.name || existingData.name !== game.name) {
+            await docRef.update({
+              name: game.name || '',
+              nameLower: (game.name || '').toLowerCase(),
+              yearPublished: game.yearPublished || existingData.yearPublished || '',
+            });
+          }
+        }
+        return true;
+      } catch (error) {
+        if (__DEV__) {
+          console.warn(`[Game Database] Failed to cache basic info for game ${game.id}:`, error);
+        }
+        return false;
+      }
+    });
+
+    await Promise.all(basicCachePromises);
+
+    // User-driven fetching: Only cache basic info from search results
+    // Full details will be fetched when user actually selects/views the game
+    // This avoids unnecessary API calls for games users never interact with
+    if (__DEV__) {
+      console.log(`[Game Database] Cached basic info for ${searchResults.length} games. Full details will be fetched on-demand when users select games.`);
+    }
+    
+    return searchResults.length;
+  } catch (error) {
+    console.error('[Game Database] Error caching search results:', error);
+    return 0;
   }
 }
 

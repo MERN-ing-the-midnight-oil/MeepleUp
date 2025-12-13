@@ -383,4 +383,132 @@ export const identifyGamesFromImage = async ({
 
 export const buildGameIdentificationPrompt = buildPrompt;
 
+/**
+ * Format a list of board game titles for BGG API use using Claude.
+ * Takes a raw text list and returns properly formatted game titles.
+ * @param {string} gameListText - Raw text list of game titles (can be messy, unformatted)
+ * @returns {Promise<{ games: Array<string>, rawText: string }>}
+ */
+export const formatGameListForBGG = async (gameListText) => {
+  if (!API_CONFIG.ANTHROPIC_API_KEY) {
+    throw new Error('Anthropic API key is not configured. Set EXPO_PUBLIC_ANTHROPIC_API_KEY before using this feature.');
+  }
+
+  if (!gameListText || !gameListText.trim()) {
+    throw new Error('A game list is required to format.');
+  }
+
+  const prompt = `Take a look at this list of board game titles. Read it back formatted properly for the BGG API.
+
+The user has provided a list of board game titles. Your task is to:
+1. Extract all valid board game titles from the text
+2. Format them as a clean JSON array of strings
+3. Each title should be the full, proper game name as it would appear on BoardGameGeek
+4. Remove any duplicates
+5. Remove any non-game items (like instructions, notes, or other text)
+6. Standardize capitalization and formatting
+
+Return your response as valid JSON in this exact format:
+{
+  "games": [
+    "Game Title 1",
+    "Game Title 2",
+    "Game Title 3"
+  ]
+}
+
+Return ONLY valid JSON, no additional commentary, no Markdown formatting.
+
+User's list:
+${gameListText.trim()}`;
+
+  const payload = {
+    model: API_CONFIG.ANTHROPIC_DEFAULT_MODEL,
+    max_tokens: 4096,
+    temperature: 0,
+    system: 'Always produce output in strict JSON that conforms to the documented schema. Do not use Markdown code blocks. Return only the raw JSON object.',
+    messages: [
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ],
+  };
+
+  const headers = {
+    'x-api-key': API_CONFIG.ANTHROPIC_API_KEY,
+    'anthropic-version': API_CONFIG.ANTHROPIC_VERSION,
+    'content-type': 'application/json',
+  };
+
+  const endpoint = `${API_CONFIG.ANTHROPIC_BASE_URL}/v1/messages`;
+
+  // Retry logic for "Overloaded" errors
+  const maxRetries = 3;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Exponential backoff: wait 1s, 2s, 4s before retries
+      if (attempt > 0) {
+        const delayMs = Math.pow(2, attempt - 1) * 1000;
+        if (__DEV__) {
+          console.log(`[Claude API] Retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      const response = await axios.post(endpoint, payload, { headers });
+      
+      if (__DEV__) {
+        console.log('[Claude API] Format list response structure:', JSON.stringify(response.data, null, 2).substring(0, 1000));
+      }
+      
+      const rawText = extractTextFromClaudeResponse(response.data?.content);
+      
+      if (__DEV__) {
+        console.log('[Claude API] Extracted raw text length:', rawText?.length || 0);
+      }
+      
+      if (!rawText || rawText.trim().length === 0) {
+        throw new Error('Claude returned an empty response. The API response may be malformed.');
+      }
+      
+      const parsed = parseClaudeJson(rawText);
+
+      return {
+        games: parsed.games ?? [],
+        rawText,
+      };
+    } catch (error) {
+      lastError = error;
+      
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        error.message ||
+        'Unknown error';
+
+      // If it's an "Overloaded" error and we have retries left, retry
+      if (errorMessage.toLowerCase().includes('overloaded') && attempt < maxRetries) {
+        if (__DEV__) {
+          console.warn(`[Claude API] Overloaded error, will retry (attempt ${attempt + 1}/${maxRetries})`);
+        }
+        continue; // Retry the request
+      }
+
+      // For other errors or if we're out of retries, throw immediately
+      const message =
+        errorMessage === 'Overloaded'
+          ? 'Claude API is temporarily overloaded. Please wait a moment and try again.'
+          : errorMessage;
+
+      throw new Error(message);
+    }
+  }
+
+  // Should never reach here, but just in case
+  throw lastError || new Error('Failed to contact Claude after multiple attempts.');
+};
+
 
