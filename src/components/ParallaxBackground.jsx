@@ -1,242 +1,286 @@
 import React, { useEffect, useRef, useState } from 'react';
-
 import './ParallaxBackground.css';
 
-
-
-const ParallaxBackground = ({ children }) => {
-
-  const containerRef = useRef(null);
-
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [scrollY, setScrollY] = useState(0);
-
-
-
-  useEffect(() => {
-
-    const handleMouseMove = (e) => {
-
-      const { clientX, clientY } = e;
-
-      const { innerWidth, innerHeight } = window;
-
-      
-
-      // Normalize to -1 to 1 range
-
-      const x = (clientX / innerWidth - 0.5) * 2;
-
-      const y = (clientY / innerHeight - 0.5) * 2;
-
-      
-
-      setMousePosition({ x, y });
-
-    };
-
-
-
-    const handleScroll = () => {
-
-      setScrollY(window.scrollY);
-
-    };
-
-
-
-    window.addEventListener('mousemove', handleMouseMove);
-
-    window.addEventListener('scroll', handleScroll);
-
-    
-
-    return () => {
-
-      window.removeEventListener('mousemove', handleMouseMove);
-
-      window.removeEventListener('scroll', handleScroll);
-
-    };
-
-  }, []);
-
-
-
-  // Meeple configuration - adjust these to customize your background
-
-  const meeples = [
-
-    // Layer 1 - Slowest, largest, most transparent (far background)
-
-    { x: 10, y: 15, size: 120, opacity: 0.15, speed: 0.1, layer: 1, rotation: 15 },
-
-    { x: 70, y: 45, size: 140, opacity: 0.12, speed: 0.1, layer: 1, rotation: -20 },
-
-    { x: 40, y: 75, size: 100, opacity: 0.1, speed: 0.1, layer: 1, rotation: 30 },
-
-    { x: 85, y: 10, size: 110, opacity: 0.13, speed: 0.1, layer: 1, rotation: -15 },
-
-    { x: 5, y: 50, size: 130, opacity: 0.11, speed: 0.1, layer: 1, rotation: 25 },
-
-    { x: 60, y: 85, size: 95, opacity: 0.14, speed: 0.1, layer: 1, rotation: -30 },
-
-    
-
-    // Layer 2 - Medium speed (middle ground)
-
-    { x: 25, y: 30, size: 80, opacity: 0.18, speed: 0.3, layer: 2, rotation: -10 },
-
-    { x: 80, y: 20, size: 90, opacity: 0.2, speed: 0.3, layer: 2, rotation: 25 },
-
-    { x: 15, y: 60, size: 70, opacity: 0.15, speed: 0.3, layer: 2, rotation: -15 },
-
-    { x: 55, y: 85, size: 85, opacity: 0.17, speed: 0.3, layer: 2, rotation: 10 },
-
-    { x: 90, y: 70, size: 75, opacity: 0.2, speed: 0.3, layer: 2, rotation: -25 },
-
-    { x: 45, y: 10, size: 82, opacity: 0.19, speed: 0.3, layer: 2, rotation: 20 },
-
-    { x: 8, y: 88, size: 78, opacity: 0.16, speed: 0.3, layer: 2, rotation: -18 },
-
-    { x: 68, y: 55, size: 88, opacity: 0.18, speed: 0.3, layer: 2, rotation: 12 },
-
-    { x: 92, y: 35, size: 72, opacity: 0.21, speed: 0.3, layer: 2, rotation: -22 },
-
-    
-
-    // Layer 3 - Fastest, smallest, most visible (foreground)
-
-    { x: 30, y: 10, size: 50, opacity: 0.25, speed: 0.5, layer: 3, rotation: 20 },
-
-    { x: 60, y: 25, size: 55, opacity: 0.28, speed: 0.5, layer: 3, rotation: -30 },
-
-    { x: 85, y: 50, size: 45, opacity: 0.22, speed: 0.5, layer: 3, rotation: 15 },
-
-    { x: 20, y: 80, size: 60, opacity: 0.3, speed: 0.5, layer: 3, rotation: -20 },
-
-    { x: 50, y: 55, size: 50, opacity: 0.25, speed: 0.5, layer: 3, rotation: 35 },
-
-    { x: 75, y: 90, size: 55, opacity: 0.28, speed: 0.5, layer: 3, rotation: -10 },
-
-    { x: 12, y: 42, size: 48, opacity: 0.27, speed: 0.5, layer: 3, rotation: 18 },
-
-    { x: 38, y: 68, size: 52, opacity: 0.29, speed: 0.5, layer: 3, rotation: -25 },
-
-    { x: 65, y: 8, size: 46, opacity: 0.24, speed: 0.5, layer: 3, rotation: 28 },
-
-    { x: 88, y: 78, size: 58, opacity: 0.31, speed: 0.5, layer: 3, rotation: -15 },
-
-    { x: 42, y: 35, size: 51, opacity: 0.26, speed: 0.5, layer: 3, rotation: 22 },
-
-    { x: 72, y: 62, size: 49, opacity: 0.28, speed: 0.5, layer: 3, rotation: -32 },
-
-    { x: 95, y: 92, size: 54, opacity: 0.3, speed: 0.5, layer: 3, rotation: 16 },
-
-  ];
-
-
-
-  return (
-
-    <div className="parallax-wrapper">
-
-      <div className="parallax-container" ref={containerRef}>
-
-        {[1, 2, 3].map((layerNum) => {
-
-          const speed = layerNum === 1 ? 0.1 : layerNum === 2 ? 0.3 : 0.5;
-
-          const scrollOffset = -(scrollY * speed);
-
-          const mouseX = mousePosition.x * layerNum * 3;
-
-          const mouseY = mousePosition.y * layerNum * 3;
-
-          
-
-          return (
-
-          <div
-
-            key={layerNum}
-
-            className="parallax-layer"
-
-            data-speed={speed}
-
-            style={{
-
-              transform: `translate(${mouseX}px, ${mouseY + scrollOffset}px)`
-
-            }}
-
-          >
-
-            {meeples
-
-              .filter(m => m.layer === layerNum)
-
-              .map((meeple, idx) => (
-
-                <div
-
-                  key={`${layerNum}-${idx}`}
-
-                  className="meeple"
-
-                  style={{
-
-                    left: `${meeple.x}%`,
-
-                    top: `${meeple.y}%`,
-
-                    width: `${meeple.size}px`,
-
-                    height: `${meeple.size}px`,
-
-                    opacity: meeple.opacity,
-
-                    transform: `rotate(${meeple.rotation}deg)`
-
-                  }}
-
-                >
-
-                  <svg viewBox="0 0 24 24" fill="currentColor">
-
-                    <path d="M9 20h-5a1 1 0 0 1 -1 -1c0 -2 3.378 -4.907 4 -6c-1 0 -4 -.5 -4 -2c0 -2 4 -3.5 6 -4c0 -1.5 .5 -4 3 -4s3 2.5 3 4c2 .5 6 2 6 4c0 1.5 -3 2 -4 2c.622 1.093 4 4 4 6a1 1 0 0 1 -1 1h-5c-1 0 -2 -4 -3 -4s-2 4 -3 4z" />
-
-                  </svg>
-
-                </div>
-
-              ))}
-
-          </div>
-
-          );
-
-        })}
-
-      </div>
-
-      
-
-      {/* Your app content goes here */}
-
-      <div className="parallax-content">
-
-        {children}
-
-      </div>
-
-    </div>
-
-  );
-
+const MEEPLE_PATH = 'M9 20h-5a1 1 0 0 1 -1 -1c0 -2 3.378 -4.907 4 -6c-1 0 -4 -.5 -4 -2c0 -2 4 -3.5 6 -4c0 -1.5 .5 -4 3 -4s3 2.5 3 4c2 .5 6 2 6 4c0 1.5 -3 2 -4 2c.622 1.093 4 4 4 6a1 1 0 0 1 -1 1h-5c-1 0 -2 -4 -3 -4s-2 4 -3 4z';
+
+// Layer configurations
+const LAYER_CONFIGS = {
+  background: {
+    sizeRange: [25, 45],
+    speedRange: [6, 10], // seconds
+    opacityRange: [0.15, 0.25],
+    tiltRange: [-20, 20],
+    spawnWeight: 0.55, // 50-60% of meeples
+  },
+  midground: {
+    sizeRange: [50, 70],
+    speedRange: [10, 15],
+    opacityRange: [0.4, 0.6],
+    tiltRange: [-35, 35],
+    spawnWeight: 0.35, // 30-40% of meeples
+  },
+  foreground: {
+    sizeRange: [80, 120],
+    speedRange: [15, 20],
+    opacityRange: [0.7, 0.9],
+    tiltRange: [-20, 20],
+    spawnWeight: 0.10, // 10-15% of meeples
+  },
 };
 
+// Helper to get random value in range
+const randomInRange = (min, max) => min + Math.random() * (max - min);
 
+// Helper to select layer based on weights
+const selectLayer = () => {
+  const rand = Math.random();
+  if (rand < LAYER_CONFIGS.background.spawnWeight) return 'background';
+  if (rand < LAYER_CONFIGS.background.spawnWeight + LAYER_CONFIGS.midground.spawnWeight) return 'midground';
+  return 'foreground';
+};
+
+// Stratified randomness: divide viewport into segments
+const SEGMENT_COUNT = 10;
+const getStratifiedX = (width, usedSegments) => {
+  // Find available segments
+  const availableSegments = [];
+  for (let i = 0; i < SEGMENT_COUNT; i++) {
+    if (!usedSegments.has(i)) {
+      availableSegments.push(i);
+    }
+  }
+  
+  // If all segments used, reset
+  if (availableSegments.length === 0) {
+    usedSegments.clear();
+    for (let i = 0; i < SEGMENT_COUNT; i++) {
+      availableSegments.push(i);
+    }
+  }
+  
+  // Select random segment from available
+  const segmentIndex = availableSegments[Math.floor(Math.random() * availableSegments.length)];
+  usedSegments.add(segmentIndex);
+  
+  // Randomize within segment
+  const segmentWidth = width / SEGMENT_COUNT;
+  const segmentStart = segmentIndex * segmentWidth;
+  return segmentStart + Math.random() * segmentWidth;
+};
+
+const ParallaxBackground = ({ children, enabled = true }) => {
+  const containerRef = useRef(null);
+  const [particles, setParticles] = useState([]);
+  const particleIdRef = useRef(0);
+  const usedSegmentsRef = useRef(new Set());
+  const spawnIntervalRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  
+  const getViewportSize = () => {
+    if (containerRef.current) {
+      return {
+        width: containerRef.current.offsetWidth || window.innerWidth,
+        height: containerRef.current.offsetHeight || window.innerHeight,
+      };
+    }
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    };
+  };
+  
+  // Spawn rate: faster for smaller screens, slower for larger
+  const getSpawnInterval = () => {
+    const { width, height } = getViewportSize();
+    const baseInterval = 800; // milliseconds
+    const screenArea = width * height;
+    const normalizedArea = screenArea / (1920 * 1080); // Normalize to 1080p
+    return baseInterval * (1 + normalizedArea * 0.5); // Scale up for larger screens
+  };
+  
+  const spawnMeeple = () => {
+    if (!enabled || !containerRef.current) return;
+    
+    const { width, height } = getViewportSize();
+    if (width === 0 || height === 0) return;
+    
+    const layer = selectLayer();
+    const config = LAYER_CONFIGS[layer];
+    const size = randomInRange(config.sizeRange[0], config.sizeRange[1]);
+    const speed = randomInRange(config.speedRange[0], config.speedRange[1]);
+    const opacity = randomInRange(config.opacityRange[0], config.opacityRange[1]);
+    const tilt = randomInRange(config.tiltRange[0], config.tiltRange[1]);
+    const x = getStratifiedX(width, usedSegmentsRef.current);
+    const id = particleIdRef.current++;
+    
+    const particle = {
+      id,
+      layer,
+      x: x - size / 2, // Center the meeple
+      y: height + size, // Start below viewport
+      size,
+      speed,
+      opacity,
+      tilt,
+      startTime: Date.now(),
+    };
+    
+    setParticles(prev => [...prev, particle]);
+    
+    // Remove segment from used set after a delay to allow reuse
+    setTimeout(() => {
+      // Find which segment this x belongs to
+      const segmentIndex = Math.floor((x / width) * SEGMENT_COUNT);
+      usedSegmentsRef.current.delete(segmentIndex);
+    }, 2000);
+  };
+  
+  const removeParticle = (id) => {
+    setParticles(prev => prev.filter(p => p.id !== id));
+  };
+  
+  // Animation loop using requestAnimationFrame
+  useEffect(() => {
+    if (!enabled) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+    
+    const animate = () => {
+      const now = Date.now();
+      const { height } = getViewportSize();
+      
+      setParticles(prev => {
+        return prev.map(particle => {
+          const elapsed = (now - particle.startTime) / 1000; // Convert to seconds
+          const progress = elapsed / particle.speed;
+          
+          if (progress >= 1) {
+            // Particle has completed its journey
+            setTimeout(() => removeParticle(particle.id), 0);
+            return particle;
+          }
+          
+          // Calculate new Y position
+          const startY = height + particle.size;
+          const endY = -particle.size;
+          const currentY = startY + (endY - startY) * progress;
+          
+          return {
+            ...particle,
+            y: currentY,
+          };
+        }).filter(particle => {
+          // Keep particles that haven't completed
+          const elapsed = (now - particle.startTime) / 1000;
+          return elapsed < particle.speed;
+        });
+      });
+      
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+    
+    animationFrameRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [enabled]);
+  
+  useEffect(() => {
+    if (!enabled) {
+      if (spawnIntervalRef.current) {
+        clearInterval(spawnIntervalRef.current);
+        spawnIntervalRef.current = null;
+      }
+      return;
+    }
+    
+    // Initial spawn
+    spawnMeeple();
+    
+    // Set up spawn interval
+    const interval = getSpawnInterval();
+    spawnIntervalRef.current = setInterval(spawnMeeple, interval);
+    
+    // Handle window resize
+    const handleResize = () => {
+      // Clear used segments on resize to prevent issues
+      usedSegmentsRef.current.clear();
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      if (spawnIntervalRef.current) {
+        clearInterval(spawnIntervalRef.current);
+        spawnIntervalRef.current = null;
+      }
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [enabled]);
+  
+  return (
+    <div ref={containerRef} className="parallax-background">
+      {/* Background layers */}
+      {enabled && (
+        <div className="parallax-background-layers">
+          {particles.map(particle => {
+            // Calculate rotation with subtle animation
+            const now = Date.now();
+            const elapsed = (now - particle.startTime) / 1000;
+            const rotationProgress = elapsed / particle.speed;
+            const rotationOffset = Math.sin(rotationProgress * Math.PI * 2) * 5;
+            const rotation = particle.tilt + rotationOffset;
+            
+            return (
+              <svg
+                key={particle.id}
+                className={`meeple-particle meeple-${particle.layer}`}
+                style={{
+                  position: 'absolute',
+                  left: `${particle.x}px`,
+                  top: `${particle.y}px`,
+                  width: `${particle.size}px`,
+                  height: `${particle.size}px`,
+                  minWidth: `${particle.size}px`, // Prevent shrinking
+                  minHeight: `${particle.size}px`, // Prevent shrinking
+                  maxWidth: `${particle.size}px`, // Prevent growing
+                  maxHeight: `${particle.size}px`, // Prevent growing
+                  opacity: particle.opacity,
+                  transform: `rotate(${rotation}deg) scale(1)`, // Explicitly set scale to 1
+                  willChange: 'transform',
+                  // Prevent any opacity transitions or animations
+                  transition: 'none',
+                }}
+                viewBox="0 0 24 24"
+                preserveAspectRatio="xMidYMid meet"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d={MEEPLE_PATH}
+                  fill="var(--meeple-red)"
+                  style={{ opacity: 1 }} // Ensure path itself has full opacity
+                />
+              </svg>
+            );
+          })}
+        </div>
+      )}
+      
+      {/* Content */}
+      <div className="parallax-background-content">
+        {children}
+      </div>
+    </div>
+  );
+};
 
 export default ParallaxBackground;
+

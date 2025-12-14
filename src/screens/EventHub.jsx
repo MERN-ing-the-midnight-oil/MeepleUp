@@ -1692,16 +1692,23 @@ const EventHub = () => {
             </View>
           </View>
         
-        {isOrganizerOrCoOrganizer && (
-          <View style={styles.editScheduleButtonContainer}>
+        <View style={styles.editScheduleButtonContainer}>
+          {isOrganizerOrCoOrganizer ? (
             <Button
               label="Edit Calendar"
               onPress={() => setShowEditSchedule(true)}
               variant="outline"
               style={styles.editButton}
             />
-          </View>
-        )}
+          ) : (
+            <Button
+              label="Display calendar"
+              onPress={() => setShowEditSchedule(true)}
+              variant="outline"
+              style={styles.editButton}
+            />
+          )}
+        </View>
         
         <View style={styles.scheduleInfo}>
           {futureEvents.length > 0 ? (
@@ -1996,17 +2003,24 @@ const EventHub = () => {
         </ScrollView>
       </Modal>
 
-      {/* Edit Schedule Button (outside of scheduleInfo for organizers) */}
-      {isOrganizerOrCoOrganizer && (
-        <View style={styles.section}>
+      {/* Edit Schedule Button (outside of scheduleInfo) */}
+      <View style={styles.section}>
+        {isOrganizerOrCoOrganizer ? (
           <Button
             label="Edit Schedule"
             onPress={() => setShowEditSchedule(true)}
             variant="outline"
             style={styles.editButton}
           />
-        </View>
-      )}
+        ) : (
+          <Button
+            label="Display calendar"
+            onPress={() => setShowEditSchedule(true)}
+            variant="outline"
+            style={styles.editButton}
+          />
+        )}
+      </View>
 
       {/* Archive Section - Combined with Event Details */}
       {isOrganizerOrCoOrganizer && (

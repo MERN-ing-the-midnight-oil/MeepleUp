@@ -189,6 +189,20 @@ const TextListGameIdentifier = ({
     }
   };
 
+  const handleRemoveGame = (gameTitle) => {
+    setFormattedGames(prev => prev.filter(title => title !== gameTitle));
+    setSearchResults(prev => {
+      const updated = { ...prev };
+      delete updated[gameTitle];
+      return updated;
+    });
+    setSelectedGames(prev => {
+      const updated = { ...prev };
+      delete updated[gameTitle];
+      return updated;
+    });
+  };
+
   const handleReset = () => {
     setGameListText('');
     setFormattedGames([]);
@@ -212,7 +226,16 @@ const TextListGameIdentifier = ({
 
     return (
       <View key={gameTitle} style={styles.gameSelectionCard}>
-        <Text style={styles.gameTitleText}>{gameTitle}</Text>
+        <View style={styles.gameTitleRow}>
+          <Text style={styles.gameTitleText}>{gameTitle}</Text>
+          <Pressable
+            onPress={() => handleRemoveGame(gameTitle)}
+            style={styles.removeButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.removeButtonText}>✕</Text>
+          </Pressable>
+        </View>
         
         {isProcessing ? (
           <View style={styles.processingContainer}>
@@ -278,14 +301,14 @@ const TextListGameIdentifier = ({
 
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
           <Text style={styles.instructions}>
-            Type or paste your list of board game titles below. You can include multiple games, one per line or separated by commas.
+            Type or paste your list of board game titles, or describe your collection. You can include multiple games (one per line or separated by commas), or use descriptions like "Pretty much all the 'Dominion' games" or "I have almost all the Settlers Expansions". The AI will generate a comprehensive list for you.
           </Text>
 
           <TextInput
             style={styles.textInput}
             multiline
             numberOfLines={10}
-            placeholder="Enter your game titles here...&#10;For example:&#10;Catan&#10;Ticket to Ride&#10;Pandemic&#10;Wingspan"
+            placeholder="Enter your game titles or description...&#10;&#10;Examples:&#10;• Catan, Ticket to Ride, Pandemic&#10;• Pretty much all the 'Dominion' games&#10;• I have almost all the Settlers Expansions&#10;• All Ticket to Ride games except the base game"
             placeholderTextColor={theme.colors.textSecondary}
             value={gameListText}
             onChangeText={setGameListText}
@@ -315,7 +338,7 @@ const TextListGameIdentifier = ({
                   Found {formattedGames.length} game{formattedGames.length !== 1 ? 's' : ''}
                 </Text>
                 <Text style={styles.resultsSubtitle}>
-                  Select the correct match for each game:
+                  Select the correct match for each game. Tap ✕ to remove games you don't have:
                 </Text>
               </View>
 
@@ -422,11 +445,32 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     marginBottom: theme.spacing.md,
   },
+  gameTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
   gameTitleText: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.sm,
+    flex: 1,
+    marginRight: theme.spacing.sm,
+  },
+  removeButton: {
+    padding: theme.spacing.xs,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.woodLight,
+    minWidth: 28,
+    minHeight: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeButtonText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.bold,
   },
   processingContainer: {
     flexDirection: 'row',

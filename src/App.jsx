@@ -5,6 +5,7 @@ import { EventsProvider } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
 import { AvailabilityProvider } from './context/AvailabilityContext';
 import WebNavigation from './components/WebNavigation';
+import ParallaxBackground from './components/ParallaxBackground';
 import Onboarding from './screens/Onboarding';
 import EventsScreen from './screens/EventsScreen';
 import EventHub from './screens/EventHub';
@@ -43,7 +44,9 @@ const AppContent = () => {
           path="/"
           element={
             <PublicRoute>
-              <Onboarding />
+              <ParallaxBackground>
+                <Onboarding />
+              </ParallaxBackground>
             </PublicRoute>
           }
         />
@@ -51,7 +54,9 @@ const AppContent = () => {
           path="/events"
           element={
             <ProtectedRoute>
-              <EventsScreen />
+              <ParallaxBackground>
+                <EventsScreen />
+              </ParallaxBackground>
             </ProtectedRoute>
           }
         />
@@ -59,7 +64,9 @@ const AppContent = () => {
           path="/event/:eventId"
           element={
             <ProtectedRoute>
-              <EventHub />
+              <ParallaxBackground>
+                <EventHub />
+              </ParallaxBackground>
             </ProtectedRoute>
           }
         />
@@ -67,7 +74,9 @@ const AppContent = () => {
           path="/event/:eventId/browse/:dateIndex"
           element={
             <ProtectedRoute>
-              <BrowseAndProposeScreen />
+              <ParallaxBackground>
+                <BrowseAndProposeScreen />
+              </ParallaxBackground>
             </ProtectedRoute>
           }
         />
@@ -75,7 +84,9 @@ const AppContent = () => {
           path="/collection"
           element={
             <ProtectedRoute>
-              <CollectionScreen />
+              <ParallaxBackground>
+                <CollectionScreen />
+              </ParallaxBackground>
             </ProtectedRoute>
           }
         />
@@ -83,7 +94,9 @@ const AppContent = () => {
           path="/profile"
           element={
             <ProtectedRoute>
-              <ProfileScreen />
+              <ParallaxBackground>
+                <ProfileScreen />
+              </ParallaxBackground>
             </ProtectedRoute>
           }
         />

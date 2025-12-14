@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -17,6 +17,7 @@ import CollectionScreen from './src/screens/CollectionScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import LoadingSpinner from './src/components/common/LoadingSpinner';
 import Navigation from './src/components/Navigation';
+import AnimatedBackground from './src/components/AnimatedBackground';
 // Fonts are now loaded on-demand, no need to load all at startup
 
 const Stack = createNativeStackNavigator();
@@ -61,6 +62,8 @@ function AppNavigator() {
     setCurrentRouteName(navigationRef.getCurrentRoute()?.name);
   };
 
+  // Screen components - no parallax wrapper for now
+
   return (
     <NavigationContainer
       ref={navigationRef}
@@ -78,7 +81,14 @@ function AppNavigator() {
       >
         {!isAuthenticated && (
           <>
-            <Stack.Screen name="Landing" component={LandingScreen} />
+            <Stack.Screen 
+              name="Landing" 
+              component={() => (
+                <AnimatedBackground>
+                  <LandingScreen />
+                </AnimatedBackground>
+              )} 
+            />
             <Stack.Screen name="Auth" component={AuthScreen} />
           </>
         )}

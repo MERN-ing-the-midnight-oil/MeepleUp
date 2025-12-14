@@ -386,7 +386,8 @@ export const buildGameIdentificationPrompt = buildPrompt;
 /**
  * Format a list of board game titles for BGG API use using Claude.
  * Takes a raw text list and returns properly formatted game titles.
- * @param {string} gameListText - Raw text list of game titles (can be messy, unformatted)
+ * Can also interpret descriptions and generate comprehensive lists.
+ * @param {string} gameListText - Raw text list of game titles or descriptive query (can be messy, unformatted)
  * @returns {Promise<{ games: Array<string>, rawText: string }>}
  */
 export const formatGameListForBGG = async (gameListText) => {
@@ -398,15 +399,29 @@ export const formatGameListForBGG = async (gameListText) => {
     throw new Error('A game list is required to format.');
   }
 
-  const prompt = `Take a look at this list of board game titles. Read it back formatted properly for the BGG API.
+  const prompt = `You are an expert on board games and BoardGameGeek (BGG). Your task is to interpret the user's input and generate a list of board game titles based on your best guess of what they're referring to.
 
-The user has provided a list of board game titles. Your task is to:
-1. Extract all valid board game titles from the text
-2. Format them as a clean JSON array of strings
-3. Each title should be the full, proper game name as it would appear on BoardGameGeek
-4. Remove any duplicates
-5. Remove any non-game items (like instructions, notes, or other text)
+The user may provide:
+1. A direct list of game titles (one per line, comma-separated, or mixed format)
+2. A descriptive query about games they own (e.g., "Pretty much all the 'Dominion' games", "I have almost all the Settlers Expansions", "All the Ticket to Ride games except the base game")
+
+Your task is to:
+1. If the input is a direct list: Extract all valid board game titles, format them properly, remove duplicates, and standardize them
+2. If the input is a descriptive query: Make your best guess about which specific games the description is referring to. For example:
+   - "Pretty much all the 'Dominion' games" → Likely means the main Dominion base games and major expansions (Dominion, Dominion: Intrigue, Dominion: Seaside, Dominion: Prosperity, Dominion: Hinterlands, Dominion: Dark Ages, Dominion: Guilds, Dominion: Adventures, Dominion: Empires, Dominion: Nocturne, Dominion: Renaissance, Dominion: Menagerie, Dominion: Allies, etc.)
+   - "I have almost all the Settlers Expansions" → Likely means the main Catan expansions (Catan: Seafarers, Catan: Cities & Knights, Catan: Traders & Barbarians, Catan: Explorers & Pirates, etc.)
+   - "All Ticket to Ride games" → Likely means the main Ticket to Ride base games and popular map expansions
+   - "All Pandemic games" → Likely means the main Pandemic base games and major expansions
+3. When generating lists from descriptions, make your best judgment:
+   - Consider the context and wording (e.g., "almost all" vs "all", "pretty much all" vs "all")
+   - Include the games that most likely match the description
+   - Focus on commonly owned/well-known games in a series rather than obscure promos or micro-expansions
+   - Use your knowledge of board game series and what games are typically available
+4. Format each title as the full, proper game name as it would appear on BoardGameGeek
+5. Remove any duplicates
 6. Standardize capitalization and formatting
+
+IMPORTANT: Make your best guess about which games the user is referring to. The user can always remove games from the staging area if they don't have them, or add more if something is missing.
 
 Return your response as valid JSON in this exact format:
 {
@@ -419,7 +434,7 @@ Return your response as valid JSON in this exact format:
 
 Return ONLY valid JSON, no additional commentary, no Markdown formatting.
 
-User's list:
+User's input:
 ${gameListText.trim()}`;
 
   const payload = {

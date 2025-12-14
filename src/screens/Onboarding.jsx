@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform, TouchableOpacity, Animated } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +45,7 @@ const Onboarding = () => {
   const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const scrollViewRef = useRef(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   const handleModeChange = (nextMode) => {
     setError('');
@@ -358,11 +359,18 @@ const Onboarding = () => {
     return (
       <>
       <KeyboardAvoidingView
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
-      >
-        <ScrollView contentContainerStyle={styles.container}>
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
+        >
+          <ScrollView 
+            contentContainerStyle={styles.container}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: false }
+            )}
+            scrollEventThrottle={16}
+          >
           <View style={styles.content}>
             <Text style={styles.title}>Welcome to MeepleUp!</Text>
           <View style={[styles.bggLogoContainer, { width: width * 0.5 }]}>
@@ -401,11 +409,6 @@ const Onboarding = () => {
                     })}
                     isOrganizer={isOrganizer}
                     style={styles.eventCard}
-                    organizerName={organizer.name}
-                    organizerAvatarUrl={organizer.avatarUrl}
-                    onOrganizerPress={(userId, userName, avatarUrl) => {
-                      setSelectedUserForProfile({ userId, userName, avatarUrl });
-                    }}
                     memberAvatars={memberAvatars}
                     memberNames={memberNames}
                     onMemberPress={(userId, userName, avatarUrl) => {
@@ -467,11 +470,18 @@ const Onboarding = () => {
     return (
       <>
       <KeyboardAvoidingView
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
-      >
-        <ScrollView contentContainerStyle={styles.container}>
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
+        >
+          <ScrollView 
+            contentContainerStyle={styles.container}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: false }
+            )}
+            scrollEventThrottle={16}
+          >
           <View style={styles.content}>
             <Button
               label="← Back"
@@ -515,16 +525,21 @@ const Onboarding = () => {
   return (
     <>
     <KeyboardAvoidingView
-      style={styles.keyboardAvoidingView}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
-    >
-      <ScrollView 
-        ref={scrollViewRef}
-        contentContainerStyle={[styles.container, styles.createFormContainer]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={true}
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
       >
+        <ScrollView 
+          ref={scrollViewRef}
+          contentContainerStyle={[styles.container, styles.createFormContainer]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={true}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: false }
+          )}
+          scrollEventThrottle={16}
+        >
         <View style={styles.content}>
         <Button
           label="← Back"
@@ -947,7 +962,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flexGrow: 1,
-    backgroundColor: theme.colors.bgColor,
+    backgroundColor: 'transparent', // Transparent to show parallax background
   },
   createFormContainer: {
     paddingBottom: 400,

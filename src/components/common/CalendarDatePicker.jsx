@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import { getHolidayForDate, HolidayIcon } from '../../utils/holidays';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -184,6 +185,7 @@ const CalendarDatePicker = ({
                 const isDisabled = isDateDisabled(date);
                 const isToday = dateToKey(date) === dateToKey(today);
                 const dateInfo = isSelected ? getDateInfo(date) : null;
+                const holiday = getHolidayForDate(date);
 
                 return (
                   <TouchableOpacity
@@ -241,6 +243,15 @@ const CalendarDatePicker = ({
                       >
                         {date.getDate()}
                       </Text>
+                      {/* Holiday emoji - positioned below date number */}
+                      {holiday && (
+                        <View style={styles.holidayIconContainer}>
+                          <HolidayIcon 
+                            holiday={holiday} 
+                            size={16}
+                          />
+                        </View>
+                      )}
                     </View>
                   </TouchableOpacity>
                 );
@@ -259,7 +270,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   monthContainer: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 4,
   },
   monthHeader: {
     alignItems: 'center',
@@ -279,6 +290,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 8,
+    minWidth: 0, // Prevents flex items from overflowing
   },
   weekdayText: {
     fontSize: 12,
@@ -289,10 +301,11 @@ const styles = StyleSheet.create({
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 4,
+    paddingHorizontal: 0,
   },
   dayCellWrapper: {
-    width: '14.28%',
+    flex: 1,
+    minWidth: 0, // Prevents flex items from overflowing
     minHeight: 60,
     marginBottom: 4,
     paddingHorizontal: 1,
@@ -305,6 +318,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 1,
     borderRadius: 8,
     minHeight: 60,
+    position: 'relative',
+  },
+  holidayIconContainer: {
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   todayCellWrapper: {
     // Container for today styling if needed

@@ -83,7 +83,7 @@ const Landing = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'transparent', // Transparent to show animated background
     justifyContent: 'center',
     alignItems: 'center',
   },

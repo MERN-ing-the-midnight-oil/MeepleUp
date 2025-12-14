@@ -8,6 +8,7 @@ import {
   Alert,
   useWindowDimensions,
   Platform,
+  Animated,
 } from 'react-native';
 import { useResponsive } from '../utils/responsive';
 import { useAuth } from '../context/AuthContext';
@@ -54,6 +55,7 @@ const EventsScreen = () => {
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const scrollViewRef = useRef(null);
   const scrollPositionRef = useRef(0);
+  const scrollY = useRef(new Animated.Value(0)).current;
 
   // Event creation form state
   const [eventForm, setEventForm] = useState({
@@ -412,13 +414,21 @@ const EventsScreen = () => {
   return (
     <>
       <ScrollView 
-        ref={scrollViewRef}
-        style={styles.container}
-        onScroll={(event) => {
-          scrollPositionRef.current = event.nativeEvent.contentOffset.y;
-        }}
-        scrollEventThrottle={16}
-      >
+          ref={scrollViewRef}
+          style={styles.container}
+          onScroll={Platform.OS !== 'web' 
+            ? Animated.event(
+                [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                { useNativeDriver: false, listener: (event) => {
+                  scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+                }}
+              )
+            : (event) => {
+                scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+              }
+          }
+          scrollEventThrottle={16}
+        >
         <View style={styles.header}>
           <Text style={styles.title}>Your MeepleUps</Text>
           <Text style={styles.subtitle}>Manage your game night MeepleUps</Text>
@@ -481,11 +491,6 @@ const EventsScreen = () => {
                   currentUserId={userIdentifier}
                   onRSVP={rsvpHandlers[event.id]}
                   memberRSVPs={eventRSVPs}
-                  organizerName={organizer.name}
-                  organizerAvatarUrl={organizer.avatarUrl}
-                  onOrganizerPress={(userId, userName, avatarUrl) => {
-                    setSelectedUserForProfile({ userId, userName, avatarUrl });
-                  }}
                   memberAvatars={memberAvatars}
                   memberNames={memberNames}
                   onMemberPress={(userId, userName, avatarUrl) => {
@@ -610,7 +615,7 @@ const EventsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.bgColor,
+    backgroundColor: 'transparent', // Transparent to show parallax background
   },
   header: {
     padding: theme.spacing.xl,

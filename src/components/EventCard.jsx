@@ -16,9 +16,6 @@ const EventCard = memo(({
   currentUserId,
   onRSVP,
   memberRSVPs = {},
-  organizerName = null,
-  organizerAvatarUrl = null,
-  onOrganizerPress = null,
   memberAvatars = {},
   memberNames = {},
   onMemberPress = null,
@@ -103,63 +100,12 @@ const EventCard = memo(({
                 </TouchableOpacity>
               )}
             </View>
-            {/* Show RSVP count in collapsed view */}
-            {!isExpanded && rsvpSettings.enabled && (
-              <Text style={styles.collapsedRsvpCount}>
-                {rsvpCounts.going > 0 ? `✓ ${rsvpCounts.going} Going` : 'No confirmations yet'}
-              </Text>
-            )}
           </View>
         </View>
 
         {/* Expanded content */}
         {isExpanded && (
           <>
-            {/* Organizer/Host Info */}
-            {(organizerName || organizerAvatarUrl) && (
-          <View style={styles.organizerContainer}>
-            <Text style={styles.organizerLabel}>Organizer:</Text>
-            <View style={styles.organizerInfo}>
-              {onOrganizerPress ? (
-                <TouchableOpacity
-                  style={styles.organizerAvatarContainer}
-                  onPress={() => onOrganizerPress(event.organizerId, organizerName, organizerAvatarUrl)}
-                >
-                  {organizerAvatarUrl ? (
-                    <Image
-                      source={{ uri: organizerAvatarUrl }}
-                      style={styles.organizerAvatar}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.organizerAvatarPlaceholder}>
-                      <Text style={styles.organizerAvatarInitial}>
-                        {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.organizerAvatarContainer}>
-                  {organizerAvatarUrl ? (
-                    <Image
-                      source={{ uri: organizerAvatarUrl }}
-                      style={styles.organizerAvatar}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.organizerAvatarPlaceholder}>
-                      <Text style={styles.organizerAvatarInitial}>
-                        {organizerName ? organizerName.charAt(0).toUpperCase() : '?'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
-              <Text style={styles.organizerName}>{organizerName || 'Unknown Organizer'}</Text>
-            </View>
-          </View>
-            )}
         
             {/* Member Avatars */}
             {event.members && event.members.length > 0 && (
@@ -257,8 +203,6 @@ const EventCard = memo(({
     prevRSVP === nextRSVP &&
     prevProps.isOrganizer === nextProps.isOrganizer &&
     prevProps.onRSVP === nextProps.onRSVP &&
-    prevProps.organizerName === nextProps.organizerName &&
-    prevProps.organizerAvatarUrl === nextProps.organizerAvatarUrl &&
     JSON.stringify(prevProps.memberAvatars) === JSON.stringify(nextProps.memberAvatars) &&
     JSON.stringify(prevProps.memberNames) === JSON.stringify(nextProps.memberNames)
   );
@@ -308,11 +252,6 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.textSecondary,
     fontWeight: theme.typography.fontWeight.semibold,
-  },
-  collapsedRsvpCount: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.textSecondary,
-    marginTop: theme.spacing.xs,
   },
   meta: {
     fontSize: theme.typography.fontSize.sm,
@@ -408,51 +347,6 @@ const styles = StyleSheet.create({
   },
   rsvpButton: {
     flex: 1,
-  },
-  organizerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: theme.spacing.md,
-    paddingTop: theme.spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.woodMedium,
-  },
-  organizerLabel: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.textSecondary,
-    marginRight: theme.spacing.sm,
-  },
-  organizerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  organizerAvatarContainer: {
-    marginRight: theme.spacing.sm,
-  },
-  organizerAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  organizerAvatarPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: theme.colors.meepleRed,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  organizerAvatarInitial: {
-    fontSize: theme.typography.fontSize.sm,
-    color: '#fff',
-    fontWeight: theme.typography.fontWeight.semibold,
-  },
-  organizerName: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.textPrimary,
-    fontWeight: theme.typography.fontWeight.medium,
   },
 });
 
