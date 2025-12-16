@@ -213,8 +213,7 @@ EventCard.displayName = 'EventCard';
 const styles = StyleSheet.create({
   card: {
     ...commonStyles.card,
-    borderWidth: 1,
-    borderColor: theme.colors.woodMedium,
+    // borderWidth and borderColor already set in commonStyles.card
     marginBottom: theme.spacing.md,
   },
   cardContent: {

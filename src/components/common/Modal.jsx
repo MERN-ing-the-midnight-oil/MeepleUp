@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   },
   content: {
     backgroundColor: theme.colors.surfaceColor,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: 0, // Containers should have no rounded corners
     padding: theme.spacing.xl,
     maxHeight: '80%',
     minHeight: 200,

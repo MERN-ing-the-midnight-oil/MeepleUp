@@ -8,21 +8,21 @@ const LAYER_CONFIGS = {
   background: {
     sizeRange: [25, 45],
     speedRange: [6, 10], // seconds
-    opacityRange: [0.15, 0.25],
+    opacityRange: [0.7, 0.9], // Inverted: smallest figures are darkest
     tiltRange: [-20, 20],
     spawnWeight: 0.55, // 50-60% of meeples
   },
   midground: {
     sizeRange: [50, 70],
     speedRange: [10, 15],
-    opacityRange: [0.4, 0.6],
+    opacityRange: [0.4, 0.6], // Medium opacity for medium size
     tiltRange: [-35, 35],
     spawnWeight: 0.35, // 30-40% of meeples
   },
   foreground: {
     sizeRange: [80, 120],
     speedRange: [15, 20],
-    opacityRange: [0.7, 0.9],
+    opacityRange: [0.15, 0.25], // Inverted: largest figures are most transparent
     tiltRange: [-20, 20],
     spawnWeight: 0.10, // 10-15% of meeples
   },

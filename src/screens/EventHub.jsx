@@ -40,6 +40,7 @@ import { getBlockedUsers } from '../services/blocking';
 import { pickAndUploadImage } from '../utils/imageUpload';
 import { checkPhotoUploadLimit, incrementPhotoUploadCount } from '../utils/photoUploadTracking';
 import { theme, commonStyles } from '../utils/theme';
+import GearIcon from '../components/GearIcon';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -167,7 +168,7 @@ const EventHub = () => {
   const [editingDateIndex, setEditingDateIndex] = useState(null);
   const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'start' | 'end' | 'usualStart' | 'usualEnd', dateIndex: number }
   const [selectedDateDetail, setSelectedDateDetail] = useState(null); // { date, startTime, endTime, location, address, note, index }
-  const [isEditingDateDetail, setIsEditingDateDetail] = useState(false);
+  const [editingDateDetailField, setEditingDateDetailField] = useState(null); // 'date' | 'startTime' | 'endTime' | 'location' | 'address' | 'note' | null
   const [editingDateDetailForm, setEditingDateDetailForm] = useState({
     date: null,
     startTime: null,
@@ -238,6 +239,8 @@ const EventHub = () => {
   // Collapsible sections state
   const [isInviteGuestsExpanded, setIsInviteGuestsExpanded] = useState(false);
   const [isMembersExpanded, setIsMembersExpanded] = useState(false);
+  const [isScheduleDefaultsExpanded, setIsScheduleDefaultsExpanded] = useState(false);
+  const [expandedRSVPDateIndices, setExpandedRSVPDateIndices] = useState(new Set());
   // Past events modal state
   const [showPastEventsModal, setShowPastEventsModal] = useState(false);
 
@@ -349,7 +352,7 @@ const EventHub = () => {
         address: selectedDateDetail.address || selectedDateDetail.exactLocation || '',
         note: selectedDateDetail.note || '',
       });
-      setIsEditingDateDetail(false);
+      setEditingDateDetailField(null);
     }
   }, [selectedDateDetail]);
 
@@ -900,7 +903,7 @@ const EventHub = () => {
     }
   };
 
-  const handleSaveDateDetail = async () => {
+  const handleSaveDateDetailField = async (fieldName) => {
     if (!isOrganizerOrCoOrganizer) {
       Alert.alert('Error', 'Only organizers and co-organizers can edit date details.');
       return;
@@ -911,7 +914,8 @@ const EventHub = () => {
       return;
     }
 
-    if (!editingDateDetailForm.date) {
+    // Validate required fields
+    if (fieldName === 'date' && !editingDateDetailForm.date) {
       Alert.alert('Error', 'Date is required.');
       return;
     }
@@ -922,17 +926,21 @@ const EventHub = () => {
       
       // Create updated eventDates array
       const updatedEventDates = [...currentEventDates];
+      const currentDate = updatedEventDates[selectedDateDetail.index] || {};
       
-      // Update the specific date at the index
-      updatedEventDates[selectedDateDetail.index] = {
-        date: editingDateDetailForm.date.toISOString(),
-        startTime: editingDateDetailForm.startTime ? editingDateDetailForm.startTime.toISOString() : null,
-        endTime: editingDateDetailForm.endTime ? editingDateDetailForm.endTime.toISOString() : null,
-        location: editingDateDetailForm.location || '',
-        address: editingDateDetailForm.address || '',
-        exactLocation: editingDateDetailForm.address || '', // Backward compatibility
-        note: editingDateDetailForm.note || '',
+      // Update only the specific field
+      const updatedDate = {
+        ...currentDate,
+        date: editingDateDetailForm.date ? editingDateDetailForm.date.toISOString() : currentDate.date,
+        startTime: editingDateDetailForm.startTime ? editingDateDetailForm.startTime.toISOString() : currentDate.startTime,
+        endTime: editingDateDetailForm.endTime ? editingDateDetailForm.endTime.toISOString() : currentDate.endTime,
+        location: editingDateDetailForm.location !== undefined ? editingDateDetailForm.location : currentDate.location,
+        address: editingDateDetailForm.address !== undefined ? editingDateDetailForm.address : currentDate.address,
+        exactLocation: editingDateDetailForm.address !== undefined ? editingDateDetailForm.address : (currentDate.exactLocation || currentDate.address),
+        note: editingDateDetailForm.note !== undefined ? editingDateDetailForm.note : currentDate.note,
       };
+      
+      updatedEventDates[selectedDateDetail.index] = updatedDate;
 
       // Update the event schedule
       await updateEventSchedule(event.id, userId, {
@@ -941,17 +949,16 @@ const EventHub = () => {
 
       // Update local state
       setSelectedDateDetail({
-        date: editingDateDetailForm.date,
-        startTime: editingDateDetailForm.startTime,
-        endTime: editingDateDetailForm.endTime,
-        location: editingDateDetailForm.location,
-        address: editingDateDetailForm.address,
-        note: editingDateDetailForm.note,
+        date: editingDateDetailForm.date || selectedDateDetail.date,
+        startTime: editingDateDetailForm.startTime !== null ? editingDateDetailForm.startTime : selectedDateDetail.startTime,
+        endTime: editingDateDetailForm.endTime !== null ? editingDateDetailForm.endTime : selectedDateDetail.endTime,
+        location: editingDateDetailForm.location !== undefined ? editingDateDetailForm.location : selectedDateDetail.location,
+        address: editingDateDetailForm.address !== undefined ? editingDateDetailForm.address : selectedDateDetail.address,
+        note: editingDateDetailForm.note !== undefined ? editingDateDetailForm.note : selectedDateDetail.note,
         index: selectedDateDetail.index,
       });
       
-      setIsEditingDateDetail(false);
-      Alert.alert('Success', 'Date details updated successfully.');
+      setEditingDateDetailField(null);
     } catch (error) {
       Alert.alert('Error', error.message || 'Failed to update date details. Please try again.');
       console.error(error);
@@ -1373,14 +1380,14 @@ const EventHub = () => {
         }}
         scrollEventThrottle={16}
       >
-        {/* Invite Guests Section */}
+        {/* Invite Members Section */}
         {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
           <View style={styles.section}>
             <TouchableOpacity
               style={styles.collapsibleHeader}
               onPress={() => setIsInviteGuestsExpanded(!isInviteGuestsExpanded)}
             >
-              <Text style={styles.sectionTitle}>Invite Guests</Text>
+              <Text style={styles.sectionTitle}>Invite Members</Text>
               <Text style={styles.expandIcon}>{isInviteGuestsExpanded ? '▼' : '▶'}</Text>
             </TouchableOpacity>
             {isInviteGuestsExpanded && (
@@ -1424,292 +1431,186 @@ const EventHub = () => {
           </View>
         )}
 
-        {/* Members Section */}
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.collapsibleHeader}
-            onPress={() => setIsMembersExpanded(!isMembersExpanded)}
-          >
-            <Text style={styles.sectionTitle}>Members ({members.length})</Text>
-            <Text style={styles.expandIcon}>{isMembersExpanded ? '▼' : '▶'}</Text>
-          </TouchableOpacity>
-          {isMembersExpanded && (
-            <>
-              {members.length === 0 ? (
-                <Text style={styles.sectionCopy}>
-                  No members yet. Invite trusted players to join.
-                </Text>
-              ) : (
-                members.map((member) => {
-                  const displayName = memberNames[member.userId] || member.userId;
-                  const isCurrentUser = member.userId === userId;
-                  const avatarUrl = memberAvatars[member.userId];
-                  const hasValidAvatar = isValidAvatarUrl(avatarUrl);
-
-                  return (
-                    <View key={member.userId} style={styles.memberCard}>
-                      <TouchableOpacity
-                        style={styles.memberAvatarContainer}
-                        onPress={() => setSelectedUserForProfile({
-                          userId: member.userId,
-                          userName: displayName,
-                          avatarUrl: avatarUrl
-                        })}
-                      >
-                        {hasValidAvatar ? (
-                          <Image 
-                            source={{ uri: avatarUrl }} 
-                            style={styles.memberAvatar}
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <View style={styles.memberAvatarPlaceholder}>
-                            <Text style={styles.memberAvatarInitial}>
-                              {displayName.charAt(0).toUpperCase()}
-                            </Text>
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.memberInfo}
-                        onPress={() => {
-                          // If organizer and not current user, show action menu; otherwise show profile
-                          if (isOrganizerOrCoOrganizer && !isCurrentUser) {
-                            setSelectedMemberForAction({
-                              userId: member.userId,
-                              displayName,
-                              role: member.role,
-                              canShareJoinCode: member.canShareJoinCode || false,
-                            });
-                          } else {
-                            setSelectedUserForProfile({
-                              userId: member.userId,
-                              userName: displayName,
-                              avatarUrl: avatarUrl
-                            });
-                          }
-                        }}
-                      >
-                        <View>
-                        <Text style={styles.memberName}>
-                            {(member.role === 'organizer' || member.userId === event?.organizerId) ? '👑 ' : ''}{displayName}
-                          {isCurrentUser && ' (You)'}
-                        </Text>
-                        <Text style={styles.memberRole}>
-                          {member.role === 'organizer' 
-                            ? (member.userId === event?.organizerId ? 'Organizer' : 'Co-Organizer')
-                            : 'Member'}
-                        </Text>
-                      </View>
-                      </TouchableOpacity>
-                      {isOrganizerOrCoOrganizer && !isCurrentUser && (
-                        <TouchableOpacity
-                          style={styles.memberActionButton}
-                          onPress={() => {
-                            setSelectedMemberForAction({
-                              userId: member.userId,
-                              displayName,
-                              role: member.role,
-                              canShareJoinCode: member.canShareJoinCode || false,
-                            });
-                          }}
-                        >
-                          <Text style={styles.memberActionButtonText}>⚙️</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  );
-                })
-              )}
-            </>
-          )}
-        </View>
-
-        {/* Default Time and Location Section - Only for Organizers */}
-        {isOrganizerOrCoOrganizer && (
-          <View style={styles.section}>
-            {/* Default Time */}
-            <View style={styles.defaultSettingRow}>
-              <Text style={styles.defaultSettingLabel}>Default Time</Text>
-              {editingDefaultTime ? (
-                <View style={styles.defaultSettingEdit}>
-                  <View style={styles.timeRow}>
-                    <View style={styles.timeInputContainer}>
-                      <Text style={styles.timeLabel}>Start</Text>
-                      <TouchableOpacity
-                        style={styles.timeButton}
-                        onPress={() => setShowDefaultTimePicker({ type: 'usualStart' })}
-                      >
-                        <Text style={styles.timeButtonText}>
-                          {defaultTimeForm.usualStartTime.toLocaleTimeString('en-US', {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true,
-                          })}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                    <View style={styles.timeInputContainer}>
-                      <Text style={styles.timeLabel}>End</Text>
-                      <TouchableOpacity
-                        style={styles.timeButton}
-                        onPress={() => setShowDefaultTimePicker({ type: 'usualEnd' })}
-                      >
-                        <Text style={styles.timeButtonText}>
-                          {defaultTimeForm.usualEndTime.toLocaleTimeString('en-US', {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true,
-                          })}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  <View style={styles.defaultSettingActions}>
-                    <Button
-                      label="Save"
-                      onPress={handleSaveDefaultTime}
-                      style={styles.defaultSettingButton}
-                    />
-                    <Button
-                      label="Cancel"
-                      onPress={() => {
-                        setEditingDefaultTime(false);
-                        // Reset to current values
-                        const defaultStart = event.usualStartTime ? new Date(event.usualStartTime) : new Date(new Date().setHours(18, 0, 0, 0));
-                        const defaultEnd = event.usualEndTime ? new Date(event.usualEndTime) : new Date(new Date().setHours(22, 0, 0, 0));
-                        setDefaultTimeForm({
-                          usualStartTime: defaultStart,
-                          usualEndTime: defaultEnd,
-                        });
-                      }}
-                      variant="outline"
-                      style={styles.defaultSettingButton}
-                    />
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.defaultSettingDisplay}>
-                  <Text style={styles.defaultSettingValue}>
-                    {(() => {
-                      const start = event.usualStartTime ? new Date(event.usualStartTime) : new Date(new Date().setHours(18, 0, 0, 0));
-                      const end = event.usualEndTime ? new Date(event.usualEndTime) : new Date(new Date().setHours(22, 0, 0, 0));
-                      return `${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })} - ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
-                    })()}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setEditingDefaultTime(true)}
-                    style={styles.editIconButton}
-                  >
-                    <Text style={styles.editIconText}>✏️</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-
-            {/* Default Location */}
-            <View style={styles.defaultSettingRow}>
-              <Text style={styles.defaultSettingLabel}>Default Location</Text>
-              {editingDefaultLocation ? (
-                <View style={styles.defaultSettingEdit}>
-                  <Input
-                    value={defaultLocationForm.location}
-                    onChangeText={(text) => setDefaultLocationForm({ ...defaultLocationForm, location: text })}
-                    placeholder="e.g., Jason's house"
-                    style={styles.defaultSettingInput}
-                  />
-                  <Input
-                    value={defaultLocationForm.address}
-                    onChangeText={(text) => setDefaultLocationForm({ ...defaultLocationForm, address: text })}
-                    placeholder="e.g., 123 Tolkien Dr."
-                    style={styles.defaultSettingInput}
-                  />
-                  <View style={styles.defaultSettingActions}>
-                    <Button
-                      label="Save"
-                      onPress={handleSaveDefaultLocation}
-                      style={styles.defaultSettingButton}
-                    />
-                    <Button
-                      label="Cancel"
-                      onPress={() => {
-                        setEditingDefaultLocation(false);
-                        // Reset to current values
-                        setDefaultLocationForm({
-                          location: event.location || event.generalLocation || '',
-                          address: event.address || event.exactLocation || '',
-                        });
-                      }}
-                      variant="outline"
-                      style={styles.defaultSettingButton}
-                    />
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.defaultSettingDisplay}>
-                  <View style={styles.defaultSettingValueContainer}>
-                    <Text style={styles.defaultSettingValue}>
-                      {event.location || event.generalLocation || 'Not set'}
-                    </Text>
-                    {(event.address || event.exactLocation) && (
-                      <Text style={styles.defaultSettingSubValue}>
-                        {event.address || event.exactLocation}
-                      </Text>
-                    )}
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setEditingDefaultLocation(true)}
-                    style={styles.editIconButton}
-                  >
-                    <Text style={styles.editIconText}>✏️</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Schedule</Text>
-            <View style={styles.sectionHeaderActions}>
-              {isOrganizer && (
-                <Button
-                  label="Manage RSVPs"
-                  onPress={() => setShowRSVPManagement(true)}
-                  variant="outline"
-                  style={styles.manageRSVPButton}
-                />
-              )}
-              {event.scheduledFor && (
-                <Button
-                  label="Export to Calendar"
-                  onPress={handleExportToCalendar}
-                  variant="outline"
-                  style={styles.exportButton}
-                />
+          </View>
+
+          {/* Edit Default Time and Place - Only for Organizers, within Schedule card */}
+          {isOrganizerOrCoOrganizer && (
+            <View>
+              <TouchableOpacity
+                style={styles.collapsibleHeader}
+                onPress={() => setIsScheduleDefaultsExpanded(!isScheduleDefaultsExpanded)}
+              >
+                <Text style={styles.sectionTitle}>Edit Default Time and Place</Text>
+                <Text style={styles.expandIcon}>{isScheduleDefaultsExpanded ? '▼' : '▶'}</Text>
+              </TouchableOpacity>
+              {isScheduleDefaultsExpanded && (
+                <>
+                  {/* Default Time */}
+                  <View style={styles.defaultSettingRow}>
+                    <Text style={styles.defaultSettingLabel}>Default Time</Text>
+                    {editingDefaultTime ? (
+                      <View style={styles.defaultSettingEdit}>
+                        <View style={styles.timeRow}>
+                          <View style={styles.timeInputContainer}>
+                            <Text style={styles.timeLabel}>Start</Text>
+                            <TouchableOpacity
+                              style={styles.timeButton}
+                              onPress={() => setShowDefaultTimePicker({ type: 'usualStart' })}
+                            >
+                              <Text style={styles.timeButtonText}>
+                                {defaultTimeForm.usualStartTime.toLocaleTimeString('en-US', {
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true,
+                                })}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={styles.timeInputContainer}>
+                            <Text style={styles.timeLabel}>End</Text>
+                            <TouchableOpacity
+                              style={styles.timeButton}
+                              onPress={() => setShowDefaultTimePicker({ type: 'usualEnd' })}
+                            >
+                              <Text style={styles.timeButtonText}>
+                                {defaultTimeForm.usualEndTime.toLocaleTimeString('en-US', {
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true,
+                                })}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        <View style={styles.defaultSettingActions}>
+                          <Button
+                            label="Save"
+                            onPress={handleSaveDefaultTime}
+                            style={styles.defaultSettingButton}
+                          />
+                          <Button
+                            label="Cancel"
+                            onPress={() => {
+                              setEditingDefaultTime(false);
+                              // Reset to current values
+                              const defaultStart = event.usualStartTime
+                                ? new Date(event.usualStartTime)
+                                : new Date(new Date().setHours(18, 0, 0, 0));
+                              const defaultEnd = event.usualEndTime
+                                ? new Date(event.usualEndTime)
+                                : new Date(new Date().setHours(22, 0, 0, 0));
+                              setDefaultTimeForm({
+                                usualStartTime: defaultStart,
+                                usualEndTime: defaultEnd,
+                              });
+                            }}
+                            variant="outline"
+                            style={styles.defaultSettingButton}
+                          />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.defaultSettingDisplay}>
+                        <Text style={styles.defaultSettingValue}>
+                          {(() => {
+                            const start = event.usualStartTime
+                              ? new Date(event.usualStartTime)
+                              : new Date(new Date().setHours(18, 0, 0, 0));
+                            const end = event.usualEndTime
+                              ? new Date(event.usualEndTime)
+                              : new Date(new Date().setHours(22, 0, 0, 0));
+                            return `${start.toLocaleTimeString('en-US', {
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              hour12: true,
+                            })} - ${end.toLocaleTimeString('en-US', {
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              hour12: true,
+                            })}`;
+                          })()}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => setEditingDefaultTime(true)}
+                          style={styles.editIconButton}
+                        >
+                          <Text style={styles.editIconText}>✏️</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Default Location */}
+                  <View style={styles.defaultSettingRow}>
+                    <Text style={styles.defaultSettingLabel}>Default Location</Text>
+                    {editingDefaultLocation ? (
+                      <View style={styles.defaultSettingEdit}>
+                        <Input
+                          value={defaultLocationForm.location}
+                          onChangeText={(text) =>
+                            setDefaultLocationForm({ ...defaultLocationForm, location: text })
+                          }
+                          placeholder="e.g., Jason's house"
+                          style={styles.defaultSettingInput}
+                        />
+                        <Input
+                          value={defaultLocationForm.address}
+                          onChangeText={(text) =>
+                            setDefaultLocationForm({ ...defaultLocationForm, address: text })
+                          }
+                          placeholder="e.g., 123 Tolkien Dr."
+                          style={styles.defaultSettingInput}
+                        />
+                        <View style={styles.defaultSettingActions}>
+                          <Button
+                            label="Save"
+                            onPress={handleSaveDefaultLocation}
+                            style={styles.defaultSettingButton}
+                          />
+                          <Button
+                            label="Cancel"
+                            onPress={() => {
+                              setEditingDefaultLocation(false);
+                              // Reset to current values
+                              setDefaultLocationForm({
+                                location: event.location || event.generalLocation || '',
+                                address: event.address || event.exactLocation || '',
+                              });
+                            }}
+                            variant="outline"
+                            style={styles.defaultSettingButton}
+                          />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.defaultSettingDisplay}>
+                        <View style={styles.defaultSettingValueContainer}>
+                          <Text style={styles.defaultSettingValue}>
+                            {event.location || event.generalLocation || 'Not set'}
+                          </Text>
+                          {(event.address || event.exactLocation) && (
+                            <Text style={styles.defaultSettingSubValue}>
+                              {event.address || event.exactLocation}
+                            </Text>
+                          )}
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => setEditingDefaultLocation(true)}
+                          style={styles.editIconButton}
+                        >
+                          <Text style={styles.editIconText}>✏️</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </>
               )}
             </View>
-          </View>
-        
-        <View style={styles.editScheduleButtonContainer}>
-          {isOrganizerOrCoOrganizer ? (
-            <Button
-              label="Edit Calendar"
-              onPress={() => setShowEditSchedule(true)}
-              variant="outline"
-              style={styles.editButton}
-            />
-          ) : (
-            <Button
-              label="Display calendar"
-              onPress={() => setShowEditSchedule(true)}
-              variant="outline"
-              style={styles.editButton}
-            />
           )}
-        </View>
-        
+
         <View style={styles.scheduleInfo}>
           {futureEvents.length > 0 ? (
             <View>
@@ -1862,74 +1763,69 @@ const EventHub = () => {
                       
                       {showRSVPForDate && (
                         <View style={styles.dateRSVPContainer}>
-                          <Text style={styles.dateRSVPLabel}>Your RSVP:</Text>
-                          <View style={styles.dateRSVPButtons}>
-                            <Button
-                              label="Going"
-                              onPress={(e) => {
-                                e?.preventDefault?.();
-                                e?.stopPropagation?.();
-                                handleRSVP('going', date, e);
-                              }}
-                              variant={dateRSVP === 'going' ? 'primary' : 'outline'}
-                              style={styles.dateRSVPButton}
-                              textStyle={styles.dateRSVPButtonText}
-                            />
-                            {rsvpSettings.allowMaybe && (
-                              <Button
-                                label="Maybe"
-                                onPress={(e) => {
-                                  e?.preventDefault?.();
-                                  e?.stopPropagation?.();
-                                  handleRSVP('maybe', date, e);
-                                }}
-                                variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
-                                style={styles.dateRSVPButton}
-                                textStyle={styles.dateRSVPButtonText}
-                              />
-                            )}
-                            <Button
-                              label="Can't Make It"
-                              onPress={(e) => {
-                                e?.preventDefault?.();
-                                e?.stopPropagation?.();
-                                handleRSVP('not-going', date, e);
-                              }}
-                              variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
-                              style={styles.dateRSVPButton}
-                              textStyle={styles.dateRSVPButtonText}
-                            />
-                          </View>
-                          {dateRSVP && (
-                            <Text style={styles.dateRSVPStatus}>
-                              Status: {getRSVPStatusLabel(dateRSVP)}
-                            </Text>
+                          <TouchableOpacity
+                            style={styles.collapsibleHeader}
+                            onPress={() => {
+                              const newExpanded = new Set(expandedRSVPDateIndices);
+                              if (newExpanded.has(index)) {
+                                newExpanded.delete(index);
+                              } else {
+                                newExpanded.add(index);
+                              }
+                              setExpandedRSVPDateIndices(newExpanded);
+                            }}
+                          >
+                            <Text style={styles.dateRSVPLabel}>Your RSVP:</Text>
+                            <Text style={styles.expandIcon}>{expandedRSVPDateIndices.has(index) ? '▼' : '▶'}</Text>
+                          </TouchableOpacity>
+                          {expandedRSVPDateIndices.has(index) && (
+                            <>
+                              <View style={styles.dateRSVPButtons}>
+                                <Button
+                                  label="Going"
+                                  onPress={(e) => {
+                                    e?.preventDefault?.();
+                                    e?.stopPropagation?.();
+                                    handleRSVP('going', date, e);
+                                  }}
+                                  variant={dateRSVP === 'going' ? 'primary' : 'outline'}
+                                  style={styles.dateRSVPButton}
+                                  textStyle={styles.dateRSVPButtonText}
+                                />
+                                {rsvpSettings.allowMaybe && (
+                                  <Button
+                                    label="Maybe"
+                                    onPress={(e) => {
+                                      e?.preventDefault?.();
+                                      e?.stopPropagation?.();
+                                      handleRSVP('maybe', date, e);
+                                    }}
+                                    variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
+                                    style={styles.dateRSVPButton}
+                                    textStyle={styles.dateRSVPButtonText}
+                                  />
+                                )}
+                                <Button
+                                  label="Can't Make It"
+                                  onPress={(e) => {
+                                    e?.preventDefault?.();
+                                    e?.stopPropagation?.();
+                                    handleRSVP('not-going', date, e);
+                                  }}
+                                  variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
+                                  style={styles.dateRSVPButton}
+                                  textStyle={styles.dateRSVPButtonText}
+                                />
+                              </View>
+                              {dateRSVP && (
+                                <Text style={styles.dateRSVPStatus}>
+                                  Status: {getRSVPStatusLabel(dateRSVP)}
+                                </Text>
+                              )}
+                            </>
                           )}
-                        </View>
-                      )}
-                      
-                      {/* Gameplan Button */}
-                      <View style={styles.dateGameplanButtonContainer}>
-                        <Button
-                          label="Gameplan"
-                          onPress={(e) => {
-                            e?.stopPropagation?.();
-                            e?.preventDefault?.();
-                            const currentEventId = event?.id || eventId;
-                            if (Platform.OS === 'web' && navigate && currentEventId) {
-                              navigate(`/event/${currentEventId}/browse/${index}`);
-                            } else if (navigation?.navigate && currentEventId) {
-                              navigation.navigate('BrowseAndPropose', {
-                                eventId: currentEventId,
-                                dateIndex: index
-                              });
-                            }
-                          }}
-                          variant="outline"
-                          style={styles.dateGameplanButton}
-                          textStyle={styles.dateGameplanButtonText}
-                        />
                       </View>
+                      )}
                     </View>
                   </View>
                 );
@@ -2003,11 +1899,27 @@ const EventHub = () => {
         </ScrollView>
       </Modal>
 
-      {/* Edit Schedule Button (outside of scheduleInfo) */}
+      {/* Action Buttons at Bottom */}
       <View style={styles.section}>
+        {isOrganizer && (
+          <Button
+            label="Manage RSVPs"
+            onPress={() => setShowRSVPManagement(true)}
+            variant="outline"
+            style={styles.manageRSVPButton}
+          />
+        )}
+        {isOrganizerOrCoOrganizer && (
+          <Button
+            label="Edit member privileges"
+            onPress={() => setIsMembersExpanded(!isMembersExpanded)}
+            variant="outline"
+            style={styles.manageRSVPButton}
+          />
+        )}
         {isOrganizerOrCoOrganizer ? (
           <Button
-            label="Edit Schedule"
+            label="Edit Calendar"
             onPress={() => setShowEditSchedule(true)}
             variant="outline"
             style={styles.editButton}
@@ -2171,16 +2083,26 @@ const EventHub = () => {
           });
         }
         
+        // Deduplicate posts by ID (in case of race conditions)
+        const uniquePosts = [];
+        const seenIds = new Set();
+        for (const post of posts) {
+          if (!seenIds.has(post.id)) {
+            seenIds.add(post.id);
+            uniquePosts.push(post);
+          }
+        }
+        
         // Sort manually: pinned first, then by date (newest first)
-        posts.sort((a, b) => {
+        uniquePosts.sort((a, b) => {
           if (a.pinned && !b.pinned) return -1;
           if (!a.pinned && b.pinned) return 1;
           return new Date(b.createdAt) - new Date(a.createdAt);
         });
         
         // Limit to 50 most recent after sorting
-        console.log('[EventHub] Setting discussion messages, count:', posts.slice(0, 50).length);
-        setDiscussionMessages(posts.slice(0, 50));
+        console.log('[EventHub] Setting discussion messages, count:', uniquePosts.slice(0, 50).length);
+        setDiscussionMessages(uniquePosts.slice(0, 50));
       },
       (error) => {
         console.error('[EventHub] Error in discussion posts listener:', error);
@@ -2471,16 +2393,23 @@ const EventHub = () => {
         // Don't fail the post creation if notification fails
       }
       
-      // Add to local state
-      setDiscussionMessages(prev => [{
-        id: docRef.id,
-        userId,
-        userName: user?.name || user?.email || 'Unknown',
-        content: newMessage.trim() || '',
-        photoUrl: selectedPhoto?.uri || null,
-        createdAt: new Date().toISOString(),
-        pinned: false,
-      }, ...prev]);
+      // Add to local state (optimistic update)
+      // Note: The snapshot listener will also update this, so we check for duplicates
+      setDiscussionMessages(prev => {
+        // Check if post already exists (shouldn't happen, but prevent duplicates)
+        if (prev.some(msg => msg.id === docRef.id)) {
+          return prev;
+        }
+        return [{
+          id: docRef.id,
+          userId,
+          userName: user?.name || user?.email || 'Unknown',
+          content: newMessage.trim() || '',
+          photoUrl: selectedPhoto?.uri || null,
+          createdAt: new Date().toISOString(),
+          pinned: false,
+        }, ...prev];
+      });
       
       setNewMessage('');
       setSelectedPhoto(null);
@@ -5140,16 +5069,17 @@ const EventHub = () => {
       >
         <ScrollView 
           ref={editScheduleScrollRef}
-          style={styles.modalContent} 
+          style={styles.modalContentNoPadding} 
           contentContainerStyle={styles.modalScrollContent}
         >
           {/* Calendar Date Picker */}
-          <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Select Event Dates</Text>
-            <Text style={styles.fieldHint}>
-              Scroll through the calendar to see the next 12 months. Long-press a date to select it (highlighted in green). Tap a selected date to view its details.
+          <View style={styles.modalFieldContainerNoPadding}>
+            <Text style={[styles.fieldLabel, { paddingHorizontal: 20 }]}>Select Event Dates</Text>
+            <Text style={[styles.fieldHint, { paddingHorizontal: 20 }]}>
+              Declare game events on any days in the next 12 months. Long-press a date to select it (highlighted in green). Tap a selected date to view its details.
             </Text>
-            <CalendarDatePicker
+            <View style={styles.calendarContainer}>
+              <CalendarDatePicker
               selectedDates={scheduleForm.selectedDates}
               onDatesChange={handleDatesChange}
               minDate={new Date()}
@@ -5177,6 +5107,7 @@ const EventHub = () => {
                 }
               }}
             />
+            </View>
           </View>
 
           {/* Location Fields for Each Date */}
@@ -5240,6 +5171,16 @@ const EventHub = () => {
             </View>
           )}
 
+          {event.scheduledFor && (
+            <View style={styles.modalActions}>
+              <Button
+                label="Export to Calendar"
+                onPress={handleExportToCalendar}
+                variant="outline"
+                style={styles.modalButton}
+              />
+            </View>
+          )}
           <View style={styles.modalActions}>
             <Button
               label="Save"
@@ -5383,17 +5324,33 @@ const EventHub = () => {
         isOpen={selectedDateDetail !== null}
         onClose={() => {
           setSelectedDateDetail(null);
-          setIsEditingDateDetail(false);
+          setEditingDateDetailField(null);
         }}
         title="Event Date Details"
       >
         {selectedDateDetail && (
           <View style={styles.dateDetailModalContent}>
-            {isEditingDateDetail && isOrganizerOrCoOrganizer ? (
-              // Edit mode for organizers/co-organizers
-              <>
-                <View style={styles.dateDetailSection}>
-                  <Text style={styles.dateDetailLabel}>Date</Text>
+            {/* Date Field */}
+            <View style={styles.dateDetailSection}>
+              <View style={styles.dateDetailHeader}>
+                <Text style={styles.dateDetailLabel}>Date</Text>
+                {isOrganizerOrCoOrganizer && editingDateDetailField !== 'date' && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingDateDetailField('date');
+                      setEditingDateDetailForm(prev => ({
+                        ...prev,
+                        date: selectedDateDetail.date ? new Date(selectedDateDetail.date) : null,
+                      }));
+                    }}
+                    style={styles.editIconButton}
+                  >
+                    <Text style={styles.editIconText}>✏️</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {editingDateDetailField === 'date' && isOrganizerOrCoOrganizer ? (
+                <View>
                   <TouchableOpacity
                     onPress={() => setShowDateDetailTimePicker({ type: 'date' })}
                     style={styles.datePickerButton}
@@ -5427,66 +5384,205 @@ const EventHub = () => {
                       onClose={() => setShowDateDetailTimePicker({ type: null })}
                     />
                   )}
+                  <View style={styles.inlineEditActions}>
+                    <Button
+                      label="Save"
+                      onPress={() => handleSaveDateDetailField('date')}
+                      style={styles.inlineEditButton}
+                      variant="primary"
+                    />
+                    <Button
+                      label="Cancel"
+                      onPress={() => {
+                        setEditingDateDetailField(null);
+                        setEditingDateDetailForm(prev => ({
+                          ...prev,
+                          date: selectedDateDetail.date ? new Date(selectedDateDetail.date) : null,
+                        }));
+                      }}
+                      variant="outline"
+                      style={styles.inlineEditButton}
+                    />
+                  </View>
                 </View>
+              ) : (
+                <Text style={styles.dateDetailValue}>
+                  {formatDate(selectedDateDetail.date.toISOString())}
+                </Text>
+              )}
+            </View>
 
-                <View style={styles.dateDetailSection}>
+            {/* Start Time Field */}
+            {selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime()) && (
+              <View style={styles.dateDetailSection}>
+                <View style={styles.dateDetailHeader}>
                   <Text style={styles.dateDetailLabel}>Start Time</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowDateDetailTimePicker({ type: 'startTime' })}
-                    style={styles.datePickerButton}
-                  >
-                    <Text style={styles.datePickerButtonText}>
-                      {editingDateDetailForm.startTime
-                        ? formatTime(editingDateDetailForm.startTime.toISOString())
-                        : 'Select start time'}
-                    </Text>
-                  </TouchableOpacity>
-                  {showDateDetailTimePicker.type === 'startTime' && (
-                    <DateTimePicker
-                      value={editingDateDetailForm.startTime || new Date()}
-                      mode="time"
-                      display="default"
-                      is24Hour={false}
-                      onChange={(event, date) => {
-                        if (date) {
-                          setEditingDateDetailForm(prev => ({ ...prev, startTime: date }));
-                        }
-                        setShowDateDetailTimePicker({ type: null });
+                  {isOrganizerOrCoOrganizer && editingDateDetailField !== 'startTime' && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setEditingDateDetailField('startTime');
+                        setEditingDateDetailForm(prev => ({
+                          ...prev,
+                          startTime: selectedDateDetail.startTime ? new Date(selectedDateDetail.startTime) : null,
+                        }));
                       }}
-                    />
+                      style={styles.editIconButton}
+                    >
+                      <Text style={styles.editIconText}>✏️</Text>
+                    </TouchableOpacity>
                   )}
                 </View>
+                {editingDateDetailField === 'startTime' && isOrganizerOrCoOrganizer ? (
+                  <View>
+                    <TouchableOpacity
+                      onPress={() => setShowDateDetailTimePicker({ type: 'startTime' })}
+                      style={styles.datePickerButton}
+                    >
+                      <Text style={styles.datePickerButtonText}>
+                        {editingDateDetailForm.startTime
+                          ? formatTime(editingDateDetailForm.startTime.toISOString())
+                          : 'Select start time'}
+                      </Text>
+                    </TouchableOpacity>
+                    {showDateDetailTimePicker.type === 'startTime' && (
+                      <DateTimePicker
+                        value={editingDateDetailForm.startTime || new Date()}
+                        mode="time"
+                        display="default"
+                        is24Hour={false}
+                        onChange={(event, date) => {
+                          if (date) {
+                            setEditingDateDetailForm(prev => ({ ...prev, startTime: date }));
+                          }
+                          setShowDateDetailTimePicker({ type: null });
+                        }}
+                      />
+                    )}
+                    <View style={styles.inlineEditActions}>
+                      <Button
+                        label="Save"
+                        onPress={() => handleSaveDateDetailField('startTime')}
+                        style={styles.inlineEditButton}
+                        variant="primary"
+                      />
+                      <Button
+                        label="Cancel"
+                        onPress={() => {
+                          setEditingDateDetailField(null);
+                          setEditingDateDetailForm(prev => ({
+                            ...prev,
+                            startTime: selectedDateDetail.startTime ? new Date(selectedDateDetail.startTime) : null,
+                          }));
+                        }}
+                        variant="outline"
+                        style={styles.inlineEditButton}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={styles.dateDetailValue}>
+                    {formatTime(selectedDateDetail.startTime.toISOString())}
+                  </Text>
+                )}
+              </View>
+            )}
 
-                <View style={styles.dateDetailSection}>
+            {/* End Time Field */}
+            {selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime()) && (
+              <View style={styles.dateDetailSection}>
+                <View style={styles.dateDetailHeader}>
                   <Text style={styles.dateDetailLabel}>End Time</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowDateDetailTimePicker({ type: 'endTime' })}
-                    style={styles.datePickerButton}
-                  >
-                    <Text style={styles.datePickerButtonText}>
-                      {editingDateDetailForm.endTime
-                        ? formatTime(editingDateDetailForm.endTime.toISOString())
-                        : 'Select end time'}
-                    </Text>
-                  </TouchableOpacity>
-                  {showDateDetailTimePicker.type === 'endTime' && (
-                    <DateTimePicker
-                      value={editingDateDetailForm.endTime || new Date()}
-                      mode="time"
-                      display="default"
-                      is24Hour={false}
-                      onChange={(event, date) => {
-                        if (date) {
-                          setEditingDateDetailForm(prev => ({ ...prev, endTime: date }));
-                        }
-                        setShowDateDetailTimePicker({ type: null });
+                  {isOrganizerOrCoOrganizer && editingDateDetailField !== 'endTime' && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setEditingDateDetailField('endTime');
+                        setEditingDateDetailForm(prev => ({
+                          ...prev,
+                          endTime: selectedDateDetail.endTime ? new Date(selectedDateDetail.endTime) : null,
+                        }));
                       }}
-                    />
+                      style={styles.editIconButton}
+                    >
+                      <Text style={styles.editIconText}>✏️</Text>
+                    </TouchableOpacity>
                   )}
                 </View>
+                {editingDateDetailField === 'endTime' && isOrganizerOrCoOrganizer ? (
+                  <View>
+                    <TouchableOpacity
+                      onPress={() => setShowDateDetailTimePicker({ type: 'endTime' })}
+                      style={styles.datePickerButton}
+                    >
+                      <Text style={styles.datePickerButtonText}>
+                        {editingDateDetailForm.endTime
+                          ? formatTime(editingDateDetailForm.endTime.toISOString())
+                          : 'Select end time'}
+                      </Text>
+                    </TouchableOpacity>
+                    {showDateDetailTimePicker.type === 'endTime' && (
+                      <DateTimePicker
+                        value={editingDateDetailForm.endTime || new Date()}
+                        mode="time"
+                        display="default"
+                        is24Hour={false}
+                        onChange={(event, date) => {
+                          if (date) {
+                            setEditingDateDetailForm(prev => ({ ...prev, endTime: date }));
+                          }
+                          setShowDateDetailTimePicker({ type: null });
+                        }}
+                      />
+                    )}
+                    <View style={styles.inlineEditActions}>
+                      <Button
+                        label="Save"
+                        onPress={() => handleSaveDateDetailField('endTime')}
+                        style={styles.inlineEditButton}
+                        variant="primary"
+                      />
+                      <Button
+                        label="Cancel"
+                        onPress={() => {
+                          setEditingDateDetailField(null);
+                          setEditingDateDetailForm(prev => ({
+                            ...prev,
+                            endTime: selectedDateDetail.endTime ? new Date(selectedDateDetail.endTime) : null,
+                          }));
+                        }}
+                        variant="outline"
+                        style={styles.inlineEditButton}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={styles.dateDetailValue}>
+                    {formatTime(selectedDateDetail.endTime.toISOString())}
+                  </Text>
+                )}
+              </View>
+            )}
 
-                <View style={styles.dateDetailSection}>
-                  <Text style={styles.dateDetailLabel}>Location</Text>
+            {/* Location Field */}
+            <View style={styles.dateDetailSection}>
+              <View style={styles.dateDetailHeader}>
+                <Text style={styles.dateDetailLabel}>Location</Text>
+                {isOrganizerOrCoOrganizer && editingDateDetailField !== 'location' && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingDateDetailField('location');
+                      setEditingDateDetailForm(prev => ({
+                        ...prev,
+                        location: selectedDateDetail.location || '',
+                      }));
+                    }}
+                    style={styles.editIconButton}
+                  >
+                    <Text style={styles.editIconText}>✏️</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {editingDateDetailField === 'location' && isOrganizerOrCoOrganizer ? (
+                <View>
                   <Input
                     value={editingDateDetailForm.location}
                     onChangeText={(text) =>
@@ -5495,11 +5591,60 @@ const EventHub = () => {
                     placeholder="Enter location"
                     style={styles.modalInput}
                   />
+                  <View style={styles.inlineEditActions}>
+                    <Button
+                      label="Save"
+                      onPress={() => handleSaveDateDetailField('location')}
+                      style={styles.inlineEditButton}
+                      variant="primary"
+                    />
+                    <Button
+                      label="Cancel"
+                      onPress={() => {
+                        setEditingDateDetailField(null);
+                        setEditingDateDetailForm(prev => ({
+                          ...prev,
+                          location: selectedDateDetail.location || '',
+                        }));
+                      }}
+                      variant="outline"
+                      style={styles.inlineEditButton}
+                    />
+                  </View>
                 </View>
+              ) : selectedDateDetail.location ? (
+                <Text style={styles.dateDetailValue}>
+                  {selectedDateDetail.location}
+                </Text>
+              ) : (
+                <Text style={styles.dateDetailPlaceholder}>
+                  No location set
+                </Text>
+              )}
+            </View>
 
-                {isMember && (
-                  <View style={styles.dateDetailSection}>
-                    <Text style={styles.dateDetailLabel}>Address</Text>
+            {/* Address Field */}
+            {isMember && (
+              <View style={styles.dateDetailSection}>
+                <View style={styles.dateDetailHeader}>
+                  <Text style={styles.dateDetailLabel}>Address</Text>
+                  {isOrganizerOrCoOrganizer && editingDateDetailField !== 'address' && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setEditingDateDetailField('address');
+                        setEditingDateDetailForm(prev => ({
+                          ...prev,
+                          address: selectedDateDetail.address || selectedDateDetail.exactLocation || '',
+                        }));
+                      }}
+                      style={styles.editIconButton}
+                    >
+                      <Text style={styles.editIconText}>✏️</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {editingDateDetailField === 'address' && isOrganizerOrCoOrganizer ? (
+                  <View>
                     <Input
                       value={editingDateDetailForm.address}
                       onChangeText={(text) =>
@@ -5508,11 +5653,60 @@ const EventHub = () => {
                       placeholder="Enter address"
                       style={styles.modalInput}
                     />
+                    <View style={styles.inlineEditActions}>
+                      <Button
+                        label="Save"
+                        onPress={() => handleSaveDateDetailField('address')}
+                        style={styles.inlineEditButton}
+                        variant="primary"
+                      />
+                      <Button
+                        label="Cancel"
+                        onPress={() => {
+                          setEditingDateDetailField(null);
+                          setEditingDateDetailForm(prev => ({
+                            ...prev,
+                            address: selectedDateDetail.address || selectedDateDetail.exactLocation || '',
+                          }));
+                        }}
+                        variant="outline"
+                        style={styles.inlineEditButton}
+                      />
+                    </View>
                   </View>
+                ) : (selectedDateDetail.address || selectedDateDetail.exactLocation) ? (
+                  <Text style={styles.dateDetailValue}>
+                    {selectedDateDetail.address || selectedDateDetail.exactLocation}
+                  </Text>
+                ) : (
+                  <Text style={styles.dateDetailPlaceholder}>
+                    No address set
+                  </Text>
                 )}
+              </View>
+            )}
 
-                <View style={styles.dateDetailSection}>
-                  <Text style={styles.dateDetailLabel}>Notes</Text>
+            {/* Notes Field */}
+            <View style={styles.dateDetailSection}>
+              <View style={styles.dateDetailHeader}>
+                <Text style={styles.dateDetailLabel}>Notes</Text>
+                {isOrganizerOrCoOrganizer && editingDateDetailField !== 'note' && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingDateDetailField('note');
+                      setEditingDateDetailForm(prev => ({
+                        ...prev,
+                        note: selectedDateDetail.note || '',
+                      }));
+                    }}
+                    style={styles.editIconButton}
+                  >
+                    <Text style={styles.editIconText}>✏️</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {editingDateDetailField === 'note' && isOrganizerOrCoOrganizer ? (
+                <View>
                   <Input
                     value={editingDateDetailForm.note}
                     onChangeText={(text) =>
@@ -5523,126 +5717,54 @@ const EventHub = () => {
                     numberOfLines={4}
                     style={styles.modalInput}
                   />
-                </View>
-
-                <View style={styles.dateDetailActions}>
-                  <Button
-                    label="Save"
-                    onPress={handleSaveDateDetail}
-                    style={styles.modalButton}
-                  />
-                  <Button
-                    label="Cancel"
-                    onPress={() => {
-                      setIsEditingDateDetail(false);
-                      // Reset form to original values
-                      setEditingDateDetailForm({
-                        date: selectedDateDetail.date ? new Date(selectedDateDetail.date) : null,
-                        startTime: selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime())
-                          ? new Date(selectedDateDetail.startTime)
-                          : null,
-                        endTime: selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime())
-                          ? new Date(selectedDateDetail.endTime)
-                          : null,
-                        location: selectedDateDetail.location || '',
-                        address: selectedDateDetail.address || selectedDateDetail.exactLocation || '',
-                        note: selectedDateDetail.note || '',
-                      });
-                    }}
-                    variant="outline"
-                    style={styles.modalButton}
-                  />
-                </View>
-              </>
-            ) : (
-              // View mode
-              <>
-                <View style={styles.dateDetailSection}>
-                  <Text style={styles.dateDetailLabel}>Date</Text>
-                  <Text style={styles.dateDetailValue}>
-                    {formatDate(selectedDateDetail.date.toISOString())}
-                  </Text>
-                </View>
-
-                {selectedDateDetail.startTime && !isNaN(selectedDateDetail.startTime.getTime()) && (
-                  <View style={styles.dateDetailSection}>
-                    <Text style={styles.dateDetailLabel}>Start Time</Text>
-                    <Text style={styles.dateDetailValue}>
-                      {formatTime(selectedDateDetail.startTime.toISOString())}
-                    </Text>
-                  </View>
-                )}
-
-                {selectedDateDetail.endTime && !isNaN(selectedDateDetail.endTime.getTime()) && (
-                  <View style={styles.dateDetailSection}>
-                    <Text style={styles.dateDetailLabel}>End Time</Text>
-                    <Text style={styles.dateDetailValue}>
-                      {formatTime(selectedDateDetail.endTime.toISOString())}
-                    </Text>
-                  </View>
-                )}
-
-                {selectedDateDetail.location && (
-                  <View style={styles.dateDetailSection}>
-                    <Text style={styles.dateDetailLabel}>Location</Text>
-                    <Text style={styles.dateDetailValue}>
-                      {selectedDateDetail.location}
-                    </Text>
-                  </View>
-                )}
-
-                {isMember && (selectedDateDetail.address || selectedDateDetail.exactLocation) && (
-                  <View style={styles.dateDetailSection}>
-                    <Text style={styles.dateDetailLabel}>Address</Text>
-                    <Text style={styles.dateDetailValue}>
-                      {selectedDateDetail.address || selectedDateDetail.exactLocation}
-                    </Text>
-                  </View>
-                )}
-
-                {!selectedDateDetail.location && !selectedDateDetail.address && !selectedDateDetail.exactLocation && (
-                  <View style={styles.dateDetailSection}>
-                    <Text style={styles.dateDetailValue}>
-                      Location to be announced
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.dateDetailSection}>
-                  <Text style={styles.dateDetailLabel}>Notes</Text>
-                  <Text
-                    style={
-                      selectedDateDetail.note
-                        ? styles.dateDetailValue
-                        : styles.dateDetailPlaceholder
-                    }
-                  >
-                    {selectedDateDetail.note ||
-                      (isOrganizerOrCoOrganizer
-                        ? 'No notes yet. Add logistics like parking or snacks in Edit Schedule.'
-                        : 'No notes yet.')}
-                  </Text>
-                </View>
-
-                <View style={styles.dateDetailActions}>
-                  {isOrganizerOrCoOrganizer && (
+                  <View style={styles.inlineEditActions}>
                     <Button
-                      label="Edit"
-                      onPress={() => setIsEditingDateDetail(true)}
-                      style={styles.modalButton}
+                      label="Save"
+                      onPress={() => handleSaveDateDetailField('note')}
+                      style={styles.inlineEditButton}
+                      variant="primary"
                     />
-                  )}
-                  <Button
-                    label="Close"
-                    onPress={() => {
-                      setSelectedDateDetail(null);
-                      setIsEditingDateDetail(false);
-                    }}
-                    style={styles.modalButton}
-                  />
+                    <Button
+                      label="Cancel"
+                      onPress={() => {
+                        setEditingDateDetailField(null);
+                        setEditingDateDetailForm(prev => ({
+                          ...prev,
+                          note: selectedDateDetail.note || '',
+                        }));
+                      }}
+                      variant="outline"
+                      style={styles.inlineEditButton}
+                    />
+                  </View>
                 </View>
-              </>
-            )}
+              ) : (
+                <Text
+                  style={
+                    selectedDateDetail.note
+                      ? styles.dateDetailValue
+                      : styles.dateDetailPlaceholder
+                  }
+                >
+                  {selectedDateDetail.note ||
+                    (isOrganizerOrCoOrganizer
+                      ? 'No notes yet. Add logistics like parking or snacks in Edit Schedule.'
+                      : 'No notes yet.')}
+                </Text>
+              )}
+            </View>
+
+            {/* Close Button */}
+            <View style={styles.dateDetailActions}>
+              <Button
+                label="Close"
+                onPress={() => {
+                  setSelectedDateDetail(null);
+                  setEditingDateDetailField(null);
+                }}
+                style={styles.modalButton}
+              />
+            </View>
           </View>
         )}
       </Modal>
@@ -5929,6 +6051,12 @@ const styles = StyleSheet.create({
   dateDetailModalContent: {
     padding: 20,
   },
+  dateDetailHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+  },
   dateDetailSection: {
     marginBottom: 20,
   },
@@ -5949,6 +6077,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#777',
     fontStyle: 'italic',
+  },
+  inlineEditActions: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+  },
+  inlineEditButton: {
+    flex: 1,
   },
   dateDetailActions: {
     marginTop: 20,
@@ -5983,9 +6119,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   manageRSVPButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    minWidth: 120,
+    marginTop: 12,
+    marginRight: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minWidth: 140,
   },
   exportButton: {
     marginLeft: 12,
@@ -6214,6 +6352,10 @@ const styles = StyleSheet.create({
   },
   editButton: {
     marginTop: 12,
+    marginRight: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minWidth: 140,
   },
   editScheduleButtonContainer: {
     marginBottom: 16,
@@ -6748,6 +6890,10 @@ const styles = StyleSheet.create({
   modalContent: {
     padding: 20,
   },
+  modalContentNoPadding: {
+    padding: 0,
+    paddingHorizontal: 0,
+  },
   modalMessage: {
     fontSize: 16,
     color: '#444',
@@ -6836,6 +6982,15 @@ const styles = StyleSheet.create({
   },
   modalFieldContainer: {
     marginBottom: 24,
+  },
+  modalFieldContainerNoPadding: {
+    marginBottom: 24,
+    paddingHorizontal: 0,
+    marginHorizontal: 0,
+  },
+  calendarContainer: {
+    paddingHorizontal: 0,
+    marginHorizontal: 0,
   },
   fieldLabel: {
     fontSize: 14,

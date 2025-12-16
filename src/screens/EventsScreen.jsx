@@ -53,6 +53,7 @@ const EventsScreen = () => {
   const [organizerData, setOrganizerData] = useState({}); // { eventId: { name, avatarUrl } }
   const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
+  const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
   const scrollViewRef = useRef(null);
   const scrollPositionRef = useRef(0);
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -316,7 +317,8 @@ const EventsScreen = () => {
       setJoinCodeWord1('');
       setJoinCodeWord2('');
       setJoinCodeWord3('');
-      Alert.alert('Success', 'You have joined the MeepleUp!');
+      // Show success modal with event name
+      setJoinedEventName(joinedEvent.name || 'MeepleUp');
     } catch (err) {
       setJoinError('Something went wrong. Please try again.');
       console.error(err);
@@ -608,6 +610,27 @@ const EventsScreen = () => {
         />
       )}
 
+      {/* Join Success Modal */}
+      <Modal
+        isOpen={!!joinedEventName}
+        onClose={() => setJoinedEventName(null)}
+        title="Congrats!"
+      >
+        <View style={styles.successModalContent}>
+          <Text style={styles.successModalText}>
+            You've successfully joined "{joinedEventName}"!
+          </Text>
+          <Text style={styles.successModalSubtext}>
+            Look for it on the "MeepleUps" tab.
+          </Text>
+          <Button
+            label="Got it!"
+            onPress={() => setJoinedEventName(null)}
+            style={styles.successModalButton}
+          />
+        </View>
+      </Modal>
+
     </>
   );
 };
@@ -615,7 +638,7 @@ const EventsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'transparent', // Transparent to show parallax background
+    backgroundColor: theme.colors.bgColor, // Wood table background
   },
   header: {
     padding: theme.spacing.xl,
@@ -884,6 +907,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
     textTransform: 'uppercase',
+  },
+  successModalContent: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.md,
+  },
+  successModalText: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  successModalSubtext: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xl,
+  },
+  successModalButton: {
+    width: '100%',
   },
 });
 

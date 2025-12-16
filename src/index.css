@@ -21,7 +21,7 @@
   --text-secondary: #6f6f6f;
 
   /* Surfaces */
-  --bg-color: #f4f1ec; /* Slight paper texture vibe */
+  --bg-color: #d4b896; /* Wood table base color */
   --surface-color: #ffffff;
   --card-surface: #fffdf9;
 
@@ -52,10 +52,10 @@
   --radius-lg: 16px; /* chunky card corners */
   --radius-circle: 9999px;
 
-  /* Shadows (tactile, board-game-ish) */
-  --shadow-soft: 0 2px 4px rgba(0,0,0,0.12);
-  --shadow-card: 0 4px 8px rgba(0,0,0,0.18);
-  --shadow-press: inset 0 2px 4px rgba(0,0,0,0.15);
+  /* Shadows - removed for flat design */
+  --shadow-soft: none;
+  --shadow-card: none;
+  --shadow-press: none;
 
   /* Legacy variable aliases for component compatibility */
   --primary-color: var(--meeple-red);
@@ -70,6 +70,31 @@
 
 body {
   background-color: var(--bg-color);
+  background-image: 
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 100px,
+      rgba(139, 115, 85, 0.15) 100px,
+      rgba(139, 115, 85, 0.15) 102px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(212, 184, 150, 0.8) 0%,
+      rgba(196, 167, 132, 0.9) 25%,
+      rgba(180, 150, 114, 0.9) 50%,
+      rgba(196, 167, 132, 0.9) 75%,
+      rgba(212, 184, 150, 0.8) 100%
+    );
+  background-size: 4px 100%, 100% 102px, 100% 400px;
+  background-position: 0 0, 0 0, 0 0;
   font-family: var(--font-family);
   color: var(--text-primary);
   font-size: var(--font-size-base);
@@ -192,20 +217,20 @@ p { margin-bottom: var(--spacing-sm); }
   color: var(--text-secondary);
 }
 
-/* Chunky Eurogame Card Tiles */
+/* Flat Eurogame Card Tiles */
 .card, .event-tile {
   background-color: var(--card-surface);
-  border-radius: var(--radius-lg);
+  border-radius: 0; /* Cards should have no rounded corners */
   padding: var(--spacing-lg);
   margin-bottom: var(--spacing-md);
-  box-shadow: var(--shadow-card);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  box-shadow: none; /* Flat design - no shadows */
+  border: 1px solid rgba(201, 183, 156, 0.5); /* Subtle border for definition */
+  transition: border-color 0.12s ease;
 }
 
 .card:hover,
 .event-tile:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(0,0,0,0.22);
+  border-color: var(--border-color);
 }
 
 .card-header {

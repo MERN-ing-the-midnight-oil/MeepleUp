@@ -536,7 +536,7 @@ const CollectionScreen = () => {
             <View style={styles.menuOptionContent}>
               <Image 
                 source={require('../../assets/images/BGGDownload.png')}
-                style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
+                style={[styles.menuOptionImageIcon, { width: iconSize, height: iconSize }]}
                 resizeMode="contain"
               />
               <View style={styles.menuOptionText}>
@@ -691,7 +691,7 @@ const CollectionScreen = () => {
                       <View style={styles.menuOptionContent}>
                         <Image 
                           source={require('../../assets/images/BGGDownload.png')}
-                          style={[styles.menuOptionIcon, { width: iconSize, height: iconSize }]}
+                          style={[styles.menuOptionImageIcon, { width: iconSize, height: iconSize }]}
                           resizeMode="contain"
                         />
                         <View style={styles.menuOptionText}>
@@ -784,6 +784,7 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.sm,
   },
   menuTitle: {
     fontSize: theme.typography.fontSize.base,
@@ -802,10 +803,10 @@ const styles = StyleSheet.create({
   },
   menuOption: {
     ...commonStyles.card,
-    borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.woodMedium,
+    borderRadius: 0, // Cards should have no rounded corners
+    marginBottom: theme.spacing.lg,
+    marginHorizontal: theme.spacing.md,
+    // borderWidth and borderColor already set in commonStyles.card
   },
   menuOptionContent: {
     flexDirection: 'row',
@@ -820,6 +821,10 @@ const styles = StyleSheet.create({
   menuOptionIcon: {
     fontSize: theme.typography.fontSize['2xl'],
     marginRight: theme.spacing.lg,
+  },
+  menuOptionImageIcon: {
+    marginRight: theme.spacing.lg,
+    // width and height will be set dynamically
   },
   menuOptionText: {
     flex: 1,

@@ -563,15 +563,11 @@ const GameCard = ({ game, onDelete }) => {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 0, // Cards should have no rounded corners
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    borderColor: 'rgba(201, 183, 156, 0.5)', // Subtle border for flat design
+    // No shadows for flat design
     position: 'relative',
     width: '100%', // Full width on mobile
     marginBottom: 12,
@@ -691,7 +687,7 @@ const styles = StyleSheet.create({
   styledCardContainer: {
     width: '100%',
     minHeight: 67, // Reduced by one third
-    borderRadius: 12,
+    borderRadius: 0, // Cards should have no rounded corners
     overflow: 'hidden',
   },
   styledCardContainerFallback: {

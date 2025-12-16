@@ -8,9 +8,11 @@ import Button from '../components/common/Button';
 import KeyboardAwareScrollView from '../components/common/KeyboardAwareScrollView';
 import { bggLogoColor } from '../components/BGGLogoAssets';
 
-const Auth = () => {
+const Auth = ({ route: routeProp }) => {
   const navigation = useNavigation();
-  const route = useRoute();
+  const routeHook = useRoute();
+  // Use provided route prop (for web) or hook result (for React Native)
+  const route = routeProp || routeHook;
   const { login, signup, signInWithGoogle, resetPassword } = useAuth();
   const mode = route.params?.mode || 'login'; // 'login' or 'register'
   const { width: screenWidth } = Dimensions.get('window');
@@ -138,51 +140,6 @@ const Auth = () => {
     }
   };
 
-  const handleTestUserLogin = async () => {
-    setError('');
-    setLoading(true);
-
-    const TEST_EMAIL = 'test@meepleup.com';
-    const TEST_PASSWORD = 'test123456';
-    const TEST_NAME = 'Test User';
-
-    try {
-      // Try to log in first
-      try {
-        await login({ email: TEST_EMAIL, password: TEST_PASSWORD });
-        // Navigation will happen automatically via auth state change
-      } catch (loginError) {
-        // If login fails, try to create the user
-        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/wrong-password' || loginError.code === 'auth/invalid-credential' || loginError.code === 'auth/invalid-login-credentials') {
-          console.log('Test user not found or wrong password, creating test user...');
-          try {
-            await signup({ email: TEST_EMAIL, password: TEST_PASSWORD, name: TEST_NAME });
-            Alert.alert(
-              'Test User Created',
-              'Test user account created and logged in successfully!',
-              [{ text: 'OK' }]
-            );
-          } catch (signupError) {
-            // If signup fails because user already exists, that's okay - user exists but password might be wrong
-            // For test user, we'll show a helpful message
-            if (signupError.code === 'auth/email-already-in-use') {
-              setError('Test user already exists but login failed. The test account may need to be reset.');
-              console.error('Test user exists but could not log in:', signupError);
-            } else {
-              throw signupError;
-            }
-          }
-        } else {
-          throw loginError;
-        }
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to log in as test user. Please try again.');
-      console.error('Test user login error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const lastInputRef = useRef(null);
   const scrollViewRef = useRef(null);
@@ -391,19 +348,6 @@ const Auth = () => {
             style={styles.googleButton}
           />
 
-          <View style={styles.dividerContainer}>
-            <View style={styles.divider} />
-            <Text style={styles.dividerText}>DEV</Text>
-            <View style={styles.divider} />
-          </View>
-
-          <Button
-            label="🚀 Quick Test Login"
-            onPress={handleTestUserLogin}
-            disabled={loading}
-            variant="primary"
-            style={styles.testButton}
-          />
 
           <View style={styles.switchContainer}>
             <Text style={styles.switchText}>
@@ -500,13 +444,6 @@ const styles = StyleSheet.create({
   googleButton: {
     width: '100%',
     marginBottom: 8,
-  },
-  testButton: {
-    width: '100%',
-    marginBottom: 8,
-    backgroundColor: '#ff9800',
-    borderColor: '#ff9800',
-    borderWidth: 2,
   },
   switchContainer: {
     flexDirection: 'row',

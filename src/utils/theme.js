@@ -19,7 +19,7 @@ export const theme = {
     textSecondary: '#6f6f6f',
     
     // Surfaces
-    bgColor: '#f4f1ec', // Slight paper texture vibe
+    bgColor: '#d4b896', // Wood table base color
     surfaceColor: '#ffffff',
     cardSurface: '#fffdf9',
     
@@ -82,28 +82,28 @@ export const theme = {
     circle: 9999,
   },
   
-  // Shadows (for web - React Native uses elevation)
+  // Shadows - removed for flat design
   shadows: {
     soft: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.12,
-      shadowRadius: 4,
-      elevation: 2, // Android
+      shadowColor: 'transparent',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0, // Android
     },
     card: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.18,
-      shadowRadius: 8,
-      elevation: 4, // Android
+      shadowColor: 'transparent',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0, // Android
     },
     press: {
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.15,
-      shadowRadius: 4,
-      elevation: 2, // Android
+      shadowColor: 'transparent',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0, // Android
     },
   },
 };
@@ -151,13 +151,15 @@ export const commonStyles = {
     color: theme.colors.feltGreen,
   },
   
-  // Card styles
+  // Card styles - flat design with subtle border
   card: {
     backgroundColor: theme.colors.cardSurface,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: 0, // Cards should have no rounded corners
     padding: theme.spacing.lg,
     marginBottom: theme.spacing.md,
-    ...theme.shadows.card,
+    borderWidth: 1,
+    borderColor: 'rgba(201, 183, 156, 0.5)', // Subtle border for definition
+    // No shadows for flat design
   },
   
   // Input styles

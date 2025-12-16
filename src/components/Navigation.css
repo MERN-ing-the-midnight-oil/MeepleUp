@@ -2,7 +2,7 @@
   background: var(--wood-light);
   border-bottom: 2px solid var(--wood-medium);
   padding-top: 40px;
-  box-shadow: var(--shadow-soft);
+  box-shadow: none; /* Flat design - no shadows */
 }
 
 .nav-content {

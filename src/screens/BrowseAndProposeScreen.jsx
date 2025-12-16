@@ -921,18 +921,20 @@ const BrowseAndProposeScreen = () => {
                   
                   return (
                     <View key={gameId || `game-${idx}`} style={styles.gameCardWrapper}>
-                      <Pressable
-                        onPress={() => handleOpenGameDetails(game)}
-                        style={styles.selectableGameCardWrapper}
-                        activeOpacity={0.7}
-                      >
-                        <GameCard 
-                          game={game} 
-                          preloadedBggData={game._bggData}
-                          disableModal={true}
-                          inGrid={true}
-                        />
-                      </Pressable>
+                      <View style={styles.selectableGameCardWrapper}>
+                        <Pressable
+                          onPress={() => handleOpenGameDetails(game)}
+                          style={styles.gameCardPressable}
+                          activeOpacity={0.7}
+                        >
+                          <GameCard 
+                            game={game} 
+                            preloadedBggData={game._bggData}
+                            disableModal={true}
+                            inGrid={true}
+                          />
+                        </Pressable>
+                      </View>
                       {!isProposedByUser && canPropose && (
                         <TouchableOpacity
                           style={styles.proposeGameButton}
@@ -1404,18 +1406,30 @@ const styles = StyleSheet.create({
     width: '32%',
     marginBottom: theme.spacing.sm,
     alignSelf: 'flex-start',
+    borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    ...theme.shadows.card,
   },
   selectableGameCardWrapper: {
+    width: '100%',
+    marginBottom: -theme.spacing.md, // Counteract GameCard's marginBottom to connect button flush
+    overflow: 'hidden', // Clip the negative margin cleanly
+  },
+  gameCardPressable: {
     width: '100%',
   },
   proposeGameButton: {
     backgroundColor: '#4a90e2',
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: theme.borderRadius.lg,
+    borderBottomRightRadius: theme.borderRadius.lg,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(201, 183, 156, 0.5)', // Subtle border matching card border for visual continuity
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
     width: '100%',
   },
   proposeGameButtonText: {
@@ -1425,12 +1439,16 @@ const styles = StyleSheet.create({
   },
   proposedBadge: {
     backgroundColor: '#28a745',
-    paddingVertical: 6,
+    paddingVertical: 10,
     paddingHorizontal: 10,
-    borderRadius: 6,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: theme.borderRadius.lg,
+    borderBottomRightRadius: theme.borderRadius.lg,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(201, 183, 156, 0.5)', // Subtle border matching card border for visual continuity
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
     width: '100%',
   },
   proposedBadgeText: {

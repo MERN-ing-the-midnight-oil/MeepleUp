@@ -47,9 +47,10 @@
 
 .bgg-collection-preview {
   background-color: var(--surface-color);
-  border-radius: var(--radius-lg);
+  border-radius: 0; /* Containers should have no rounded corners */
   padding: var(--spacing-lg);
-  box-shadow: var(--shadow-md);
+  box-shadow: none; /* Flat design - no shadows */
+  border: 1px solid rgba(201, 183, 156, 0.5); /* Subtle border for definition */
 }
 
 .collection-summary {

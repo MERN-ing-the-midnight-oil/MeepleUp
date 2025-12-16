@@ -4,6 +4,31 @@
   height: 100%;
   min-height: 100vh;
   background-color: var(--bg-color);
+  background-image: 
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 100px,
+      rgba(139, 115, 85, 0.15) 100px,
+      rgba(139, 115, 85, 0.15) 102px
+    ),
+    linear-gradient(
+      180deg,
+      rgba(212, 184, 150, 0.8) 0%,
+      rgba(196, 167, 132, 0.9) 25%,
+      rgba(180, 150, 114, 0.9) 50%,
+      rgba(196, 167, 132, 0.9) 75%,
+      rgba(212, 184, 150, 0.8) 100%
+    );
+  background-size: 4px 100%, 100% 102px, 100% 400px;
+  background-position: 0 0, 0 0, 0 0;
   overflow: hidden;
 }
 

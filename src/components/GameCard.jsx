@@ -44,11 +44,11 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     return StyleSheet.create({
       card: {
         backgroundColor: theme.colors.cardSurface,
-        borderRadius: theme.borderRadius.lg,
+        borderRadius: 0, // Cards should have no rounded corners
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: theme.colors.woodMedium,
-        ...theme.shadows.card,
+        borderColor: 'rgba(201, 183, 156, 0.5)', // Subtle border for flat design
+        // No shadows for flat design
         position: 'relative',
         width: cardWidth,
         marginBottom: theme.spacing.md,

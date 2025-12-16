@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { EventsProvider } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
@@ -7,11 +7,25 @@ import { AvailabilityProvider } from './context/AvailabilityContext';
 import WebNavigation from './components/WebNavigation';
 import ParallaxBackground from './components/ParallaxBackground';
 import Onboarding from './screens/Onboarding';
+import Auth from './screens/Auth';
 import EventsScreen from './screens/EventsScreen';
 import EventHub from './screens/EventHub';
 import BrowseAndProposeScreen from './screens/BrowseAndProposeScreen';
 import CollectionScreen from './screens/CollectionScreen';
 import ProfileScreen from './screens/ProfileScreen';
+
+// Wrapper to pass URL search params to Auth component as route params
+const AuthWrapper = () => {
+  const [searchParams] = useSearchParams();
+  const mode = searchParams.get('mode') || 'login';
+  
+  // Create a mock route object for Auth component
+  const mockRoute = {
+    params: { mode }
+  };
+  
+  return <Auth route={mockRoute} />;
+};
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -51,12 +65,20 @@ const AppContent = () => {
           }
         />
         <Route
+          path="/auth"
+          element={
+            <PublicRoute>
+              <ParallaxBackground>
+                <AuthWrapper />
+              </ParallaxBackground>
+            </PublicRoute>
+          }
+        />
+        <Route
           path="/events"
           element={
             <ProtectedRoute>
-              <ParallaxBackground>
-                <EventsScreen />
-              </ParallaxBackground>
+              <EventsScreen />
             </ProtectedRoute>
           }
         />
@@ -64,9 +86,7 @@ const AppContent = () => {
           path="/event/:eventId"
           element={
             <ProtectedRoute>
-              <ParallaxBackground>
-                <EventHub />
-              </ParallaxBackground>
+              <EventHub />
             </ProtectedRoute>
           }
         />
@@ -74,9 +94,7 @@ const AppContent = () => {
           path="/event/:eventId/browse/:dateIndex"
           element={
             <ProtectedRoute>
-              <ParallaxBackground>
-                <BrowseAndProposeScreen />
-              </ParallaxBackground>
+              <BrowseAndProposeScreen />
             </ProtectedRoute>
           }
         />
@@ -84,9 +102,7 @@ const AppContent = () => {
           path="/collection"
           element={
             <ProtectedRoute>
-              <ParallaxBackground>
-                <CollectionScreen />
-              </ParallaxBackground>
+              <CollectionScreen />
             </ProtectedRoute>
           }
         />
@@ -94,9 +110,7 @@ const AppContent = () => {
           path="/profile"
           element={
             <ProtectedRoute>
-              <ParallaxBackground>
-                <ProfileScreen />
-              </ParallaxBackground>
+              <ProfileScreen />
             </ProtectedRoute>
           }
         />

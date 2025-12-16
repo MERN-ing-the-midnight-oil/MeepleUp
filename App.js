@@ -89,7 +89,14 @@ function AppNavigator() {
                 </AnimatedBackground>
               )} 
             />
-            <Stack.Screen name="Auth" component={AuthScreen} />
+            <Stack.Screen 
+              name="Auth" 
+              component={() => (
+                <AnimatedBackground>
+                  <AuthScreen />
+                </AnimatedBackground>
+              )} 
+            />
           </>
         )}
         {isAuthenticated && !isVerified && (

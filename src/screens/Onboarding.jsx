@@ -44,6 +44,7 @@ const Onboarding = () => {
   const [organizerData, setOrganizerData] = useState({}); // { eventId: { name, avatarUrl } }
   const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
+  const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -113,8 +114,9 @@ const Onboarding = () => {
         return;
       }
 
-      // Navigate back to the choice screen to show the event in the list
+      // Show success modal with event name
       setLoading(false);
+      setJoinedEventName(joinedEvent.name || 'MeepleUp');
       handleModeChange('choice');
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -952,6 +954,27 @@ const Onboarding = () => {
         avatarUrl={selectedUserForProfile.avatarUrl}
       />
     )}
+
+    {/* Join Success Modal */}
+    <Modal
+      isOpen={!!joinedEventName}
+      onClose={() => setJoinedEventName(null)}
+      title="Congrats!"
+    >
+      <View style={styles.successModalContent}>
+        <Text style={styles.successModalText}>
+          You've successfully joined "{joinedEventName}"!
+        </Text>
+        <Text style={styles.successModalSubtext}>
+          Look for it on the "MeepleUps" tab.
+        </Text>
+        <Button
+          label="Got it!"
+          onPress={() => setJoinedEventName(null)}
+          style={styles.successModalButton}
+        />
+      </View>
+    </Modal>
     </>
   );
 };
@@ -962,7 +985,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flexGrow: 1,
-    backgroundColor: 'transparent', // Transparent to show parallax background
+    backgroundColor: theme.colors.bgColor, // Wood table background
   },
   createFormContainer: {
     paddingBottom: 400,
@@ -1272,6 +1295,26 @@ const styles = StyleSheet.create({
   },
   requiredAsterisk: {
     color: theme.colors.meepleRed,
+  },
+  successModalContent: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing.md,
+  },
+  successModalText: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  successModalSubtext: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xl,
+  },
+  successModalButton: {
+    width: '100%',
   },
 });
 
