@@ -34,6 +34,13 @@ const parseProfile = (profile) => {
         discussionEmail: false,
         discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
       },
+      personalMatchWeights: {
+        publisher: 3,
+        mechanics: 3,
+        category: 2,
+        complexity: 1.5,
+        favorite: 2, // Multiplier for favorited games
+      },
     };
   }
 
@@ -51,6 +58,13 @@ const parseProfile = (profile) => {
       discussion: true,
       discussionEmail: false,
       discussionFrequency: 'all',
+    },
+    personalMatchWeights: profile.personalMatchWeights || {
+      publisher: 3,
+      mechanics: 3,
+      category: 2,
+      complexity: 1.5,
+      favorite: 2,
     },
   };
 };
@@ -74,6 +88,7 @@ const mapUser = (firebaseUser, storedProfile = {}) => {
     zipcode: profile.zipcode,
     photoURL: firebaseUser.photoURL || null,
     notificationPreferences: profile.notificationPreferences,
+    personalMatchWeights: profile.personalMatchWeights,
     metadata: {
       creationTime: firebaseUser.metadata?.creationTime,
       lastSignInTime: firebaseUser.metadata?.lastSignInTime,
@@ -127,6 +142,13 @@ export const AuthProvider = ({ children }) => {
                   discussion: true,
                   discussionEmail: false,
                   discussionFrequency: 'all',
+                },
+                personalMatchWeights: userData.personalMatchWeights || {
+                  publisher: 3,
+                  mechanics: 3,
+                  category: 2,
+                  complexity: 1.5,
+                  favorite: 2,
                 },
               };
             }
@@ -645,6 +667,11 @@ export const AuthProvider = ({ children }) => {
         // Handle notification preferences separately
         if (nextProfile.notificationPreferences) {
           userData.notificationPreferences = nextProfile.notificationPreferences;
+        }
+
+        // Handle personal match weights separately
+        if (nextProfile.personalMatchWeights) {
+          userData.personalMatchWeights = nextProfile.personalMatchWeights;
         }
 
         await userRef.set(userData, { merge: true });

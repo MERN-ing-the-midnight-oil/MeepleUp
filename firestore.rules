@@ -69,13 +69,29 @@ service cloud.firestore {
     // Gaming Groups
     match /gamingGroups/{groupId} {
       // Allow reading if authenticated AND (user is in memberIds OR user is the organizer)
-      // This handles cases where memberIds might not be properly set
+      // Also allow reading during join process - if user can query by joinCode, they should be able to read
+      // This handles cases where memberIds might not be properly set and allows join code flow
       allow read: if isAuthenticated() && (
         request.auth.uid in (resource.data.memberIds || []) ||
-        request.auth.uid == resource.data.organizerId
+        request.auth.uid == resource.data.organizerId ||
+        // Allow reading if group is active (not deleted) - this enables join code flow
+        // Users with join codes can read the group to verify it exists before joining
+        (resource.data.isActive != false && resource.data.deletedAt == null)
       );
       allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (
+      // Allow organizers to update/delete, or allow users to add themselves to memberIds when joining
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.organizerId ||
+        isOrganizerOrCoOrganizer(groupId) ||
+        // Allow users to add themselves to memberIds when joining
+        // Check that only memberIds and updatedAt are being modified
+        // and that the user is in the new memberIds
+        // Note: We allow this even if user is already in memberIds to handle edge cases
+        // where memberIds exists but member document doesn't, or vice versa
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'updatedAt']) &&
+         request.auth.uid in (request.resource.data.memberIds || []))
+      );
+      allow delete: if isAuthenticated() && (
         request.auth.uid == resource.data.organizerId ||
         isOrganizerOrCoOrganizer(groupId)
       );
@@ -84,25 +100,57 @@ service cloud.firestore {
       match /members/{userId} {
         // Allow reading if user is authenticated and either:
         // - They are reading their own member document, OR
-        // - They are a member of the group (in memberIds) OR the organizer
-        // Check membership: if user has their own member document OR is in memberIds/organizer
+        // - They have a member document (they're a member), OR
+        // - They are a member of the group (in memberIds) OR the organizer, OR
+        // - The group is active (enables join code flow - users joining need to see members)
         function isGroupMemberOrOrganizer() {
-          // Option 1: Check if current user has a member document (they're definitely a member)
-          // Option 2: Check group document memberIds and organizerId
+          // Option 1: Check if current user has a member document (most reliable, doesn't require group read)
+          // If user has a member document, they're definitely a member and can read all members
+          // exists() doesn't require read permission, so this works even if user can't read the group
+          // This handles the case where user joined but Firestore update to memberIds failed
+          // IMPORTANT: Check exists() first - if user has member doc, they can read all members
+          // This avoids needing to call get() on the group document, which might fail
+          let hasMemberDoc = exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid));
+          
+          // Option 2: Check group document for membership, organizer status, or active status
+          // get() in security rules is evaluated server-side and should work even if user can't read directly
+          // However, if the group document doesn't exist or has restrictions, get() might fail
+          // We structure this so that if hasMemberDoc is true, we return true via logical OR
+          // But Firestore rules evaluate all expressions, so get() might still be called
+          // To avoid get() failing, we need to ensure it only runs when necessary
+          // Actually, the issue is that get() might fail if the group document can't be read
+          // But get() in security rules should work server-side even if user can't read the document
+          // So the real issue might be that the group document doesn't exist or is deleted
           let groupDoc = get(/databases/$(database)/documents/gamingGroups/$(groupId));
           let memberIds = groupDoc.data.memberIds || [];
-          return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+          let isActive = groupDoc.data.isActive != false && groupDoc.data.deletedAt == null;
+          
+          // Return true if user has member doc OR is in memberIds OR is organizer OR group is active
+          // The logical OR means if hasMemberDoc is true, we return true
+          // But Firestore rules evaluate all expressions, so get() is still called
+          // If get() fails, the entire rule fails, even if hasMemberDoc is true
+          // This is a limitation of Firestore rules - we can't short-circuit evaluation
+          return hasMemberDoc ||
                  request.auth.uid in memberIds ||
-                 request.auth.uid == groupDoc.data.organizerId;
+                 request.auth.uid == groupDoc.data.organizerId ||
+                 // Allow reading members if group is active (enables join code flow)
+                 // Users joining via join code need to see existing members before they're added to memberIds
+                 // This matches the group read rule which allows reading active groups
+                 isActive;
         }
         allow read: if isAuthenticated() && (
           isOwner(userId) ||
+          // If user has a member document, they can read all members
+          // This check doesn't require reading the group document, so it works even if user can't read the group
+          exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+          // Otherwise, check group document for membership, organizer status, or active status
           isGroupMemberOrOrganizer()
         );
-        allow create: if isAuthenticated() && (
-          isOwner(userId) ||
-          isOrganizerOrCoOrganizer(groupId)
-        );
+        // Allow users to create their own member document when joining
+        // This allows users to join events by creating their own membership
+        // The isOwner check ensures users can only create their own member document
+        // Note: Organizers adding members should update memberIds array directly, not create member docs
+        allow create: if isAuthenticated() && isOwner(userId);
         // Allow members to update their own member document (including rsvpStatus, rsvpStatuses, rsvpUpdatedAt)
         // Organizers and co-organizers can update any member's data
         allow update: if isAuthenticated() && (
@@ -118,10 +166,14 @@ service cloud.firestore {
       // Discussion Forum Posts
       match /posts/{postId} {
         // Helper function to check if user can access posts
+        // Check membership via member document first (doesn't require group read)
+        // Then fall back to checking group document memberIds/organizerId
         function canAccessPosts() {
-          let groupDoc = get(/databases/$(database)/documents/gamingGroups/$(groupId));
-          return request.auth.uid in (groupDoc.data.memberIds || []) ||
-                 request.auth.uid == groupDoc.data.organizerId;
+          // Check if user has a member document (most reliable, doesn't require group read)
+          return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+                 // Otherwise check group document (requires read permission)
+                 (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+                 (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId);
         }
         allow read: if isAuthenticated() && canAccessPosts();
         allow create: if isAuthenticated() && canAccessPosts();
@@ -199,22 +251,17 @@ service cloud.firestore {
           (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId)
         );
         
-        allow create: if isAuthenticated() && (
-          // Check membership - prioritize member document check first
-          // Firestore rules should short-circuit, so if hasMemberDocument() is true,
-          // it won't evaluate the get() calls
-          exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
-          (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
-          (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId)
-        ) && (
-          // Ensure the nominatedBy or userId matches the authenticated user
+        allow create: if isAuthenticated() && 
+          // Check membership - member document must exist
+          // This is the primary and most reliable check
+          hasMemberDocument() &&
           (
+            // Ensure the nominatedBy or userId matches the authenticated user
             // For proposal documents (has nominatedBy field), ensure nominatedBy matches authenticated user
             (request.resource.data.nominatedBy != null && request.resource.data.nominatedBy == request.auth.uid) ||
             // For rating documents (has userId field), ensure userId matches authenticated user
             (request.resource.data.userId != null && request.resource.data.userId == request.auth.uid)
-          )
-        );
+          );
         
         allow update, delete: if isAuthenticated() && (
           // Allow if user is the one who proposed (proposal documents)

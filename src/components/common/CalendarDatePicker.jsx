@@ -19,29 +19,27 @@ const CalendarDatePicker = ({
   minDate,
   usualStartTime,
   usualEndTime,
-  onDateTimeEdit, // Callback when user wants to edit a date's time
-  onDateLongPress, // Callback when user long-presses a selected date
-  onDatePress, // Callback when user taps a selected date
+  onDateTimeEdit,
+  onDateLongPress,
+  onDatePress,
+  readOnly = false,
+  showEditIcon = false,
+  onEditIconPress,
 }) => {
-  // Anchor all calculations in UTC to avoid timezone/DST shifts
-  const todayLocal = new Date();
-  const today = new Date(Date.UTC(
-    todayLocal.getUTCFullYear(),
-    todayLocal.getUTCMonth(),
-    todayLocal.getUTCDate()
-  ));
-  const todayKey = `${today.getUTCFullYear()}-${today.getUTCMonth()}-${today.getUTCDate()}`;
-  const startMonth = today.getUTCMonth();
-  const startYear = today.getUTCFullYear();
+  // Use local dates consistently - no UTC
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Midnight local time
+  const todayKey = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+  const startMonth = today.getMonth();
+  const startYear = today.getFullYear();
   
-  // State to track current month index (0 = current month)
   const [currentMonthIndex, setCurrentMonthIndex] = useState(0);
   const scrollViewRef = useRef(null);
 
-  // Helper function to convert date to key - must be defined before useMemo
+  // Helper function to convert date to key - use LOCAL time components
   const dateToKey = (date) => {
     const d = new Date(date);
-    return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
   };
 
   // Create a map of date keys to date objects with times
@@ -82,18 +80,37 @@ const CalendarDatePicker = ({
         newSelectedDates.splice(index, 1);
       }
     } else {
-      // Add date with default times
-      const startTime = new Date(date);
-      startTime.setHours(usualStartTime.getHours(), usualStartTime.getMinutes(), 0, 0);
+      // Add date with default times - use LOCAL time to prevent timezone shifts
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const day = date.getDate();
       
-      const endTime = new Date(date);
-      endTime.setHours(usualEndTime.getHours(), usualEndTime.getMinutes(), 0, 0);
+      // Create date at midnight local time
+      const dateObj = new Date(year, month, day, 0, 0, 0, 0);
       
-      newSelectedDates.push({
-        date: new Date(date),
+      // Create start time: same day at the specified hour
+      let startTime;
+      if (usualStartTime) {
+        startTime = new Date(year, month, day, usualStartTime.getHours(), usualStartTime.getMinutes(), 0, 0);
+      } else {
+        startTime = new Date(year, month, day, 18, 0, 0, 0); // 6 PM default
+      }
+      
+      // Create end time: same day at the specified hour
+      let endTime;
+      if (usualEndTime) {
+        endTime = new Date(year, month, day, usualEndTime.getHours(), usualEndTime.getMinutes(), 0, 0);
+      } else {
+        endTime = new Date(year, month, day, 22, 0, 0, 0); // 10 PM default
+      }
+      
+      const newDateObj = {
+        date: dateObj,
         startTime,
         endTime,
-      });
+      };
+      
+      newSelectedDates.push(newDateObj);
     }
     
     // Sort dates
@@ -118,19 +135,13 @@ const CalendarDatePicker = ({
   };
 
   const getDaysInMonth = (month, year) => {
-    return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return new Date(year, month + 1, 0).getDate();
   };
 
   const getFirstDayOfMonth = (month, year) => {
-    // Use UTC to avoid timezone/DST shifts
-    const date = new Date(Date.UTC(year, month, 1));
-    const dayOfWeek = date.getUTCDay();
-    
-    // Debug: Log for December 2025 to verify
-    if (__DEV__ && month === 11 && year === 2025) {
-      console.log(`[CalendarDatePicker] getFirstDayOfMonth(11, 2025) = ${dayOfWeek} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek]})`);
-    }
-    
+    // Use local time
+    const date = new Date(year, month, 1);
+    const dayOfWeek = date.getDay();
     return dayOfWeek;
   };
 
@@ -147,39 +158,37 @@ const CalendarDatePicker = ({
 
   const months = generateMonths();
   const screenWidth = Dimensions.get('window').width;
-  // Reduce available width significantly to account for implicit padding/margins and ensure all columns fit
-  // Use 96% of screen width to ensure all 7 columns fit comfortably
-  const availableWidth = Math.floor(screenWidth * 0.96);
-  const columnWidth = Math.floor(availableWidth / 7); // Exact pixel width per column - smaller to ensure fit
+  
+  // Use full screen width - no padding/margin reduction needed
+  // Parent container should handle any necessary padding
+  const availableWidth = screenWidth;
+  const dayWidth = Math.floor(availableWidth / 7); // Each day gets exactly 1/7 of width
 
-  // Handle scroll to update current month index
   const handleScroll = (event) => {
     const offsetX = event.nativeEvent.contentOffset.x;
-    const newIndex = Math.round(offsetX / availableWidth);
+    const newIndex = Math.round(offsetX / screenWidth);
     if (newIndex >= 0 && newIndex < months.length) {
       setCurrentMonthIndex(newIndex);
     }
   };
 
-  // Navigate to previous month
   const goToPreviousMonth = () => {
     if (currentMonthIndex > 0) {
       const newIndex = currentMonthIndex - 1;
       setCurrentMonthIndex(newIndex);
       scrollViewRef.current?.scrollTo({
-        x: newIndex * availableWidth,
+        x: newIndex * screenWidth,
         animated: true,
       });
     }
   };
 
-  // Navigate to next month
   const goToNextMonth = () => {
     if (currentMonthIndex < months.length - 1) {
       const newIndex = currentMonthIndex + 1;
       setCurrentMonthIndex(newIndex);
       scrollViewRef.current?.scrollTo({
-        x: newIndex * availableWidth,
+        x: newIndex * screenWidth,
         animated: true,
       });
     }
@@ -189,46 +198,19 @@ const CalendarDatePicker = ({
     const daysInMonth = getDaysInMonth(month, year);
     const days = [];
 
-    // Calculate the first day of the month directly to ensure accuracy
-    // JavaScript Date months are 0-indexed (0=Jan, 11=Dec)
-    // getDay() returns 0=Sunday, 1=Monday, 2=Tuesday, etc.
-    const firstDayOfMonth = new Date(Date.UTC(year, month, 1));
-    const jsFirstDay = firstDayOfMonth.getUTCDay();
-    // Adjust for week start (e.g., if Monday-start, shift Sunday to last column)
+    const firstDayOfMonth = new Date(year, month, 1);
+    const jsFirstDay = firstDayOfMonth.getDay();
     const firstDay = ((jsFirstDay - WEEK_START_INDEX) + 7) % 7;
-    
-    // Debug log to verify calculation
-    if (__DEV__ && month === 11 && year === 2025) {
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      console.log(`[CalendarDatePicker] December 2025 - JS first day: ${jsFirstDay} (${dayNames[jsFirstDay]}), adjusted first day (week start ${WEEK_START_INDEX === 0 ? 'Sun' : 'Mon'}): ${firstDay} (${WEEKDAYS[firstDay]})`);
-    }
 
     // Add empty cells for days before the first day of the month
     for (let i = 0; i < firstDay; i++) {
       days.push(null);
     }
 
-    // Add cells for each day of the month
-    // Use UTC dates to avoid timezone issues that could shift the date
+    // Add cells for each day of the month - use LOCAL time
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(Date.UTC(year, month, day));
+      const date = new Date(year, month, day, 0, 0, 0, 0); // Local time at midnight
       days.push(date);
-    }
-
-    // Debug: Log first 7 days to verify layout
-    if (__DEV__ && month === 11 && year === 2025) {
-      const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      console.log('[CalendarDatePicker] First 7 cells in days array:');
-      days.slice(0, 7).forEach((d, i) => {
-        if (d === null) {
-          console.log(`  Index ${i} (${WEEKDAYS[i]}): null (empty)`);
-        } else {
-          const dayNum = d.getDate();
-          const actualDay = d.getUTCDay();
-          const adjustedDay = ((actualDay - WEEK_START_INDEX) + 7) % 7;
-          console.log(`  Index ${i} (${WEEKDAYS[i]}): Day ${dayNum} (actual day: ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][actualDay]}, adjusted column: ${WEEKDAYS[adjustedDay]})`);
-        }
-      });
     }
 
     return days;
@@ -243,7 +225,7 @@ const CalendarDatePicker = ({
       pagingEnabled={true}
       showsHorizontalScrollIndicator={true}
       decelerationRate="fast"
-      snapToInterval={availableWidth}
+      snapToInterval={screenWidth}
       snapToAlignment="start"
       onMomentumScrollEnd={handleScroll}
       onScroll={handleScroll}
@@ -253,7 +235,7 @@ const CalendarDatePicker = ({
         const calendarDays = renderCalendar(month, year);
         
         return (
-          <View key={`${year}-${month}`} style={[styles.monthContainer, { width: availableWidth, maxWidth: availableWidth }]}>
+          <View key={`${year}-${month}`} style={[styles.monthContainer, { width: screenWidth, marginHorizontal: 0, paddingHorizontal: 0 }]}>
             {/* Month Header */}
             <View style={styles.monthHeader}>
               {monthIndex === currentMonthIndex && (
@@ -299,7 +281,7 @@ const CalendarDatePicker = ({
             {/* Weekday Headers */}
             <View style={styles.weekdayRow}>
               {WEEKDAYS.map((day) => (
-                <View key={day} style={[styles.weekdayHeader, { width: columnWidth }]}>
+                <View key={day} style={[styles.weekdayHeader, { width: dayWidth }]}>
                   <Text style={styles.weekdayText}>{day}</Text>
                 </View>
               ))}
@@ -309,7 +291,7 @@ const CalendarDatePicker = ({
             <View style={styles.calendarGrid}>
               {calendarDays.map((date, index) => {
                 if (date === null) {
-                  return <View key={`empty-${monthIndex}-${index}`} style={[styles.dayCell, { width: columnWidth }]} />;
+                  return <View key={`empty-${monthIndex}-${index}`} style={[styles.dayCellWrapper, { width: dayWidth }]} />;
                 }
 
                 const isSelected = isDateSelected(date);
@@ -323,37 +305,46 @@ const CalendarDatePicker = ({
                     key={dateToKey(date)}
                     style={[
                       styles.dayCellWrapper,
-                      { width: columnWidth },
+                      { width: dayWidth },
                       isToday && styles.todayCellWrapper,
                       isSelected && styles.selectedCellWrapper,
                       isDisabled && styles.disabledCellWrapper,
                     ]}
                     onPress={() => {
-                      if (!isDisabled) {
-                        if (isSelected && dateInfo && onDatePress) {
-                          // Tap on selected date opens details
-                          const dateKey = dateToKey(date);
-                          const index = selectedDates.findIndex(d => {
-                            const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
-                            return dKey === dateKey;
+                      if (!isDisabled && readOnly && isSelected && dateInfo && onDatePress) {
+                        const dateKey = dateToKey(date);
+                        const index = selectedDates.findIndex(d => {
+                          const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
+                          return dKey === dateKey;
+                        });
+                        if (index !== -1) {
+                          onDatePress(index, {
+                            date: dateInfo.date,
+                            startTime: dateInfo.startTime,
+                            endTime: dateInfo.endTime,
                           });
-                          if (index !== -1) {
-                            onDatePress(index, {
-                              date: dateInfo.date,
-                              startTime: dateInfo.startTime,
-                              endTime: dateInfo.endTime,
-                            });
-                          }
+                        }
+                      } else if (!isDisabled && !readOnly && isSelected && dateInfo && onDatePress) {
+                        const dateKey = dateToKey(date);
+                        const index = selectedDates.findIndex(d => {
+                          const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
+                          return dKey === dateKey;
+                        });
+                        if (index !== -1) {
+                          onDatePress(index, {
+                            date: dateInfo.date,
+                            startTime: dateInfo.startTime,
+                            endTime: dateInfo.endTime,
+                          });
                         }
                       }
                     }}
                     onLongPress={() => {
-                      if (!isDisabled && !isSelected) {
-                        // Long press on unselected date creates/selects it
+                      if (!isDisabled && !readOnly) {
                         toggleDate(date);
                       }
                     }}
-                    delayLongPress={500}
+                    delayLongPress={300}
                     disabled={isDisabled}
                     activeOpacity={0.7}
                   >
@@ -373,9 +364,8 @@ const CalendarDatePicker = ({
                           isDisabled && styles.disabledText,
                         ]}
                       >
-                        {date.getUTCDate()}
+                        {date.getDate()}
                       </Text>
-                      {/* Holiday emoji - positioned below date number */}
                       {holiday && (
                         <View style={styles.holidayIconContainer}>
                           <HolidayIcon 
@@ -383,6 +373,29 @@ const CalendarDatePicker = ({
                             size={16}
                           />
                         </View>
+                      )}
+                      {isSelected && showEditIcon && onEditIconPress && (
+                        <TouchableOpacity
+                          style={styles.editIconContainer}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            const dateKey = dateToKey(date);
+                            const index = selectedDates.findIndex(d => {
+                              const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
+                              return dKey === dateKey;
+                            });
+                            if (index !== -1 && dateInfo) {
+                              onEditIconPress(index, {
+                                date: dateInfo.date,
+                                startTime: dateInfo.startTime,
+                                endTime: dateInfo.endTime,
+                              });
+                            }
+                          }}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <Text style={styles.editIconText}>✏️</Text>
+                        </TouchableOpacity>
                       )}
                     </View>
                   </TouchableOpacity>
@@ -400,16 +413,15 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     flex: 1,
-    paddingHorizontal: 0,
-    marginHorizontal: 0,
+    overflow: 'hidden',
   },
   scrollContentContainer: {
     paddingHorizontal: 0,
   },
   monthContainer: {
     paddingHorizontal: 0,
-    marginHorizontal: 0,
-    width: '100%',
+    flexShrink: 0,
+    overflow: 'hidden',
   },
   monthHeader: {
     flexDirection: 'row',
@@ -427,12 +439,12 @@ const styles = StyleSheet.create({
   weekdayRow: {
     flexDirection: 'row',
     marginBottom: 8,
-    paddingHorizontal: 0,
-    marginHorizontal: 0,
+    width: '100%',
   },
   weekdayHeader: {
     alignItems: 'center',
     paddingVertical: 8,
+    paddingHorizontal: 0,
   },
   weekdayText: {
     fontSize: 12,
@@ -443,15 +455,13 @@ const styles = StyleSheet.create({
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: 0,
-    marginHorizontal: 0,
+    width: '100%',
   },
   dayCellWrapper: {
     minHeight: 60,
     marginBottom: 4,
     paddingHorizontal: 0,
     marginHorizontal: 0,
-    maxWidth: '13.7%', // Ensure columns don't exceed this percentage (7 * 13.7% = 95.9%)
   },
   dayCell: {
     flex: 1,
@@ -468,12 +478,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  todayCellWrapper: {
-    // Container for today styling if needed
-  },
-  selectedCellWrapper: {
-    // Container for selected styling if needed
-  },
+  todayCellWrapper: {},
+  selectedCellWrapper: {},
   disabledCellWrapper: {
     opacity: 0.3,
   },
@@ -499,9 +505,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#4caf50',
     paddingVertical: 4,
   },
-  disabledCell: {
-    // Disabled styling handled by wrapper
-  },
+  disabledCell: {},
   disabledText: {
     color: '#ccc',
   },
@@ -524,7 +528,15 @@ const styles = StyleSheet.create({
   monthNavButtonTextDisabled: {
     color: '#999',
   },
+  editIconContainer: {
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+  },
+  editIconText: {
+    fontSize: 12,
+  },
 });
 
 export default CalendarDatePicker;
-

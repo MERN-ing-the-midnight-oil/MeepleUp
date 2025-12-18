@@ -92,6 +92,13 @@ export const CollectionsProvider = ({ children }) => {
               addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
               source: data.source || 'manual',
               updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+              // BGG data fields for Personal Match feature
+              mechanics: data.mechanics || null,
+              categories: data.categories || null,
+              publishers: data.publishers || null,
+              publisher: data.publisher || null,
+              complexity: data.complexity || null,
+              averageWeight: data.averageWeight || data.complexity || null,
             };
           }).filter(g => g.title !== 'Unknown Game');
           
@@ -155,6 +162,13 @@ export const CollectionsProvider = ({ children }) => {
               addedAt: data.addedAt?.toDate?.()?.toISOString() || data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
               source: data.source || 'manual',
               updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.lastUpdatedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+              // BGG data fields for Personal Match feature
+              mechanics: data.mechanics || null,
+              categories: data.categories || null,
+              publishers: data.publishers || null,
+              publisher: data.publisher || null,
+              complexity: data.complexity || null,
+              averageWeight: data.averageWeight || data.complexity || null,
             };
           }).filter(g => g.title !== 'Unknown Game');
           

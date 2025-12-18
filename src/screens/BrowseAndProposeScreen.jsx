@@ -13,6 +13,11 @@ import Modal from '../components/common/Modal';
 import { formatDate, formatTime } from '../utils/helpers';
 import { theme, commonStyles } from '../utils/theme';
 import { getGameDetails } from '../utils/api';
+import { findGameSimilarities } from '../utils/gameSimilarities';
+import PersonalMatchSettings from '../components/PersonalMatchSettings';
+import BeepleAvatar from '../components/BeepleAvatar';
+import { getVibeScore, calculateVibeScoresForGame } from '../services/vibeScores';
+import { calculateVibeScore } from '../utils/vibeScore';
 
 // Platform-specific navigation hooks
 let useNavigationHook;
@@ -108,15 +113,31 @@ const BrowseAndProposeScreen = () => {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [gamesWithBggData, setGamesWithBggData] = useState({}); // { gameId: bggData }
+  const [personalMatchGame, setPersonalMatchGame] = useState(null);
+  const [showPersonalMatchModal, setShowPersonalMatchModal] = useState(false);
+  const [personalMatchText, setPersonalMatchText] = useState(null);
+  const [showPersonalMatchSettings, setShowPersonalMatchSettings] = useState(false);
+  const [vibeScores, setVibeScores] = useState({}); // { gameId: score }
   
   // Get event dates
   const eventDates = useMemo(() => {
-    if (!event) return [];
+    console.log('[BrowseAndProposeScreen] Computing eventDates:', {
+      hasEvent: !!event,
+      eventId: event?.id,
+      hasEventDates: !!event?.eventDates,
+      eventDatesType: Array.isArray(event?.eventDates) ? 'array' : typeof event?.eventDates,
+      eventDatesLength: Array.isArray(event?.eventDates) ? event.eventDates.length : 'N/A'
+    });
+    
+    if (!event) {
+      console.log('[BrowseAndProposeScreen] No event, returning empty eventDates');
+      return [];
+    }
     
     if (event.eventDates && Array.isArray(event.eventDates)) {
-      return event.eventDates.map((ed, index) => {
+      const dates = event.eventDates.map((ed, index) => {
         const date = safeParseDate(ed.date);
-        return {
+        const result = {
           index,
           date: date && !isNaN(date.getTime()) ? date : null,
           dateString: ed.date,
@@ -124,11 +145,31 @@ const BrowseAndProposeScreen = () => {
           endTime: safeParseDate(ed.endTime),
           location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
         };
+        console.log(`[BrowseAndProposeScreen] Event date ${index}:`, {
+          rawDate: ed.date,
+          parsedDate: result.date,
+          dateKey: result.date ? getDateKey(result.date) : null,
+          isValid: result.date !== null
+        });
+        return result;
       }).filter(ed => ed.date !== null);
+      
+      console.log('[BrowseAndProposeScreen] Filtered eventDates:', {
+        count: dates.length,
+        dates: dates.map(d => ({
+          index: d.index,
+          date: d.date,
+          dateKey: getDateKey(d.date),
+          dateString: d.dateString
+        }))
+      });
+      
+      return dates;
     } else if (event.scheduledFor) {
+      console.log('[BrowseAndProposeScreen] Using scheduledFor (legacy format):', event.scheduledFor);
       const date = safeParseDate(event.scheduledFor);
       if (date && !isNaN(date.getTime())) {
-        return [{
+        const result = [{
           index: 0,
           date,
           dateString: event.scheduledFor,
@@ -136,9 +177,19 @@ const BrowseAndProposeScreen = () => {
           endTime: null,
           location: event.location || event.generalLocation || '',
         }];
+        console.log('[BrowseAndProposeScreen] Created eventDates from scheduledFor:', {
+          dateKey: getDateKey(date),
+          date: date
+        });
+        return result;
+      } else {
+        console.warn('[BrowseAndProposeScreen] scheduledFor could not be parsed:', event.scheduledFor);
       }
+    } else {
+      console.warn('[BrowseAndProposeScreen] No eventDates or scheduledFor found in event');
     }
     
+    console.log('[BrowseAndProposeScreen] Returning empty eventDates');
     return [];
   }, [event]);
   
@@ -154,36 +205,88 @@ const BrowseAndProposeScreen = () => {
       ? eventDates[normalizedDateIndex]
       : null;
   
+  // Log selected date info
+  useEffect(() => {
+    console.log('[BrowseAndProposeScreen] Selected date info:', {
+      dateIndex,
+      normalizedDateIndex,
+      eventDatesCount: eventDates.length,
+      hasSelectedDate: !!selectedDate,
+      selectedDateValue: selectedDate?.date,
+      selectedDateString: selectedDate?.date ? new Date(selectedDate.date).toISOString() : null,
+      selectedDateKey: selectedDate?.date ? getDateKey(selectedDate.date) : null
+    });
+  }, [dateIndex, normalizedDateIndex, selectedDate, eventDates.length]);
+  
   // Get confirmed attendees for selected date
   const confirmedAttendees = useMemo(() => {
-    if (dateIndex === null || !selectedDate) return [];
+    console.log('[BrowseAndProposeScreen] Calculating confirmedAttendees:', {
+      dateIndex,
+      hasSelectedDate: !!selectedDate,
+      selectedDateValue: selectedDate?.date,
+      membersCount: members.length,
+      memberIds: members.map(m => m.userId),
+      memberRSVPsKeys: Object.keys(memberRSVPs),
+      userId
+    });
+    
+    if (dateIndex === null || !selectedDate) {
+      console.log('[BrowseAndProposeScreen] No dateIndex or selectedDate, returning empty');
+      return [];
+    }
     
     const dateKey = getDateKey(selectedDate.date);
+    console.log('[BrowseAndProposeScreen] Using dateKey:', dateKey, 'for date:', selectedDate.date);
     
     const confirmed = members.filter(member => {
       const memberRsvps = memberRSVPs[member.userId] || {};
+      console.log(`[BrowseAndProposeScreen] Checking member ${member.userId}:`, {
+        memberRsvpsType: typeof memberRsvps,
+        memberRsvps,
+        dateKey
+      });
+      
       if (typeof memberRsvps === 'string') {
-        return !selectedDate.date ? memberRsvps === 'going' : false;
+        const result = !selectedDate.date ? memberRsvps === 'going' : false;
+        console.log(`[BrowseAndProposeScreen] Member ${member.userId} (legacy format): ${result}`);
+        return result;
       }
       const status = memberRsvps[dateKey];
-      return status === 'going';
+      const result = status === 'going';
+      console.log(`[BrowseAndProposeScreen] Member ${member.userId} status for ${dateKey}: ${status}, confirmed: ${result}`);
+      return result;
     });
+    
+    console.log('[BrowseAndProposeScreen] After filtering, confirmed count:', confirmed.length, 'userIds:', confirmed.map(c => c.userId));
     
     // Always include the logged-in user if they're a member and have confirmed for this date
     const isMember = members.some(m => m.userId === userId);
+    console.log('[BrowseAndProposeScreen] Is logged-in user a member?', isMember, 'userId:', userId);
+    
     if (isMember && userId) {
       const userIsInList = confirmed.some(m => m.userId === userId);
+      console.log('[BrowseAndProposeScreen] Is user already in confirmed list?', userIsInList);
+      
       if (!userIsInList) {
         const userRSVPs = memberRSVPs[userId] || {};
+        console.log('[BrowseAndProposeScreen] User RSVPs:', {
+          userRSVPs,
+          userRSVPsType: typeof userRSVPs,
+          dateKey
+        });
+        
         let userHasConfirmed = false;
         if (typeof userRSVPs === 'string') {
           userHasConfirmed = !selectedDate.date ? userRSVPs === 'going' : false;
+          console.log('[BrowseAndProposeScreen] User has confirmed (legacy format)?', userHasConfirmed);
         } else {
           userHasConfirmed = userRSVPs[dateKey] === 'going';
+          console.log('[BrowseAndProposeScreen] User has confirmed for', dateKey, '?', userHasConfirmed, 'status:', userRSVPs[dateKey]);
         }
         
         if (userHasConfirmed) {
           const userMember = members.find(m => m.userId === userId);
+          console.log('[BrowseAndProposeScreen] Adding user to confirmed list:', !!userMember);
           if (userMember) {
             confirmed.push(userMember);
           }
@@ -191,6 +294,7 @@ const BrowseAndProposeScreen = () => {
       }
     }
     
+    console.log('[BrowseAndProposeScreen] Final confirmedAttendees count:', confirmed.length, 'userIds:', confirmed.map(c => c.userId));
     return confirmed;
   }, [members, memberRSVPs, dateIndex, selectedDate, userId]);
   
@@ -353,6 +457,99 @@ const BrowseAndProposeScreen = () => {
     });
   }, [aggregatedGames, gamesWithBggData]);
 
+  // Load vibe scores for games (both enriched games and proposed games)
+  useEffect(() => {
+    if (!eventId || !userId) {
+      return;
+    }
+
+    const loadVibeScores = async () => {
+      const scores = {};
+      const allGamesToScore = [];
+      
+      // Add enriched games
+      if (Array.isArray(enrichedGames) && enrichedGames.length > 0) {
+        enrichedGames.forEach(game => {
+          const gameId = game.bggId || game.id;
+          if (gameId) {
+            allGamesToScore.push({ gameId, game });
+          }
+        });
+      }
+      
+      // Add proposed games
+      if (Array.isArray(proposedGames) && proposedGames.length > 0) {
+        proposedGames.forEach(proposal => {
+          const gameId = proposal.gameId;
+          if (gameId && !allGamesToScore.find(g => g.gameId === gameId)) {
+            // Create a minimal game object for proposed games
+            allGamesToScore.push({
+              gameId,
+              game: {
+                bggId: gameId,
+                id: gameId,
+                title: proposal.gameName,
+                image: proposal.gameImage,
+              }
+            });
+          }
+        });
+      }
+      
+      if (allGamesToScore.length === 0) {
+        return;
+      }
+      
+      const userCollection = collections[userId] || [];
+      if (userCollection.length === 0) {
+        return;
+      }
+      
+      const customWeights = user?.personalMatchWeights || null;
+      
+      for (const { gameId, game } of allGamesToScore) {
+        try {
+          // Try to get stored score first
+          const storedScore = await getVibeScore(eventId, gameId, userId);
+          if (storedScore !== null) {
+            scores[gameId] = storedScore;
+          } else {
+            // Calculate on-demand if not stored
+            // For proposed games, we might need to fetch game data
+            let gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[gameId] };
+            
+            // If still no BGG data, try to fetch it
+            if (!gameWithBggData._bggData && gameId) {
+              try {
+                const bggData = await getGameDetails(gameId);
+                if (bggData) {
+                  gameWithBggData = { ...gameWithBggData, _bggData: bggData };
+                }
+              } catch (err) {
+                // Continue without BGG data
+              }
+            }
+            
+            const score = calculateVibeScore(gameWithBggData, userCollection, customWeights);
+            if (score !== null) {
+              scores[gameId] = score;
+              // Store it for future use (non-blocking)
+              calculateVibeScoresForGame(eventId, gameId, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
+                console.warn('[BrowseAndPropose] Error storing vibe score:', err);
+              });
+            }
+          }
+        } catch (error) {
+          console.warn(`[BrowseAndPropose] Error loading vibe score for game ${gameId}:`, error);
+        }
+      }
+      
+      setVibeScores(scores);
+    };
+
+    loadVibeScores();
+  }, [eventId, userId, enrichedGames, proposedGames, collections, user?.personalMatchWeights, gamesWithBggData]);
+
   // Helper to get rating label
   const getRatingLabel = (rating) => {
     const ratingLabels = {
@@ -382,12 +579,34 @@ const BrowseAndProposeScreen = () => {
     const loadEvent = async () => {
       try {
         setLoading(true);
+        console.log('[BrowseAndProposeScreen] Loading event:', eventId);
         const eventData = await getEventById(eventId);
+        console.log('[BrowseAndProposeScreen] Event loaded:', {
+          hasEventData: !!eventData,
+          eventId: eventData?.id,
+          eventName: eventData?.name,
+          hasEventDates: !!eventData?.eventDates,
+          eventDatesCount: Array.isArray(eventData?.eventDates) ? eventData.eventDates.length : 'N/A',
+          eventDates: eventData?.eventDates,
+          organizerId: eventData?.organizerId,
+          membersCount: Array.isArray(eventData?.members) ? eventData.members.length : 'N/A',
+          memberIds: eventData?.members?.map(m => m.userId) || [],
+          currentUserId: userId,
+          isCurrentUserInMembers: eventData?.members?.some(m => m.userId === userId) || false,
+          isCurrentUserOrganizer: eventData?.organizerId === userId
+        });
         if (eventData) {
           setEvent(eventData);
+        } else {
+          console.warn('[BrowseAndProposeScreen] No event data returned for eventId:', eventId);
         }
       } catch (error) {
-        console.error('Error loading event:', error);
+        console.error('[BrowseAndProposeScreen] Error loading event:', {
+          error,
+          errorCode: error?.code,
+          errorMessage: error?.message,
+          eventId
+        });
         Alert.alert('Error', 'Failed to load event. Please try again.');
       } finally {
         setLoading(false);
@@ -402,9 +621,120 @@ const BrowseAndProposeScreen = () => {
   useEffect(() => {
     if (!event?.id || !db) return;
     
-    const unsubscribeMembers = db.collection('gamingGroups').doc(event.id)
-      .collection('members')
-      .onSnapshot(async (snapshot) => {
+    console.log('[BrowseAndProposeScreen] Setting up members listener for event:', event.id);
+    console.log('[BrowseAndProposeScreen] Current user and event info:', {
+      userId,
+      eventId: event.id,
+      eventOrganizerId: event?.organizerId,
+      eventMemberIds: event?.members?.map(m => m.userId) || [],
+      isCurrentUserOrganizer: event?.organizerId === userId,
+      isCurrentUserInEventMembers: event?.members?.some(m => m.userId === userId) || false,
+      eventMembersCount: event?.members?.length || 0
+    });
+    
+    // Check if member document exists, and create it if missing
+    // This is critical for Firestore rules to work - user must have a member document to read members
+    const ensureMemberDocument = async () => {
+      try {
+        const memberDocRef = db.collection('gamingGroups').doc(event.id)
+          .collection('members').doc(userId);
+        
+        const memberDoc = await memberDocRef.get();
+        
+        if (!memberDoc.exists) {
+          console.log('[BrowseAndProposeScreen] Member document does not exist, creating it...', {
+            eventId: event.id,
+            userId,
+            isInMemberIds: event?.members?.some(m => m.userId === userId) || false,
+            isOrganizer: event?.organizerId === userId
+          });
+          
+          // Only create if user is actually a member (in memberIds or is organizer)
+          const isInMemberIds = event?.members?.some(m => m.userId === userId) || false;
+          const isOrganizer = event?.organizerId === userId;
+          
+          if (isInMemberIds || isOrganizer) {
+            const userName = user?.name || user?.email || userId;
+            const userAvatarUrl = user?.photoURL || user?.avatarUrl || null;
+            
+            await memberDocRef.set({
+              userId,
+              userName: userName || userId,
+              userAvatarUrl: userAvatarUrl || null,
+              role: isOrganizer ? 'organizer' : 'member',
+              joinedAt: firebase.firestore.Timestamp.now(),
+              rsvpStatus: null,
+              rsvpStatuses: {},
+            }, { merge: true });
+            
+            console.log('[BrowseAndProposeScreen] Member document created successfully');
+          } else {
+            console.warn('[BrowseAndProposeScreen] User is not a member, cannot create member document');
+          }
+        } else {
+          console.log('[BrowseAndProposeScreen] Member document exists:', {
+            eventId: event.id,
+            userId,
+            hasData: !!memberDoc.data()
+          });
+        }
+      } catch (error) {
+        console.error('[BrowseAndProposeScreen] Error ensuring member document:', {
+          error,
+          errorCode: error?.code,
+          errorMessage: error?.message,
+          eventId: event.id,
+          userId
+        });
+      }
+    };
+    
+    // Set up members listener after ensuring member document exists
+    // This is critical - the Firestore rule requires the member document to exist
+    let unsubscribeMembers = null;
+    
+    ensureMemberDocument()
+      .then(() => {
+        // Also try to check if user can read the group document directly
+        return db.collection('gamingGroups').doc(event.id).get()
+          .then((groupDoc) => {
+            if (groupDoc.exists) {
+              const groupData = groupDoc.data();
+              console.log('[BrowseAndProposeScreen] Group document read successful:', {
+                groupId: event.id,
+                memberIds: groupData.memberIds || [],
+                isActive: groupData.isActive,
+                deletedAt: groupData.deletedAt,
+                isCurrentUserInMemberIds: (groupData.memberIds || []).includes(userId),
+                isCurrentUserOrganizer: groupData.organizerId === userId
+              });
+            } else {
+              console.warn('[BrowseAndProposeScreen] Group document does not exist:', event.id);
+            }
+          })
+          .catch((error) => {
+            console.error('[BrowseAndProposeScreen] Error reading group document:', {
+              error,
+              errorCode: error?.code,
+              errorMessage: error?.message
+            });
+          });
+      })
+      .then(() => {
+        // Now set up the members listener after member document is ensured
+        console.log('[BrowseAndProposeScreen] Setting up members listener after ensuring member document');
+        unsubscribeMembers = db.collection('gamingGroups').doc(event.id)
+          .collection('members')
+          .onSnapshot(async (snapshot) => {
+        console.log('[BrowseAndProposeScreen] Members snapshot received:', {
+          size: snapshot.size,
+          empty: snapshot.empty,
+          eventId: event.id,
+          hasMetadata: !!snapshot.metadata,
+          fromCache: snapshot.metadata?.fromCache,
+          hasPendingWrites: snapshot.metadata?.hasPendingWrites
+        });
+        
         const membersList = [];
         const rsvps = {};
         const names = {};
@@ -413,17 +743,29 @@ const BrowseAndProposeScreen = () => {
         snapshot.forEach((doc) => {
           const data = doc.data();
           const userId = doc.id;
+          console.log(`[BrowseAndProposeScreen] Processing member document ${userId}:`, {
+            hasRsvpStatuses: !!data.rsvpStatuses,
+            hasRsvpStatus: !!data.rsvpStatus,
+            rsvpStatuses: data.rsvpStatuses,
+            rsvpStatus: data.rsvpStatus,
+            userName: data.userName,
+            hasUserAvatarUrl: !!data.userAvatarUrl
+          });
+          
           membersList.push({ id: userId, userId, ...data });
           
           // Extract RSVP data from member document
           if (data.rsvpStatuses && typeof data.rsvpStatuses === 'object') {
             // New format: rsvpStatuses is an object with date keys
             rsvps[userId] = { ...data.rsvpStatuses };
+            console.log(`[BrowseAndProposeScreen] Member ${userId} RSVPs (new format):`, rsvps[userId]);
           } else if (data.rsvpStatus) {
             // Legacy format: single rsvpStatus field
             rsvps[userId] = { default: data.rsvpStatus };
+            console.log(`[BrowseAndProposeScreen] Member ${userId} RSVP (legacy format):`, rsvps[userId]);
           } else {
             rsvps[userId] = {};
+            console.log(`[BrowseAndProposeScreen] Member ${userId} has no RSVP data`);
           }
           
           // Extract name and avatar from member document
@@ -433,6 +775,16 @@ const BrowseAndProposeScreen = () => {
           if (data.userAvatarUrl) {
             avatars[userId] = data.userAvatarUrl;
           }
+        });
+        
+        console.log('[BrowseAndProposeScreen] Members loaded:', {
+          count: membersList.length,
+          memberIds: membersList.map(m => m.userId),
+          rsvpsCount: Object.keys(rsvps).length,
+          rsvpsKeys: Object.keys(rsvps),
+          rsvpsData: rsvps,
+          namesCount: Object.keys(names).length,
+          avatarsCount: Object.keys(avatars).length
         });
         
         setMembers(membersList);
@@ -470,19 +822,39 @@ const BrowseAndProposeScreen = () => {
         
         setMemberNames(names);
         setMemberAvatars(avatars);
-      }, (error) => {
-        console.error('[BrowseAndProposeScreen] Error loading members:', error);
-        // Set empty arrays on error to prevent crashes
-        setMembers([]);
-        setMemberRSVPs({});
-        setMemberNames({});
-        setMemberAvatars({});
+          }, (error) => {
+            console.error('[BrowseAndProposeScreen] Error loading members:', {
+              error,
+              errorCode: error?.code,
+              errorMessage: error?.message,
+              errorStack: error?.stack,
+              eventId: event?.id,
+              hasDb: !!db,
+              userId
+            });
+            // Set empty arrays on error to prevent crashes
+            setMembers([]);
+            setMemberRSVPs({});
+            setMemberNames({});
+            setMemberAvatars({});
+          });
+      })
+      .catch((error) => {
+        console.error('[BrowseAndProposeScreen] Error setting up members listener:', {
+          error,
+          errorCode: error?.code,
+          errorMessage: error?.message,
+          eventId: event.id,
+          userId
+        });
       });
     
     return () => {
-      unsubscribeMembers();
+      if (unsubscribeMembers) {
+        unsubscribeMembers();
+      }
     };
-  }, [event?.id, db]);
+  }, [event?.id, db, userId, user]);
   
   // Load proposed games (nominations)
   useEffect(() => {
@@ -622,6 +994,34 @@ const BrowseAndProposeScreen = () => {
         return;
       }
       
+      // Ensure member document exists - create it if missing
+      // This is needed for Firestore rules to work properly
+      if (!hasMemberDoc && (isInMemberIds || isOrganizer)) {
+        try {
+          const membersRef = db.collection('gamingGroups').doc(event.id)
+            .collection('members').doc(userId);
+          
+          // Get user data
+          const userName = user?.name || user?.email || userId;
+          const userAvatarUrl = user?.photoURL || user?.avatarUrl || null;
+          
+          await membersRef.set({
+            userId,
+            userName: userName || userId,
+            userAvatarUrl: userAvatarUrl || null,
+            role: isOrganizer ? 'organizer' : 'member',
+            joinedAt: firebase.firestore.Timestamp.now(),
+            rsvpStatus: null,
+            rsvpStatuses: {},
+          }, { merge: true });
+          
+          console.log('[BrowseAndPropose] Created missing member document');
+        } catch (memberDocError) {
+          console.warn('[BrowseAndPropose] Error creating member document:', memberDocError);
+          // Continue anyway - the user is still a member, just might have permission issues
+        }
+      }
+      
       const proposalDoc = {
         gameId,
         gameName: game.title || 'Unknown Game',
@@ -637,10 +1037,16 @@ const BrowseAndProposeScreen = () => {
         documentPath: `gamingGroups/${event.id}/nominations/${gameId}`,
       });
       
+      // Ensure nominatedBy is explicitly set for Firestore rule validation
+      const finalProposalDoc = {
+        ...proposalDoc,
+        nominatedBy: userId, // Explicitly ensure this field is set
+      };
+      
       await db.collection('gamingGroups').doc(event.id)
         .collection('nominations')
         .doc(gameId)
-        .set(proposalDoc, { merge: true });
+        .set(finalProposalDoc, { merge: true });
       
       console.log('[BrowseAndPropose] Proposal saved successfully');
       
@@ -680,6 +1086,37 @@ const BrowseAndProposeScreen = () => {
   const handleCloseRatingModal = () => {
     setShowRatingModal(false);
     setRatingModalGame(null);
+  };
+
+  const handleOpenPersonalMatch = (game) => {
+    if (!userId) {
+      Alert.alert('Sign In Required', 'Please sign in to see Beeple\'s recommendations.');
+      return;
+    }
+    
+    const userCollection = collections[userId] || [];
+    if (userCollection.length === 0) {
+      Alert.alert('No Collection', 'Add games to your collection to see Beeple\'s recommendations.');
+      return;
+    }
+    
+    // Get BGG data for the game if not already loaded
+    const gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[game.bggId || game.id] };
+    
+    // Get user's custom weights if available
+    const customWeights = user?.personalMatchWeights || null;
+    
+    const recommendation = findGameSimilarities(gameWithBggData, userCollection, customWeights);
+    
+    setPersonalMatchGame(game);
+    setPersonalMatchText(recommendation);
+    setShowPersonalMatchModal(true);
+  };
+
+  const handleClosePersonalMatchModal = () => {
+    setShowPersonalMatchModal(false);
+    setPersonalMatchGame(null);
+    setPersonalMatchText(null);
   };
 
   const handleRateGame = async (gameId, newRating) => {
@@ -777,7 +1214,7 @@ const BrowseAndProposeScreen = () => {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* Event Details Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Game Night Details</Text>
+          <Text style={styles.sectionTitle}>Gaming Group Details</Text>
           <View style={styles.eventDetailsCard}>
             <Text style={styles.eventName}>{event.name}</Text>
             <View style={styles.eventDetailRow}>
@@ -803,7 +1240,13 @@ const BrowseAndProposeScreen = () => {
             )}
             <View style={styles.eventDetailRow}>
               <Text style={styles.eventDetailLabel}>Confirmed Attendees:</Text>
-              <Text style={styles.eventDetailValue}>{confirmedAttendees.length}</Text>
+              <Text style={styles.eventDetailValue}>
+                {(() => {
+                  const count = Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0;
+                  console.log('[BrowseAndProposeScreen] Rendering confirmed attendees count:', count, 'confirmedAttendees:', confirmedAttendees);
+                  return count;
+                })()}
+              </Text>
             </View>
           </View>
         </View>
@@ -821,6 +1264,7 @@ const BrowseAndProposeScreen = () => {
               const proposerId = proposal.proposedBy;
               const proposerName = memberNames[proposerId] || proposerId;
               const proposerAvatar = memberAvatars[proposerId] || null;
+              const proposalVibeScore = vibeScores[gameId];
               
               return (
                 <View key={gameId} style={styles.proposedGameItem}>
@@ -839,7 +1283,15 @@ const BrowseAndProposeScreen = () => {
                       </View>
                     )}
                     <View style={styles.proposedGameInfo}>
-                      <Text style={styles.proposedGameTitle}>{proposal.gameName}</Text>
+                      <View style={styles.proposedGameTitleRow}>
+                        <Text style={styles.proposedGameTitle}>{proposal.gameName}</Text>
+                        {userId && proposalVibeScore !== undefined && proposalVibeScore !== null && (
+                          <View style={styles.proposedGameVibeScore}>
+                            <Text style={styles.vibeScoreIconSmall}>📊</Text>
+                            <Text style={styles.vibeScoreTextSmall}>{proposalVibeScore}</Text>
+                          </View>
+                        )}
+                      </View>
                       <View style={styles.proposedByContainer}>
                         <Text style={styles.proposedByLabel}>Proposed by </Text>
                         <TouchableOpacity
@@ -902,9 +1354,12 @@ const BrowseAndProposeScreen = () => {
         
         {/* Super Collection Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Browse Collections</Text>
+          <Text style={styles.sectionTitle}>Propose a Game</Text>
           <Text style={styles.sectionCopy}>
             {Array.isArray(enrichedGames) ? enrichedGames.length : 0} {Array.isArray(enrichedGames) && enrichedGames.length === 1 ? 'game' : 'games'} from {Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0} {Array.isArray(confirmedAttendees) && confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
+          </Text>
+          <Text style={styles.sectionCopy}>
+            Tap "Beeple Recommends" on any game to see personalized recommendations based on your collection.
           </Text>
           
           {!Array.isArray(enrichedGames) || enrichedGames.length === 0 ? (
@@ -918,6 +1373,8 @@ const BrowseAndProposeScreen = () => {
                   const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
                   const canPropose = userProposals.size < 5 || isProposedByUser;
                   const owners = game._owners || [];
+                  
+                  const vibeScore = vibeScores[gameId];
                   
                   return (
                     <View key={gameId || `game-${idx}`} style={styles.gameCardWrapper}>
@@ -935,19 +1392,35 @@ const BrowseAndProposeScreen = () => {
                           />
                         </Pressable>
                       </View>
-                      {!isProposedByUser && canPropose && (
-                        <TouchableOpacity
-                          style={styles.proposeGameButton}
-                          onPress={() => handleProposeGame(game)}
-                        >
-                          <Text style={styles.proposeGameButtonText}>Propose</Text>
-                        </TouchableOpacity>
-                      )}
-                      {isProposedByUser && (
-                        <View style={styles.proposedBadge}>
-                          <Text style={styles.proposedBadgeText}>Proposed</Text>
+                      {userId && vibeScore !== undefined && vibeScore !== null && (
+                        <View style={styles.vibeScoreBadge}>
+                          <Text style={styles.vibeScoreIcon}>📊</Text>
+                          <Text style={styles.vibeScoreText}>{vibeScore}</Text>
                         </View>
                       )}
+                      <View style={styles.gameActionsContainer}>
+                        {!isProposedByUser && canPropose && (
+                          <TouchableOpacity
+                            style={styles.proposeGameButton}
+                            onPress={() => handleProposeGame(game)}
+                          >
+                            <Text style={styles.proposeGameButtonText}>Propose</Text>
+                          </TouchableOpacity>
+                        )}
+                        {isProposedByUser && (
+                          <View style={styles.proposedBadge}>
+                            <Text style={styles.proposedBadgeText}>Proposed</Text>
+                          </View>
+                        )}
+                        {userId && (
+                          <TouchableOpacity
+                            style={styles.personalMatchButton}
+                            onPress={() => handleOpenPersonalMatch(game)}
+                          >
+                            <Text style={styles.personalMatchButtonText}>Beeple Recommends</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
                     </View>
                   );
                 }) : null}
@@ -996,6 +1469,7 @@ const BrowseAndProposeScreen = () => {
             setSelectedGame(null);
           }}
           owners={selectedGame._owners || []}
+          eventId={eventId}
         />
       )}
 
@@ -1069,6 +1543,73 @@ const BrowseAndProposeScreen = () => {
           userName={selectedUserForProfile.userName}
           avatarUrl={selectedUserForProfile.avatarUrl}
         />
+      )}
+
+      {/* Beeple Recommends Modal */}
+      {showPersonalMatchModal && personalMatchGame && (
+        <Modal
+          isOpen={showPersonalMatchModal}
+          onClose={handleClosePersonalMatchModal}
+          title={`Beeple Recommends: ${personalMatchGame.title || personalMatchGame.name || 'Game'}`}
+        >
+          <View style={styles.personalMatchModalContent}>
+            <View style={styles.beepleHeader}>
+              <BeepleAvatar size={50} />
+              <View style={styles.beepleHeaderText}>
+                <Text style={styles.beepleName}>Beeple</Text>
+                <Text style={styles.beepleSubtitle}>Your Game Recommendation Bot</Text>
+              </View>
+            </View>
+            {personalMatchText ? (
+              <Text style={styles.personalMatchText}>{personalMatchText}</Text>
+            ) : (
+              <Text style={styles.personalMatchText}>
+                Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities between this game and your collection. 
+                Try adding more games to your collection so I can give you better recommendations!
+              </Text>
+            )}
+            <TouchableOpacity
+              style={styles.customizeWeightsLink}
+              onPress={() => {
+                setShowPersonalMatchModal(false);
+                setShowPersonalMatchSettings(true);
+              }}
+            >
+              <Text style={styles.customizeWeightsLinkText}>
+                ⚙️ Customize Beeple's recommendation weights
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      )}
+
+      {/* Beeple Recommends Settings Modal */}
+      {showPersonalMatchSettings && (
+        <Modal
+          isOpen={showPersonalMatchSettings}
+          onClose={() => {
+            setShowPersonalMatchSettings(false);
+            // Optionally reopen the personal match modal after closing settings
+            // setShowPersonalMatchModal(true);
+          }}
+          title="Beeple's Recommendation Weights"
+        >
+          <PersonalMatchSettings
+            onSave={() => {
+              setShowPersonalMatchSettings(false);
+              // Refresh the personal match if we had one open
+              if (personalMatchGame) {
+                const gameWithBggData = personalMatchGame._bggData 
+                  ? personalMatchGame 
+                  : { ...personalMatchGame, _bggData: gamesWithBggData[personalMatchGame.bggId || personalMatchGame.id] };
+                const customWeights = user?.personalMatchWeights || null;
+                const recommendation = findGameSimilarities(gameWithBggData, collections[userId] || [], customWeights);
+                setPersonalMatchText(recommendation);
+                setShowPersonalMatchModal(true);
+              }
+            }}
+          />
+        </Modal>
       )}
     </View>
   );
@@ -1194,11 +1735,35 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
+  proposedGameTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.xs,
+  },
   proposedGameTitle: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.xs,
+    flex: 1,
+    marginRight: theme.spacing.sm,
+  },
+  proposedGameVibeScore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.woodLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.sm,
+  },
+  vibeScoreIconSmall: {
+    fontSize: 12,
+    marginRight: 4,
+  },
+  vibeScoreTextSmall: {
+    fontSize: 12,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
   },
   proposedGameSubtext: {
     fontSize: theme.typography.fontSize.xs,
@@ -1410,6 +1975,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...theme.shadows.card,
   },
+  gameActionsContainer: {
+    width: '100%',
+  },
   selectableGameCardWrapper: {
     width: '100%',
     marginBottom: -theme.spacing.md, // Counteract GameCard's marginBottom to connect button flush
@@ -1424,13 +1992,97 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
-    borderBottomLeftRadius: theme.borderRadius.lg,
-    borderBottomRightRadius: theme.borderRadius.lg,
     borderTopWidth: 1,
     borderTopColor: 'rgba(201, 183, 156, 0.5)', // Subtle border matching card border for visual continuity
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
+  },
+  personalMatchButton: {
+    backgroundColor: '#FF8C00',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: theme.borderRadius.lg,
+    borderBottomRightRadius: theme.borderRadius.lg,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(201, 183, 156, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  personalMatchButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  personalMatchModalContent: {
+    paddingVertical: theme.spacing.md,
+  },
+  beepleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.woodMedium,
+  },
+  beepleHeaderText: {
+    marginLeft: theme.spacing.md,
+    flex: 1,
+  },
+  beepleName: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
+  },
+  beepleSubtitle: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+  },
+  personalMatchText: {
+    fontSize: theme.typography.fontSize.base,
+    lineHeight: 24,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+  },
+  customizeWeightsLink: {
+    marginTop: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.woodLight,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    alignItems: 'center',
+  },
+  customizeWeightsLinkText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.medium,
+  },
+  vibeScoreBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.woodLight,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(201, 183, 156, 0.5)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(201, 183, 156, 0.5)',
+  },
+  vibeScoreIcon: {
+    fontSize: 14,
+    marginRight: 4,
+  },
+  vibeScoreText: {
+    fontSize: 12,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
   },
   proposeGameButtonText: {
     fontSize: 12,

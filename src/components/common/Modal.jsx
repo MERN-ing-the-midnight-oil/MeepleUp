@@ -77,6 +77,8 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
                   showsVerticalScrollIndicator={true}
                   style={[styles.scrollView, { maxHeight: maxScrollHeight }]}
                   nestedScrollEnabled={true}
+                  removeClippedSubviews={false}
+                  maintainVisibleContentPosition={null}
                 >
                   {children}
                 </ScrollView>
@@ -122,6 +124,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
     position: 'relative',
     flexDirection: 'column',
+    flexShrink: 0,
     // Responsive padding
     ...(Platform.OS === 'web' ? {} : {
       paddingHorizontal: theme.spacing.lg,

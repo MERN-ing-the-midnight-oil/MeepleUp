@@ -7,8 +7,8 @@ const MEEPLE_PATH = 'M9 20h-5a1 1 0 0 1 -1 -1c0 -2 3.378 -4.907 4 -6c-1 0 -4 -.5
 const LAYER_CONFIGS = {
   background: {
     sizeRange: [25, 45],
-    speedRange: [6, 10], // seconds
-    opacityRange: [0.7, 0.9], // Inverted: smallest figures are darkest
+    speedRange: [15, 20], // seconds - small and slow
+    opacityRange: [0.7, 0.9], // Smallest figures are darkest (high opacity)
     tiltRange: [-20, 20],
     spawnWeight: 0.55, // 50-60% of meeples
   },
@@ -21,8 +21,8 @@ const LAYER_CONFIGS = {
   },
   foreground: {
     sizeRange: [80, 120],
-    speedRange: [15, 20],
-    opacityRange: [0.15, 0.25], // Inverted: largest figures are most transparent
+    speedRange: [6, 10], // seconds - big and fast
+    opacityRange: [0.15, 0.25], // Largest figures are lightest (low opacity)
     tiltRange: [-20, 20],
     spawnWeight: 0.10, // 10-15% of meeples
   },
@@ -124,6 +124,9 @@ const ParallaxBackground = ({ children, enabled = true }) => {
       tilt,
       startTime: Date.now(),
     };
+    
+    // Debug: verify opacity values are correct
+    // console.log(`Spawned ${layer} meeple: size=${size.toFixed(1)}, speed=${speed.toFixed(1)}, opacity=${opacity.toFixed(2)}`);
     
     setParticles(prev => [...prev, particle]);
     

@@ -8,6 +8,11 @@ import { useCollections } from '../context/CollectionsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { theme, commonStyles } from '../utils/theme';
+import { findGameSimilarities } from '../utils/gameSimilarities';
+import PersonalMatchSettings from '../components/PersonalMatchSettings';
+import BeepleAvatar from '../components/BeepleAvatar';
+import { getVibeScore, calculateVibeScoresForGame } from '../services/vibeScores';
+import { calculateVibeScore } from '../utils/vibeScore';
 
 const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [] }) => {
   const { user } = useAuth();
@@ -17,6 +22,10 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   const [starRating, setStarRating] = useState(0);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [showPersonalMatch, setShowPersonalMatch] = useState(false);
+  const [personalMatchText, setPersonalMatchText] = useState(null);
+  const [showPersonalMatchSettings, setShowPersonalMatchSettings] = useState(false);
+  const [vibeScore, setVibeScore] = useState(null);
   const isMountedRef = useRef(true);
   const userId = user?.uid || user?.id;
 
@@ -51,6 +60,55 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
       setBggData(preloadedBggData);
     }
   }, [preloadedBggData, game?.id, game?.bggId]);
+
+  // Load vibe score when game or eventId changes
+  useEffect(() => {
+    if (!game || !eventId || !userId) {
+      setVibeScore(null);
+      return;
+    }
+
+    const loadVibeScore = async () => {
+      const gameId = game.bggId || game.id;
+      if (!gameId) {
+        setVibeScore(null);
+        return;
+      }
+
+      try {
+        // Try to get stored score first
+        const storedScore = await getVibeScore(eventId, gameId, userId);
+        if (storedScore !== null) {
+          setVibeScore(storedScore);
+        } else {
+          // Calculate on-demand if not stored
+          const userCollection = collections[userId] || [];
+          if (userCollection.length > 0) {
+            const gameWithBggData = {
+              ...game,
+              _bggData: bggData || preloadedBggData,
+            };
+            const customWeights = user?.personalMatchWeights || null;
+            const score = calculateVibeScore(gameWithBggData, userCollection, customWeights);
+            setVibeScore(score);
+            // Store it for future use (non-blocking)
+            if (score !== null && collections) {
+              calculateVibeScoresForGame(eventId, gameId, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
+                console.warn('[GameDetailsModal] Error storing vibe score:', err);
+              });
+            }
+          } else {
+            setVibeScore(null);
+          }
+        }
+      } catch (error) {
+        console.warn('[GameDetailsModal] Error loading vibe score:', error);
+        setVibeScore(null);
+      }
+    };
+
+    loadVibeScore();
+  }, [game?.id, game?.bggId, eventId, userId, bggData, preloadedBggData, collections, user?.personalMatchWeights]);
 
   // Initialize badges and rating from preloaded data
   const initializedRef = useRef(false);
@@ -213,6 +271,33 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
     }
   };
 
+  const handlePersonalMatch = () => {
+    if (!userId) {
+      Alert.alert('Sign In Required', 'Please sign in to see Beeple\'s recommendations.');
+      return;
+    }
+    
+    const userCollection = collections[userId] || [];
+    if (userCollection.length === 0) {
+      Alert.alert('No Collection', 'Add games to your collection to see Beeple\'s recommendations.');
+      return;
+    }
+    
+    // Combine game data with BGG data
+    const gameWithBggData = {
+      ...game,
+      _bggData: bggData || preloadedBggData,
+    };
+    
+    // Get user's custom weights if available
+    const customWeights = user?.personalMatchWeights || null;
+    
+    const recommendation = findGameSimilarities(gameWithBggData, userCollection, customWeights);
+    
+    setPersonalMatchText(recommendation);
+    setShowPersonalMatch(true);
+  };
+
   // Guard against invalid game data
   if (!game || (typeof game !== 'object')) {
     console.log('[GameDetailsModal] Guard clause: game is invalid', { game, isOpen });
@@ -229,6 +314,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   });
 
   return (
+    <>
     <Modal
       visible={modalVisible}
       animationType="slide"
@@ -275,6 +361,17 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
 
           {/* Game Details */}
           <View style={styles.modalDetails}>
+            {/* Vibe Score */}
+            {vibeScore !== null && vibeScore !== undefined && userId && (
+              <View style={styles.vibeScoreContainer}>
+                <Text style={styles.vibeScoreLabel}>📊 Personal Vibe Score</Text>
+                <Text style={styles.vibeScoreValue}>{vibeScore}</Text>
+                <Text style={styles.vibeScoreDescription}>
+                  Based on your collection and preferences
+                </Text>
+              </View>
+            )}
+
             {/* Year and Rating */}
             <View style={styles.modalMetaRow}>
               {year && (
@@ -373,6 +470,63 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
+            {/* Beeple Recommends Section */}
+            {userId && (
+              <View style={styles.modalTeachingSection}>
+                <View style={styles.beepleSectionHeader}>
+                  <BeepleAvatar size={40} />
+                  <View style={styles.beepleSectionHeaderText}>
+                    <Text style={[styles.modalMetaLabel, { marginBottom: 4 }]}>
+                      Beeple Recommends
+                    </Text>
+                    <Text style={styles.modalTeachingHint}>
+                      See why Beeple thinks you might like this game.
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.personalMatchButton}
+                  onPress={handlePersonalMatch}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.personalMatchButtonText}>
+                    Ask Beeple
+                  </Text>
+                </TouchableOpacity>
+                {showPersonalMatch && personalMatchText && (
+                  <View style={styles.personalMatchResult}>
+                    <View style={styles.beepleMessageHeader}>
+                      <BeepleAvatar size={32} />
+                      <Text style={styles.beepleMessageName}>Beeple</Text>
+                    </View>
+                    <Text style={styles.personalMatchText}>{personalMatchText}</Text>
+                  </View>
+                )}
+                {showPersonalMatch && !personalMatchText && (
+                  <View style={styles.personalMatchResult}>
+                    <View style={styles.beepleMessageHeader}>
+                      <BeepleAvatar size={32} />
+                      <Text style={styles.beepleMessageName}>Beeple</Text>
+                    </View>
+                    <Text style={styles.personalMatchText}>
+                      Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities between this game and your collection. 
+                      Try adding more games to your collection so I can give you better recommendations!
+                    </Text>
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.customizeWeightsLink}
+                  onPress={() => {
+                    setShowPersonalMatchSettings(true);
+                  }}
+                >
+                  <Text style={styles.customizeWeightsLinkText}>
+                    ⚙️ Customize Beeple's recommendation weights
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Favorite Section - Only show if user owns the game */}
             {userId && game && userOwnsGame && (
               <View style={styles.modalTeachingSection}>
@@ -402,7 +556,34 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </Modal>
+      </Modal>
+      {showPersonalMatchSettings && (
+        <Modal
+          isOpen={showPersonalMatchSettings}
+          onClose={() => {
+            setShowPersonalMatchSettings(false);
+          }}
+          title="Beeple's Recommendation Weights"
+        >
+          <PersonalMatchSettings
+            onSave={() => {
+              setShowPersonalMatchSettings(false);
+              // Refresh the personal match if it was shown
+              if (showPersonalMatch && game) {
+                const userCollection = collections[userId] || [];
+                const gameWithBggData = {
+                  ...game,
+                  _bggData: bggData || preloadedBggData,
+                };
+                const customWeights = user?.personalMatchWeights || null;
+                const recommendation = findGameSimilarities(gameWithBggData, userCollection, customWeights);
+                setPersonalMatchText(recommendation);
+              }
+            }}
+          />
+        </Modal>
+      )}
+    </>
   );
 };
 
@@ -681,6 +862,95 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4a90e2',
     fontWeight: '500',
+  },
+  personalMatchButton: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#FF8C00',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  personalMatchButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF8C00',
+  },
+  personalMatchResult: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#FFF9E6',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD700',
+  },
+  beepleSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  beepleSectionHeaderText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  beepleMessageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  beepleMessageName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  personalMatchText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333',
+  },
+  customizeWeightsLink: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+  },
+  customizeWeightsLinkText: {
+    fontSize: 12,
+    color: '#dc2626',
+    fontWeight: '500',
+  },
+  vibeScoreContainer: {
+    backgroundColor: '#FFF9E6',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    alignItems: 'center',
+  },
+  vibeScoreLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  vibeScoreValue: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#dc2626',
+    marginBottom: 4,
+  },
+  vibeScoreDescription: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
   },
 });
 

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -47,6 +47,19 @@ const ensureFontFamily = (existingStyle) => {
 Text.defaultProps.style = ensureFontFamily(Text.defaultProps.style);
 TextInput.defaultProps.style = ensureFontFamily(TextInput.defaultProps?.style);
 
+// Screen wrapper components to avoid inline functions
+const LandingWrapper = () => (
+  <AnimatedBackground>
+    <LandingScreen />
+  </AnimatedBackground>
+);
+
+const AuthWrapper = () => (
+  <AnimatedBackground>
+    <AuthScreen />
+  </AnimatedBackground>
+);
+
 function AppNavigator() {
   const { user } = useAuth();
   const isAuthenticated = !!user;
@@ -61,8 +74,6 @@ function AppNavigator() {
   const handleStateChange = () => {
     setCurrentRouteName(navigationRef.getCurrentRoute()?.name);
   };
-
-  // Screen components - no parallax wrapper for now
 
   return (
     <NavigationContainer
@@ -83,19 +94,11 @@ function AppNavigator() {
           <>
             <Stack.Screen 
               name="Landing" 
-              component={() => (
-                <AnimatedBackground>
-                  <LandingScreen />
-                </AnimatedBackground>
-              )} 
+              component={LandingWrapper} 
             />
             <Stack.Screen 
               name="Auth" 
-              component={() => (
-                <AnimatedBackground>
-                  <AuthScreen />
-                </AnimatedBackground>
-              )} 
+              component={AuthWrapper} 
             />
           </>
         )}

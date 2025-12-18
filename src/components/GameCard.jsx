@@ -383,12 +383,12 @@ const styles = StyleSheet.create({
     gap: theme.spacing.xs,
   },
   ratingText: {
-    fontSize: 11,
+    fontSize: 16,
     color: theme.colors.meepleYellow,
     fontWeight: theme.typography.fontWeight.semibold,
   },
   ratingNumber: {
-    fontSize: 10,
+    fontSize: 12,
     color: theme.colors.textSecondary,
     fontWeight: theme.typography.fontWeight.medium,
   },

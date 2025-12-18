@@ -1,18 +1,19 @@
 New Test Users Created:
-Alice - alice@meepleup.com
-Bob - bob@meepleup.com
-    cruel amber wizard
-Charlie - charlie@meepleup.com
-Diana - diana@meepleup.com
-Eve - eve@meepleup.com
-Frank - frank@meepleup.com
+Alice - alice@email.com
+    clean greek hunter
+Bob - bob@email.com
+    rough tan reaver
+Charlie - charlie@email.com
+Diana - diana@email.com
+Eve - eve@email.com
+Frank - frank@email.com
 
 
 Priorities
 
 Test group library and star rating system. (propose games)
 
-Have game optimizer for voted on games
+Have game optimizer for voted on games that considers "best number of players" and star ratings. 
 
 Add "start with google" start with email, start with apple
 
@@ -60,3 +61,58 @@ card stock Dice towers giveaway?
 Marketing= USe AI to target real game shops. Tailor letters, include 50 cents postage worth of flyers, use old stamps. Real paper campaign? Give codes for hosting . Tear off codes, some better than others. 
 
 Tailor landing page to zip code ie "made in State of Washington, Made in Pacific Northwest, made with love by a mom and pop web dev.
+
+
+
+Stats and info retrieved from BGG API calls:
+Basic Game Information
+id - BGG game ID (integer)
+name - Primary game name (string)
+alternateNames - Array of alternate names with types (e.g., alternate, expansion)
+yearPublished - Year the game was published (integer)
+description - Game description (HTML stripped, plain text)
+thumbnail - URL to thumbnail image
+image - URL to full-size image
+Player & Time Information
+minPlayers - Minimum number of players (integer)
+maxPlayers - Maximum number of players (integer)
+bestPlayerCount - Best player count from community polls (string, e.g., "4")
+playingTime - Average playing time in minutes (integer)
+minPlayTime - Minimum playing time in minutes (integer)
+maxPlayTime - Maximum playing time in minutes (integer)
+minAge - Minimum recommended age (integer)
+Ratings & Statistics
+average - Average rating (float, typically 1-10)
+bayesAverage - Bayesian average rating (float)
+usersRated - Number of users who rated the game (integer)
+rank - Overall BGG board game rank (integer)
+complexity - Game complexity/weight rating (float, typically 1-5)
+ownedCount - Number of users who own the game (integer)
+Category Ranks
+strategyGamesRank - Rank in Strategy Games category (string)
+familyGamesRank - Rank in Family Games category (string)
+partyGamesRank - Rank in Party Games category (string)
+abstractsRank - Rank in Abstract Games category (string)
+thematicRank - Rank in Thematic Games category (string)
+wargamesRank - Rank in War Games category (string)
+childrensGamesRank - Rank in Children's Games category (string)
+cgsRank - Rank in CCG/Customizable Games category (string)
+Game Attributes (Arrays)
+mechanics - Array of game mechanics (e.g., "Dice Rolling", "Worker Placement")
+categories - Array of game categories/themes (e.g., "Economic", "Fantasy")
+designers - Array of designer names
+publishers - Array of publisher names
+artists - Array of artist names
+Community Polls
+languageDependence - Language dependence level from polls (string, e.g., "No necessary in-game text")
+suggestedPlayerAge - Suggested player age from polls (string)
+Physical Properties
+weight - Physical weight of the game (float, in pounds/kilograms)
+dimensions - Physical dimensions (currently not extracted, returns null)
+Note: The API calls use stats=1 parameter to include rating statistics. Search results return only id, name, and yearPublished; full details are fetched via fetchBGGGameDetails() or fetchBGGGameDetailsBatch() for multiple games.
+
+
+
+
+
+Have slider controls for how much I like "publisher, theme, mechanics...  for beeple to use to give games a vibe score

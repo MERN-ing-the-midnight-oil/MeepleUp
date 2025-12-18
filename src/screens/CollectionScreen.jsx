@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDimensions, ScrollView } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
@@ -30,6 +30,50 @@ const CollectionScreen = () => {
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [showTextListModal, setShowTextListModal] = useState(false);
+  
+  // Refs to maintain scroll position when sort changes
+  const flatListRef = useRef(null);
+  const scrollViewRef = useRef(null);
+  const scrollPositionRef = useRef(0);
+  
+  // Handler to change sort while preserving scroll position
+  const handleSortChange = useCallback((newSortBy) => {
+    // Update sort - scroll position is already tracked in scrollPositionRef via onScroll
+    setSortBy(newSortBy);
+  }, []);
+  
+  // Restore scroll position after sort changes
+  useEffect(() => {
+    // Only restore if we have a saved position > 0 (not at top)
+    if (scrollPositionRef.current <= 0) return;
+    
+    // Use requestAnimationFrame to ensure layout has updated
+    requestAnimationFrame(() => {
+      // Use a small delay to ensure content has rendered
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToOffset({ 
+            offset: scrollPositionRef.current, 
+            animated: false 
+          });
+        }
+        if (scrollViewRef.current) {
+          scrollViewRef.current.scrollTo({ 
+            y: scrollPositionRef.current, 
+            animated: false 
+          });
+        }
+      }, 100);
+    });
+  }, [sortBy]);
+  
+  // Track scroll position
+  const handleScroll = useCallback((event) => {
+    const offsetY = event.nativeEvent.contentOffset?.y ?? 0;
+    if (offsetY >= 0) {
+      scrollPositionRef.current = offsetY;
+    }
+  }, []);
   
   // Calculate responsive column count - use 2 columns on mobile when 3 would be too small
   // Threshold: if screen width < 700px, use 2 columns for better card size; otherwise use 3
@@ -433,9 +477,12 @@ const CollectionScreen = () => {
   const renderGamesByCategory = useCallback(() => {
     return (
       <ScrollView 
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.categoryContent}
         showsVerticalScrollIndicator={true}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
       >
         {renderHeader()}
         
@@ -555,7 +602,7 @@ const CollectionScreen = () => {
               <View style={styles.sortButtons}>
                 <Pressable
                   style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
-                  onPress={() => setSortBy('rating')}
+                  onPress={() => handleSortChange('rating')}
                 >
                   <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
                     ⭐ Rating
@@ -563,7 +610,7 @@ const CollectionScreen = () => {
                 </Pressable>
                 <Pressable
                   style={[styles.sortButton, sortBy === 'category' && styles.sortButtonActive]}
-                  onPress={() => setSortBy('category')}
+                  onPress={() => handleSortChange('category')}
                 >
                   <Text style={[styles.sortButtonText, sortBy === 'category' && styles.sortButtonTextActive]}>
                     🏷️ Category
@@ -571,7 +618,7 @@ const CollectionScreen = () => {
                 </Pressable>
                 <Pressable
                   style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
-                  onPress={() => setSortBy('title')}
+                  onPress={() => handleSortChange('title')}
                 >
                   <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
                     A-Z
@@ -612,6 +659,7 @@ const CollectionScreen = () => {
             console.log('[CollectionScreen] Rendering FlatList with', sortedCollection.length, 'items');
             return (
               <FlatList
+                ref={flatListRef}
                 data={sortedCollection}
                 keyExtractor={(item) => {
                   const key = item.id;
@@ -644,6 +692,8 @@ const CollectionScreen = () => {
                 updateCellsBatchingPeriod={50}
                 initialNumToRender={5}
                 windowSize={10}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
                 onLayout={() => {
                   console.log('[CollectionScreen] FlatList onLayout called');
                 }}

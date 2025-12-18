@@ -10,7 +10,7 @@ const MEEPLE_PATH = 'M9 20h-5a1 1 0 0 1 -1 -1c0 -2 3.378 -4.907 4 -6c-1 0 -4 -.5
 const LAYER_CONFIGS = {
   background: {
     sizeRange: [25, 45],
-    speedRange: [6000, 10000], // milliseconds
+    speedRange: [15000, 20000], // milliseconds - small and slow
     opacityRange: [0.15, 0.25],
     tiltRange: [-20, 20],
     spawnWeight: 0.55, // 50-60% of meeples
@@ -24,7 +24,7 @@ const LAYER_CONFIGS = {
   },
   foreground: {
     sizeRange: [80, 120],
-    speedRange: [15000, 20000],
+    speedRange: [6000, 10000], // milliseconds - big and fast
     opacityRange: [0.7, 0.9],
     tiltRange: [-20, 20],
     spawnWeight: 0.10, // 10-15% of meeples
@@ -234,7 +234,7 @@ const AnimatedBackground = ({ children, enabled = true }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.bgColor,
+    backgroundColor: '#ffffff', // White background instead of wood color
   },
   content: {
     flex: 1,

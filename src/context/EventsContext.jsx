@@ -494,6 +494,23 @@ export const EventsProvider = ({ children }) => {
         try {
           const eventsRef = db.collection('gamingGroups').doc(baseEvent.id);
           
+          console.log('[EventsContext] createEvent - eventData.eventDates received:', {
+            hasEventDates: !!eventData.eventDates,
+            count: eventData.eventDates?.length || 0,
+            eventDates: eventData.eventDates?.map((ed, index) => ({
+              index,
+              date: ed.date,
+              dateType: typeof ed.date,
+              startTime: ed.startTime,
+              startTimeType: typeof ed.startTime,
+              endTime: ed.endTime,
+              endTimeType: typeof ed.endTime,
+              dateParsed: new Date(ed.date).toISOString(),
+              startTimeParsed: new Date(ed.startTime).toISOString(),
+              endTimeParsed: new Date(ed.endTime).toISOString(),
+            })) || [],
+          });
+          
           // Convert local event format to Firestore format
           const firestoreData = {
             id: baseEvent.id,
@@ -509,16 +526,47 @@ export const EventsProvider = ({ children }) => {
               address: baseEvent.address || baseEvent.exactLocation || '',
             },
             scheduledFor: baseEvent.scheduledFor || null,
-            eventDates: eventData.eventDates ? eventData.eventDates.map(ed => ({
-              date: firebase.firestore.Timestamp.fromDate(new Date(ed.date)),
-              startTime: firebase.firestore.Timestamp.fromDate(new Date(ed.startTime)),
-              endTime: firebase.firestore.Timestamp.fromDate(new Date(ed.endTime)),
-              location: ed.location || '',
-              exactLocation: ed.exactLocation || '',
-              note: ed.note || '',
-            })) : undefined,
-            usualStartTime: eventData.usualStartTime || undefined,
-            usualEndTime: eventData.usualEndTime || undefined,
+            eventDates: eventData.eventDates ? eventData.eventDates.map((ed, index) => {
+              const dateDate = new Date(ed.date);
+              const startTimeDate = new Date(ed.startTime);
+              const endTimeDate = new Date(ed.endTime);
+              
+              const firestoreDate = firebase.firestore.Timestamp.fromDate(dateDate);
+              const firestoreStartTime = firebase.firestore.Timestamp.fromDate(startTimeDate);
+              const firestoreEndTime = firebase.firestore.Timestamp.fromDate(endTimeDate);
+              
+              console.log(`[EventsContext] Converting eventDate ${index + 1} to Firestore:`, {
+                original: {
+                  date: ed.date,
+                  startTime: ed.startTime,
+                  endTime: ed.endTime,
+                },
+                parsed: {
+                  date: dateDate.toISOString(),
+                  startTime: startTimeDate.toISOString(),
+                  endTime: endTimeDate.toISOString(),
+                },
+                firestore: {
+                  date: firestoreDate.toDate().toISOString(),
+                  startTime: firestoreStartTime.toDate().toISOString(),
+                  endTime: firestoreEndTime.toDate().toISOString(),
+                },
+                timestamp: {
+                  date: firestoreDate.seconds,
+                  startTime: firestoreStartTime.seconds,
+                  endTime: firestoreEndTime.seconds,
+                },
+              });
+              
+              return {
+                date: firestoreDate,
+                startTime: firestoreStartTime,
+                endTime: firestoreEndTime,
+                location: ed.location || '',
+                exactLocation: ed.exactLocation || '',
+                note: ed.note || '',
+              };
+            }) : undefined,
             nextEventDate: baseEvent.eventDates && baseEvent.eventDates.length > 0
               ? firebase.firestore.Timestamp.fromDate(new Date(baseEvent.eventDates[0].date))
               : (baseEvent.scheduledFor ? firebase.firestore.Timestamp.fromDate(new Date(baseEvent.scheduledFor)) : null),
@@ -537,7 +585,47 @@ export const EventsProvider = ({ children }) => {
             },
           };
           
+          // Only include usualStartTime and usualEndTime if they're provided (Firestore doesn't allow undefined)
+          if (eventData.usualStartTime) {
+            firestoreData.usualStartTime = firebase.firestore.Timestamp.fromDate(
+              eventData.usualStartTime instanceof Date 
+                ? eventData.usualStartTime 
+                : new Date(eventData.usualStartTime)
+            );
+            console.log('[EventsContext] createEvent - usualStartTime converted:', {
+              original: eventData.usualStartTime,
+              firestore: firestoreData.usualStartTime.toDate().toISOString(),
+            });
+          }
+          if (eventData.usualEndTime) {
+            firestoreData.usualEndTime = firebase.firestore.Timestamp.fromDate(
+              eventData.usualEndTime instanceof Date 
+                ? eventData.usualEndTime 
+                : new Date(eventData.usualEndTime)
+            );
+            console.log('[EventsContext] createEvent - usualEndTime converted:', {
+              original: eventData.usualEndTime,
+              firestore: firestoreData.usualEndTime.toDate().toISOString(),
+            });
+          }
+          
+          console.log('[EventsContext] createEvent - firestoreData being saved:', {
+            ...firestoreData,
+            eventDates: firestoreData.eventDates?.map((ed, index) => ({
+              index,
+              date: ed.date?.toDate?.()?.toISOString() || ed.date,
+              startTime: ed.startTime?.toDate?.()?.toISOString() || ed.startTime,
+              endTime: ed.endTime?.toDate?.()?.toISOString() || ed.endTime,
+              dateTimestamp: ed.date?.seconds || ed.date,
+              startTimeTimestamp: ed.startTime?.seconds || ed.startTime,
+              endTimeTimestamp: ed.endTime?.seconds || ed.endTime,
+            })) || [],
+            scheduledFor: firestoreData.scheduledFor,
+          });
+          
           await eventsRef.set(firestoreData);
+          
+          console.log('[EventsContext] createEvent - Event saved to Firestore successfully');
           
           // Save organizer as member in subcollection
           if (organizerId) {
@@ -831,13 +919,59 @@ export const EventsProvider = ({ children }) => {
               const doc = activeDocs[0];
               const firestoreEvent = doc.data();
               
+              // Get members from subcollection (same as syncEventsFromFirestore)
+              let members = [];
+              try {
+                const membersSnapshot = await db.collection('gamingGroups')
+                  .doc(doc.id)
+                  .collection('members')
+                  .get();
+                
+                members = membersSnapshot.docs.map(memberDoc => {
+                  const memberData = memberDoc.data();
+                  return {
+                    userId: memberData.userId || memberDoc.id,
+                    status: MEMBERSHIP_STATUS.MEMBER,
+                    role: memberData.role || MEMBER_ROLES.MEMBER,
+                    joinedAt: memberData.joinedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                    rsvpStatus: memberData.rsvpStatus || null, // Backward compatibility
+                    rsvpStatuses: memberData.rsvpStatuses || {},
+                    rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || memberData.rsvpUpdatedAt || null,
+                    canShareJoinCode: memberData.canShareJoinCode !== undefined ? memberData.canShareJoinCode : (memberData.role === MEMBER_ROLES.ORGANIZER || memberData.userId === firestoreEvent.organizerId),
+                  };
+                });
+              } catch (membersError) {
+                console.warn('[EventsContext] Error fetching members subcollection, falling back to memberIds:', membersError);
+                // Fallback to memberIds if subcollection fetch fails
+                if (firestoreEvent.memberIds && Array.isArray(firestoreEvent.memberIds)) {
+                  members = firestoreEvent.memberIds.map((memberId) => ({
+                    userId: memberId,
+                    status: MEMBERSHIP_STATUS.MEMBER,
+                    role: memberId === firestoreEvent.organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
+                    joinedAt: firestoreEvent.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                    canShareJoinCode: memberId === firestoreEvent.organizerId,
+                  }));
+                }
+              }
+              
               // Convert Firestore event format to local event format
+              // Match the format used in syncEventsFromFirestore for consistency
               const localEventData = {
                 id: doc.id,
                 name: firestoreEvent.name,
                 organizerId: firestoreEvent.organizerId,
                 description: firestoreEvent.description || '',
                 scheduledFor: firestoreEvent.scheduledFor || firestoreEvent.nextEventDate || '',
+                eventDates: firestoreEvent.eventDates ? firestoreEvent.eventDates.map(ed => ({
+                  date: ed.date?.toDate?.()?.toISOString() || ed.date,
+                  startTime: ed.startTime?.toDate?.()?.toISOString() || ed.startTime,
+                  endTime: ed.endTime?.toDate?.()?.toISOString() || ed.endTime,
+                  location: ed.location || firestoreEvent.location?.name || '',
+                  exactLocation: ed.exactLocation || firestoreEvent.location?.address || '',
+                  note: ed.note || '',
+                })) : undefined,
+                usualStartTime: firestoreEvent.usualStartTime?.toDate?.()?.toISOString() || firestoreEvent.usualStartTime,
+                usualEndTime: firestoreEvent.usualEndTime?.toDate?.()?.toISOString() || firestoreEvent.usualEndTime,
                 createdAt: firestoreEvent.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
                 joinCode: firestoreEvent.joinCode || '',
                 joinCodes: firestoreEvent.joinCodes || (firestoreEvent.joinCode ? [firestoreEvent.joinCode] : []),
@@ -847,14 +981,15 @@ export const EventsProvider = ({ children }) => {
                 generalLocation: firestoreEvent.location?.name || '',
                 exactLocation: firestoreEvent.location?.address || '',
                 visibility: 'private', // All meepleups are private (public feature removed)
-                members: firestoreEvent.memberIds ? firestoreEvent.memberIds.map((memberId, index) => ({
-                  userId: memberId,
-                  status: MEMBERSHIP_STATUS.MEMBER,
-                  role: memberId === firestoreEvent.organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
-                  joinedAt: firestoreEvent.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                })) : [],
-                isActive: firestoreEvent.isActive,
+                members: members,
+                isActive: firestoreEvent.isActive !== false,
                 deletedAt: firestoreEvent.deletedAt?.toDate?.()?.toISOString() || firestoreEvent.deletedAt || null,
+                // Include RSVP settings if they exist
+                rsvpSettings: firestoreEvent.rsvpSettings || {
+                  enabled: true,
+                  allowMaybe: true,
+                  attendanceLimit: null,
+                },
               };
               
               event = normalizeEvent(localEventData);
@@ -917,6 +1052,13 @@ export const EventsProvider = ({ children }) => {
               userAvatarUrl = userDocData?.avatarUrl || '';
             }
             
+            console.log('[EventsContext] Creating/updating member document:', {
+              eventId: event.id,
+              userId,
+              userName,
+              hasUserAvatarUrl: !!userAvatarUrl
+            });
+            
             await membersRef.set({
               userId,
               userName: userName || userId, // Fallback to userId if no name found
@@ -927,15 +1069,64 @@ export const EventsProvider = ({ children }) => {
               rsvpStatuses: {},
             }, { merge: true });
             
+            console.log('[EventsContext] Member document created/updated successfully');
+            
             // Update memberIds array in the group document
+            console.log('[EventsContext] Updating memberIds array in group document');
             await groupRef.update({
               memberIds: firebase.firestore.FieldValue.arrayUnion(userId),
               updatedAt: firebase.firestore.Timestamp.now(),
             });
+            
+            console.log('[EventsContext] Group document updated successfully - user added to memberIds');
+
+            // Calculate vibe scores for new member (background task, non-blocking)
+            try {
+              const { calculateVibeScoresForUser } = await import('../services/vibeScores');
+              // Get user's collection and weights
+              const userGamesSnapshot = await db.collection('userGames').doc(userId).collection('games').get();
+              const userCollection = userGamesSnapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                  id: doc.id,
+                  bggId: data.bggId || null,
+                  mechanics: data.mechanics || null,
+                  categories: data.categories || null,
+                  publishers: data.publishers || null,
+                  publisher: data.publisher || null,
+                  complexity: data.complexity || null,
+                  averageWeight: data.averageWeight || data.complexity || null,
+                  isFavorite: data.isFavorite || false,
+                };
+              });
+
+              // Get user's custom weights
+              const userDoc = await db.collection('users').doc(userId).get();
+              const userData = userDoc.data();
+              const customWeights = userData?.personalMatchWeights || null;
+
+              // Calculate scores in background (don't await)
+              calculateVibeScoresForUser(event.id, userId, userCollection, customWeights).catch(err => {
+                console.warn('[EventsContext] Error calculating vibe scores for new member:', err);
+              });
+            } catch (vibeScoreError) {
+              console.warn('[EventsContext] Error setting up vibe score calculation:', vibeScoreError);
+              // Non-critical, continue
+            }
           }
         } catch (error) {
-          console.error('Error saving membership to Firestore:', error);
+          console.error('[EventsContext] Error saving membership to Firestore:', {
+            error,
+            errorCode: error?.code,
+            errorMessage: error?.message,
+            eventId: event.id,
+            userId
+          });
           // Continue with local join even if Firestore update fails
+          // But log the error so we can debug permission issues
+          if (error?.code === 'permission-denied') {
+            console.warn('[EventsContext] Permission denied when saving membership - user may not be able to access members subcollection');
+          }
         }
       }
 

@@ -30,8 +30,8 @@ const Onboarding = () => {
   const [eventLocation, setEventLocation] = useState('');
   const [eventAddress, setEventAddress] = useState('');
   const [selectedDates, setSelectedDates] = useState([]); // Array of { date: Date, startTime: Date, endTime: Date }
-  const [usualStartTime, setUsualStartTime] = useState(new Date(new Date().setHours(18, 0, 0, 0))); // Default 6 PM
-  const [usualEndTime, setUsualEndTime] = useState(new Date(new Date().setHours(22, 0, 0, 0))); // Default 10 PM
+  const [usualStartTime, setUsualStartTime] = useState(null); // Optional - no default
+  const [usualEndTime, setUsualEndTime] = useState(null); // Optional - no default
   const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'usualStart' | 'usualEnd' | 'start' | 'end', dateIndex: number }
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [eventDescription, setEventDescription] = useState('');
@@ -55,8 +55,8 @@ const Onboarding = () => {
       setEventLocation('');
       setEventAddress('');
       setSelectedDates([]);
-      setUsualStartTime(new Date(new Date().setHours(18, 0, 0, 0)));
-      setUsualEndTime(new Date(new Date().setHours(22, 0, 0, 0)));
+      setUsualStartTime(null);
+      setUsualEndTime(null);
       setEventDescription('');
       setRsvpRequired(true);
       setMemberLimit('');
@@ -140,25 +140,97 @@ const Onboarding = () => {
 
     setLoading(true);
     try {
+      console.log('[Onboarding] handleCreateEvent - selectedDates before conversion:', {
+        count: selectedDates.length,
+        selectedDates: selectedDates.map(d => ({
+          date: d.date instanceof Date ? d.date.toISOString() : d.date,
+          dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
+          dateType: d.date instanceof Date ? 'Date' : typeof d.date,
+          startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+          startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
+          startTimeType: d.startTime instanceof Date ? 'Date' : typeof d.startTime,
+          endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+          endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
+          endTimeType: d.endTime instanceof Date ? 'Date' : typeof d.endTime,
+        })),
+      });
+      
       // Convert dates to ISO strings for storage
-      const eventDates = selectedDates.map(d => ({
-        date: d.date.toISOString(),
-        startTime: d.startTime.toISOString(),
-        endTime: d.endTime.toISOString(),
-      }));
+      const eventDates = selectedDates.map((d, index) => {
+        const dateObj = d.date instanceof Date ? d.date : new Date(d.date);
+        const startTimeObj = d.startTime instanceof Date ? d.startTime : new Date(d.startTime);
+        const endTimeObj = d.endTime instanceof Date ? d.endTime : new Date(d.endTime);
+        
+        const converted = {
+          date: dateObj.toISOString(),
+          startTime: startTimeObj.toISOString(),
+          endTime: endTimeObj.toISOString(),
+        };
+        
+        console.log(`[Onboarding] Converting date ${index + 1}:`, {
+          original: {
+            date: d.date instanceof Date ? d.date.toISOString() : d.date,
+            startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+            endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+          },
+          converted: converted,
+        });
+        
+        return converted;
+      });
+      
+      console.log('[Onboarding] handleCreateEvent - eventDates after conversion:', {
+        count: eventDates.length,
+        eventDates: eventDates.map((ed, index) => ({
+          index,
+          date: ed.date,
+          startTime: ed.startTime,
+          endTime: ed.endTime,
+          dateParsed: new Date(ed.date).toISOString(),
+          startTimeParsed: new Date(ed.startTime).toISOString(),
+          endTimeParsed: new Date(ed.endTime).toISOString(),
+        })),
+      });
+      
+      const scheduledForValue = selectedDates[0]?.date instanceof Date 
+        ? selectedDates[0].date.toISOString() 
+        : (selectedDates[0]?.date ? new Date(selectedDates[0].date).toISOString() : '');
+      
+      console.log('[Onboarding] handleCreateEvent - scheduledFor:', {
+        scheduledFor: scheduledForValue,
+        firstDate: selectedDates[0]?.date instanceof Date 
+          ? selectedDates[0].date.toISOString() 
+          : selectedDates[0]?.date,
+      });
       
       const eventData = {
         name: eventName.trim(),
         location: eventLocation.trim(),
         address: eventAddress.trim() || '',
         eventDates,
-        usualStartTime: usualStartTime.toISOString(),
-        usualEndTime: usualEndTime.toISOString(),
-        scheduledFor: selectedDates[0]?.date.toISOString() || '', // For backward compatibility
+        scheduledFor: scheduledForValue, // For backward compatibility
         description: eventDescription.trim(),
         visibility: 'private', // Invite only for v1
         organizerId: user.uid,
       };
+      
+      console.log('[Onboarding] handleCreateEvent - eventData being sent to createEvent:', {
+        ...eventData,
+        eventDates: eventData.eventDates.map((ed, index) => ({
+          index,
+          date: ed.date,
+          startTime: ed.startTime,
+          endTime: ed.endTime,
+        })),
+      });
+
+      // Only include usual times if they're set
+      if (usualStartTime) {
+        eventData.usualStartTime = usualStartTime.toISOString();
+      }
+      if (usualEndTime) {
+        eventData.usualEndTime = usualEndTime.toISOString();
+      }
 
       // Add member limit if provided
       if (memberLimit.trim()) {
@@ -174,8 +246,8 @@ const Onboarding = () => {
       setEventLocation('');
       setEventAddress('');
       setSelectedDates([]);
-      setUsualStartTime(new Date(new Date().setHours(18, 0, 0, 0)));
-      setUsualEndTime(new Date(new Date().setHours(22, 0, 0, 0)));
+      setUsualStartTime(null);
+      setUsualEndTime(null);
       setEventDescription('');
       setRsvpRequired(true);
       setMemberLimit('');
@@ -448,7 +520,7 @@ const Onboarding = () => {
                 <Text style={styles.optionTitle}>Organize</Text>
               </View>
               <Text style={styles.optionText}>
-                Organize your own game night and share a join code with friends.
+                Organize your own gaming group and share a join code with friends.
               </Text>
             </Pressable>
             </View>
@@ -493,7 +565,7 @@ const Onboarding = () => {
             />
             <Text style={styles.title}>Join an existing MeepleUp</Text>
             <Text style={styles.subtitle}>
-              Enter the three-word join code provided by your game night organizer.
+              Enter the three-word join code provided by your gamiing group organizer.
             </Text>
             
             <JoinForm
@@ -591,32 +663,44 @@ const Onboarding = () => {
                 <View style={styles.timeInputContainer}>
                   <Text style={styles.timeLabel}>Usual Start Time</Text>
                   <Pressable
-                    style={styles.timeButton}
+                    style={({ pressed }) => [
+                      styles.timeButton,
+                      pressed && styles.timeButtonPressed,
+                    ]}
                     onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
                   >
                     <Text style={styles.timeButtonText}>
-                      {usualStartTime.toLocaleTimeString('en-US', {
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        hour12: true,
-                      })}
+                      {usualStartTime 
+                        ? usualStartTime.toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true,
+                          })
+                        : 'Not set (optional)'}
                     </Text>
+                    <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                   </Pressable>
                 </View>
                 
                 <View style={styles.timeInputContainer}>
                   <Text style={styles.timeLabel}>Usual End Time</Text>
                   <Pressable
-                    style={styles.timeButton}
+                    style={({ pressed }) => [
+                      styles.timeButton,
+                      pressed && styles.timeButtonPressed,
+                    ]}
                     onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
                   >
                     <Text style={styles.timeButtonText}>
-                      {usualEndTime.toLocaleTimeString('en-US', {
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        hour12: true,
-                      })}
+                      {usualEndTime 
+                        ? usualEndTime.toLocaleTimeString('en-US', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            hour12: true,
+                          })
+                        : 'Not set (optional)'}
                     </Text>
+                    <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                   </Pressable>
                 </View>
               </View>
@@ -766,32 +850,44 @@ const Onboarding = () => {
               <View style={styles.timeInputContainer}>
                 <Text style={styles.timeLabel}>Start Time</Text>
                 <Pressable
-                  style={styles.timeButton}
+                  style={({ pressed }) => [
+                    styles.timeButton,
+                    pressed && styles.timeButtonPressed,
+                  ]}
                   onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
                 >
                   <Text style={styles.timeButtonText}>
-                    {usualStartTime.toLocaleTimeString('en-US', {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}
+                    {usualStartTime 
+                      ? usualStartTime.toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        })
+                      : 'Not set (optional)'}
                   </Text>
+                  <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                 </Pressable>
               </View>
               
               <View style={styles.timeInputContainer}>
                 <Text style={styles.timeLabel}>End Time</Text>
                 <Pressable
-                  style={styles.timeButton}
+                  style={({ pressed }) => [
+                    styles.timeButton,
+                    pressed && styles.timeButtonPressed,
+                  ]}
                   onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
                 >
                   <Text style={styles.timeButtonText}>
-                    {usualEndTime.toLocaleTimeString('en-US', {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}
+                    {usualEndTime 
+                      ? usualEndTime.toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        })
+                      : 'Not set (optional)'}
                   </Text>
+                  <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                 </Pressable>
               </View>
             </View>
@@ -804,7 +900,20 @@ const Onboarding = () => {
             </Text>
             <CalendarDatePicker
               selectedDates={selectedDates}
-              onDatesChange={setSelectedDates}
+              onDatesChange={(newDates) => {
+                console.log('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
+                  count: newDates.length,
+                  dates: newDates.map(d => ({
+                    date: d.date instanceof Date ? d.date.toISOString() : d.date,
+                    dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
+                    startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+                    startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
+                    endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+                    endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
+                  })),
+                });
+                setSelectedDates(newDates);
+              }}
               minDate={new Date()}
               usualStartTime={usualStartTime}
               usualEndTime={usualEndTime}
@@ -839,8 +948,8 @@ const Onboarding = () => {
               <View style={styles.timePickerModalContent}>
                 <DateTimePicker
                   value={
-                    showTimePicker.type === 'usualStart' ? usualStartTime :
-                    showTimePicker.type === 'usualEnd' ? usualEndTime :
+                    showTimePicker.type === 'usualStart' ? (usualStartTime || new Date(new Date().setHours(18, 0, 0, 0))) :
+                    showTimePicker.type === 'usualEnd' ? (usualEndTime || new Date(new Date().setHours(22, 0, 0, 0))) :
                     showTimePicker.dateIndex !== null && selectedDates[showTimePicker.dateIndex]
                       ? (showTimePicker.type === 'start' 
                           ? selectedDates[showTimePicker.dateIndex].startTime
@@ -856,22 +965,36 @@ const Onboarding = () => {
                         setUsualStartTime(date);
                         // Update all dates that haven't been individually edited
                         setSelectedDates(prev => prev.map(d => {
-                          const newDate = new Date(d.date);
-                          newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
-                          return { ...d, startTime: newDate };
+                          // Extract date components to preserve the date without timezone shifts
+                          const dateObj = d.date instanceof Date ? d.date : new Date(d.date);
+                          const year = dateObj.getFullYear();
+                          const month = dateObj.getMonth();
+                          const day = dateObj.getDate();
+                          const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
+                          return { ...d, startTime: newTime };
                         }));
                       } else if (showTimePicker.type === 'usualEnd') {
                         setUsualEndTime(date);
                         setSelectedDates(prev => prev.map(d => {
-                          const newDate = new Date(d.date);
-                          newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
-                          return { ...d, endTime: newDate };
+                          // Extract date components to preserve the date without timezone shifts
+                          const dateObj = d.date instanceof Date ? d.date : new Date(d.date);
+                          const year = dateObj.getFullYear();
+                          const month = dateObj.getMonth();
+                          const day = dateObj.getDate();
+                          const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
+                          return { ...d, endTime: newTime };
                         }));
                       } else if (showTimePicker.type === 'start' || showTimePicker.type === 'end') {
                         const updatedDates = [...selectedDates];
                         if (showTimePicker.dateIndex !== null && updatedDates[showTimePicker.dateIndex]) {
-                          const newTime = new Date(updatedDates[showTimePicker.dateIndex].date);
-                          newTime.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                          // Extract date components to preserve the date without timezone shifts
+                          const dateObj = updatedDates[showTimePicker.dateIndex].date instanceof Date 
+                            ? updatedDates[showTimePicker.dateIndex].date 
+                            : new Date(updatedDates[showTimePicker.dateIndex].date);
+                          const year = dateObj.getFullYear();
+                          const month = dateObj.getMonth();
+                          const day = dateObj.getDate();
+                          const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
                           updatedDates[showTimePicker.dateIndex] = {
                             ...updatedDates[showTimePicker.dateIndex],
                             [showTimePicker.type === 'start' ? 'startTime' : 'endTime']: newTime,
@@ -884,6 +1007,21 @@ const Onboarding = () => {
                   style={{ width: '100%', height: 200 }}
                 />
                 <View style={styles.iosPickerActions}>
+                  {(showTimePicker.type === 'usualStart' || showTimePicker.type === 'usualEnd') && (
+                    <Button
+                      label="Clear"
+                      onPress={() => {
+                        if (showTimePicker.type === 'usualStart') {
+                          setUsualStartTime(null);
+                        } else if (showTimePicker.type === 'usualEnd') {
+                          setUsualEndTime(null);
+                        }
+                        setShowTimePicker({ type: null, dateIndex: null });
+                      }}
+                      variant="outline"
+                      style={styles.modalButton}
+                    />
+                  )}
                   <Button
                     label="Done"
                     onPress={() => setShowTimePicker({ type: null, dateIndex: null })}
@@ -896,8 +1034,8 @@ const Onboarding = () => {
             showTimePicker.type && (
               <DateTimePicker
                 value={
-                  showTimePicker.type === 'usualStart' ? usualStartTime :
-                  showTimePicker.type === 'usualEnd' ? usualEndTime :
+                  showTimePicker.type === 'usualStart' ? (usualStartTime || new Date(new Date().setHours(18, 0, 0, 0))) :
+                  showTimePicker.type === 'usualEnd' ? (usualEndTime || new Date(new Date().setHours(22, 0, 0, 0))) :
                   showTimePicker.dateIndex !== null && selectedDates[showTimePicker.dateIndex]
                     ? (showTimePicker.type === 'start' 
                         ? selectedDates[showTimePicker.dateIndex].startTime
@@ -912,22 +1050,36 @@ const Onboarding = () => {
                     if (showTimePicker.type === 'usualStart') {
                       setUsualStartTime(date);
                       setSelectedDates(prev => prev.map(d => {
-                        const newDate = new Date(d.date);
-                        newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
-                        return { ...d, startTime: newDate };
+                        // Extract date components to preserve the date without timezone shifts
+                        const dateObj = d.date instanceof Date ? d.date : new Date(d.date);
+                        const year = dateObj.getFullYear();
+                        const month = dateObj.getMonth();
+                        const day = dateObj.getDate();
+                        const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
+                        return { ...d, startTime: newTime };
                       }));
                     } else if (showTimePicker.type === 'usualEnd') {
                       setUsualEndTime(date);
                       setSelectedDates(prev => prev.map(d => {
-                        const newDate = new Date(d.date);
-                        newDate.setHours(date.getHours(), date.getMinutes(), 0, 0);
-                        return { ...d, endTime: newDate };
+                        // Extract date components to preserve the date without timezone shifts
+                        const dateObj = d.date instanceof Date ? d.date : new Date(d.date);
+                        const year = dateObj.getFullYear();
+                        const month = dateObj.getMonth();
+                        const day = dateObj.getDate();
+                        const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
+                        return { ...d, endTime: newTime };
                       }));
                     } else if (showTimePicker.type === 'start' || showTimePicker.type === 'end') {
                       const updatedDates = [...selectedDates];
                       if (showTimePicker.dateIndex !== null && updatedDates[showTimePicker.dateIndex]) {
-                        const newTime = new Date(updatedDates[showTimePicker.dateIndex].date);
-                        newTime.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                        // Extract date components to preserve the date without timezone shifts
+                        const dateObj = updatedDates[showTimePicker.dateIndex].date instanceof Date 
+                          ? updatedDates[showTimePicker.dateIndex].date 
+                          : new Date(updatedDates[showTimePicker.dateIndex].date);
+                        const year = dateObj.getFullYear();
+                        const month = dateObj.getMonth();
+                        const day = dateObj.getDate();
+                        const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
                         updatedDates[showTimePicker.dateIndex] = {
                           ...updatedDates[showTimePicker.dateIndex],
                           [showTimePicker.type === 'start' ? 'startTime' : 'endTime']: newTime,
@@ -1162,17 +1314,29 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
   },
   timeButton: {
-    backgroundColor: theme.colors.woodLight,
-    borderWidth: 1,
+    backgroundColor: theme.colors.surfaceColor,
+    borderWidth: 2,
     borderColor: theme.colors.woodMedium,
     borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    minHeight: 44,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timeButtonPressed: {
+    borderColor: theme.colors.meepleRed,
+    backgroundColor: theme.colors.woodLight,
   },
   timeButtonText: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: theme.typography.fontWeight.medium,
     color: theme.colors.textPrimary,
+    flex: 1,
+  },
+  timeIcon: {
+    marginLeft: theme.spacing.sm,
   },
   calendarButton: {
     marginTop: theme.spacing.sm,

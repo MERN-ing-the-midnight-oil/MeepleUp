@@ -95,13 +95,19 @@ const TextListGameIdentifier = ({
         
         results[gameTitle] = resultsWithThumbnails;
         
+        // Update search results incrementally so UI updates as each game finishes
+        setSearchResults({ ...results });
+        
         // Auto-select the first result if available
         if (resultsWithThumbnails && resultsWithThumbnails.length > 0) {
           selected[gameTitle] = resultsWithThumbnails[0].id;
+          setSelectedGames({ ...selected });
         }
       } catch (err) {
         console.error(`[TextListGameIdentifier] Error searching for ${gameTitle}:`, err);
         results[gameTitle] = [];
+        // Update search results even for empty results to show "No matches found" instead of loading
+        setSearchResults({ ...results });
       }
     }
 
@@ -220,9 +226,11 @@ const TextListGameIdentifier = ({
   };
 
   const renderGameSelection = (gameTitle, index) => {
-    const results = searchResults[gameTitle] || [];
+    const results = searchResults[gameTitle];
     const selectedBggId = selectedGames[gameTitle];
     const isProcessing = processingGameIndex === index;
+    // Show loading if currently processing this game OR if results haven't been set yet
+    const isLoading = isProcessing || (results === undefined && processingGameIndex !== null);
 
     return (
       <View key={gameTitle} style={styles.gameSelectionCard}>
@@ -237,12 +245,12 @@ const TextListGameIdentifier = ({
           </Pressable>
         </View>
         
-        {isProcessing ? (
+        {isLoading ? (
           <View style={styles.processingContainer}>
             <ActivityIndicator size="small" color={theme.colors.meepleRed} />
-            <Text style={styles.processingText}>Searching...</Text>
+            <Text style={styles.processingText}>Loading...</Text>
           </View>
-        ) : results.length === 0 ? (
+        ) : (results || []).length === 0 ? (
           <Text style={styles.noResultsText}>No matches found</Text>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll}>
@@ -344,8 +352,19 @@ const TextListGameIdentifier = ({
 
               {formattedGames.map((gameTitle, index) => renderGameSelection(gameTitle, index))}
 
+              {isProcessing && formattedGames.length > 0 && (
+                <View style={styles.addingContainer}>
+                  <ActivityIndicator size="small" color={theme.colors.meepleRed} />
+                  <Text style={styles.addingText}>Adding games to collection...</Text>
+                </View>
+              )}
+
               <Button
-                label={`Add ${Object.keys(selectedGames).length} Selected Game${Object.keys(selectedGames).length !== 1 ? 's' : ''} to Collection`}
+                label={
+                  isProcessing && formattedGames.length > 0
+                    ? 'Adding Games...'
+                    : `Add ${Object.keys(selectedGames).length} Selected Game${Object.keys(selectedGames).length !== 1 ? 's' : ''} to Collection`
+                }
                 onPress={handleAddSelectedGames}
                 disabled={isProcessing || Object.keys(selectedGames).length === 0}
                 style={styles.addButton}
@@ -555,6 +574,18 @@ const styles = StyleSheet.create({
   addButton: {
     marginTop: theme.spacing.lg,
     marginBottom: theme.spacing.xl,
+  },
+  addingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.md,
+    marginTop: theme.spacing.md,
+  },
+  addingText: {
+    marginLeft: theme.spacing.sm,
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
   },
 });
 

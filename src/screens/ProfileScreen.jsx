@@ -5,6 +5,7 @@ import Input from '../components/common/Input';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
 import NotificationSettings from '../components/NotificationSettings';
+import PersonalMatchSettings from '../components/PersonalMatchSettings';
 import { pickAndUploadImage, deleteImageFromFirebase } from '../utils/imageUpload';
 import { theme, commonStyles } from '../utils/theme';
 
@@ -50,6 +51,7 @@ const ProfileScreen = () => {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [showPersonalMatchModal, setShowPersonalMatchModal] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -428,6 +430,15 @@ const ProfileScreen = () => {
 
       <View style={styles.form}>
         <Button
+          label="Beeple's Recommendation Weights"
+          onPress={() => setShowPersonalMatchModal(true)}
+          variant="outline"
+          style={styles.saveButton}
+        />
+      </View>
+
+      <View style={styles.form}>
+        <Button
           label="Update Password"
           onPress={() => setShowPasswordModal(true)}
           variant="outline"
@@ -465,6 +476,14 @@ const ProfileScreen = () => {
         title="Notification Settings"
       >
         <NotificationSettings inModal={true} />
+      </Modal>
+
+      <Modal
+        isOpen={showPersonalMatchModal}
+        onClose={() => setShowPersonalMatchModal(false)}
+        title="Beeple's Recommendation Weights"
+      >
+        <PersonalMatchSettings onSave={() => setShowPersonalMatchModal(false)} />
       </Modal>
 
       <Modal
