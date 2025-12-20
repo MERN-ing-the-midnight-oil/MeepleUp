@@ -13,11 +13,12 @@ import Modal from '../components/common/Modal';
 import { formatDate, formatTime } from '../utils/helpers';
 import { theme, commonStyles } from '../utils/theme';
 import { getGameDetails } from '../utils/api';
-import { findGameSimilarities } from '../utils/gameSimilarities';
-import PersonalMatchSettings from '../components/PersonalMatchSettings';
-import BeepleAvatar from '../components/BeepleAvatar';
-import { getVibeScore, calculateVibeScoresForGame } from '../services/vibeScores';
-import { calculateVibeScore } from '../utils/vibeScore';
+import BeepleRecommendations from '../components/BeepleRecommendations';
+import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
+import { calculateMatchScore } from '../utils/matchScore';
+import { createNotification } from '../utils/notifications';
+import { getOrCreateConversation, sendMessage } from '../services/messaging';
+import { BEEPLE_USER_ID } from '../utils/constants';
 
 // Platform-specific navigation hooks
 let useNavigationHook;
@@ -113,11 +114,7 @@ const BrowseAndProposeScreen = () => {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [gamesWithBggData, setGamesWithBggData] = useState({}); // { gameId: bggData }
-  const [personalMatchGame, setPersonalMatchGame] = useState(null);
-  const [showPersonalMatchModal, setShowPersonalMatchModal] = useState(false);
-  const [personalMatchText, setPersonalMatchText] = useState(null);
-  const [showPersonalMatchSettings, setShowPersonalMatchSettings] = useState(false);
-  const [vibeScores, setVibeScores] = useState({}); // { gameId: score }
+  const [matchScores, setMatchScores] = useState({}); // { gameId: score }
   
   // Get event dates
   const eventDates = useMemo(() => {
@@ -457,13 +454,13 @@ const BrowseAndProposeScreen = () => {
     });
   }, [aggregatedGames, gamesWithBggData]);
 
-  // Load vibe scores for games (both enriched games and proposed games)
+  // Load match scores for games (both enriched games and proposed games)
   useEffect(() => {
     if (!eventId || !userId) {
       return;
     }
 
-    const loadVibeScores = async () => {
+    const loadMatchScores = async () => {
       const scores = {};
       const allGamesToScore = [];
       
@@ -509,19 +506,32 @@ const BrowseAndProposeScreen = () => {
       
       for (const { gameId, game } of allGamesToScore) {
         try {
+          // Ensure gameId is always a string for use as object key
+          const gameIdStr = String(gameId);
+          
           // Try to get stored score first
-          const storedScore = await getVibeScore(eventId, gameId, userId);
+          const storedScore = await getMatchScore(eventId, gameIdStr, userId);
           if (storedScore !== null) {
-            scores[gameId] = storedScore;
+            // Ensure storedScore is a number, not an object
+            const scoreNum = typeof storedScore === 'number' ? storedScore : Number(storedScore);
+            if (!isNaN(scoreNum)) {
+              scores[gameIdStr] = scoreNum;
+            } else {
+              console.warn('[BrowseAndPropose] Invalid storedScore, not a number:', {
+                gameId: gameIdStr,
+                storedScore,
+                storedScoreType: typeof storedScore
+              });
+            }
           } else {
             // Calculate on-demand if not stored
             // For proposed games, we might need to fetch game data
-            let gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[gameId] };
+            let gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[gameIdStr] };
             
             // If still no BGG data, try to fetch it
-            if (!gameWithBggData._bggData && gameId) {
+            if (!gameWithBggData._bggData && gameIdStr) {
               try {
-                const bggData = await getGameDetails(gameId);
+                const bggData = await getGameDetails(gameIdStr);
                 if (bggData) {
                   gameWithBggData = { ...gameWithBggData, _bggData: bggData };
                 }
@@ -530,24 +540,34 @@ const BrowseAndProposeScreen = () => {
               }
             }
             
-            const score = calculateVibeScore(gameWithBggData, userCollection, customWeights);
+            const score = calculateMatchScore(gameWithBggData, userCollection, customWeights);
             if (score !== null) {
-              scores[gameId] = score;
-              // Store it for future use (non-blocking)
-              calculateVibeScoresForGame(eventId, gameId, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
-                console.warn('[BrowseAndPropose] Error storing vibe score:', err);
-              });
+              // Ensure score is a number
+              const scoreNum = typeof score === 'number' ? score : Number(score);
+              if (!isNaN(scoreNum)) {
+                scores[gameIdStr] = scoreNum;
+                // Store it for future use (non-blocking)
+                calculateMatchScoresForGame(eventId, gameIdStr, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
+                  console.warn('[BrowseAndPropose] Error storing match score:', err);
+                });
+              } else {
+                console.warn('[BrowseAndPropose] Invalid calculated score, not a number:', {
+                  gameId: gameIdStr,
+                  score,
+                  scoreType: typeof score
+                });
+              }
             }
           }
         } catch (error) {
-          console.warn(`[BrowseAndPropose] Error loading vibe score for game ${gameId}:`, error);
+          console.warn(`[BrowseAndPropose] Error loading match score for game ${gameId}:`, error);
         }
       }
       
-      setVibeScores(scores);
+      setMatchScores(scores);
     };
 
-    loadVibeScores();
+    loadMatchScores();
   }, [eventId, userId, enrichedGames, proposedGames, collections, user?.personalMatchWeights, gamesWithBggData]);
 
   // Helper to get rating label
@@ -926,6 +946,94 @@ const BrowseAndProposeScreen = () => {
     setShowGameDetails(true);
   }, []);
   
+  // Helper function to find game owner user IDs
+  const findGameOwnerUserIds = (game, memberNames, members) => {
+    const owners = game._owners || [];
+    if (owners.length === 0) {
+      return [];
+    }
+    
+    // Map owner names to user IDs
+    const ownerUserIds = [];
+    for (const ownerName of owners) {
+      // Find member with matching name
+      const member = members.find(m => {
+        const memberName = memberNames[m.userId] || m.userName || '';
+        return memberName === ownerName;
+      });
+      
+      if (member && member.userId) {
+        ownerUserIds.push(member.userId);
+      }
+    }
+    
+    return ownerUserIds;
+  };
+
+  // Helper function to notify game owners about a proposal
+  const notifyGameOwnersAboutProposal = async (
+    eventId,
+    game,
+    proposerUserId,
+    memberNames,
+    members,
+    gameName,
+    eventName
+  ) => {
+    if (!eventId || !game || !db) {
+      console.warn('[notifyGameOwnersAboutProposal] Missing required parameters');
+      return;
+    }
+
+    // Find game owner user IDs
+    const ownerUserIds = findGameOwnerUserIds(game, memberNames, members);
+    
+    if (ownerUserIds.length === 0) {
+      console.log('[notifyGameOwnersAboutProposal] No game owners found');
+      return;
+    }
+
+    // Get proposer's name
+    const proposerName = memberNames[proposerUserId] || user?.name || 'Someone';
+    
+    // Use provided event name or default
+    const meepleUpName = eventName || 'your MeepleUp';
+
+    // Notify each owner
+    for (const ownerUserId of ownerUserIds) {
+      // Skip if the proposer is the owner
+      if (ownerUserId === proposerUserId) {
+        continue;
+      }
+
+      try {
+        // Create in-app notification
+        await createNotification(ownerUserId, {
+          type: 'game_proposed',
+          groupId: eventId,
+          fromUserId: proposerUserId,
+          fromUserName: proposerName,
+          message: `${proposerName} proposed ${gameName} for your next meeting. You might want to bring it in case the group decides to play it!`,
+        });
+
+        // Send message from beeple
+        try {
+          const conversation = await getOrCreateConversation(eventId, BEEPLE_USER_ID, ownerUserId);
+          if (conversation) {
+            const beepleMessage = `Hi! Just wanted to let you know that ${proposerName} proposed "${gameName}" for your next meeting. You might want to bring it in case the group decides they'd like to play it (no pressure!).`;
+            await sendMessage(eventId, conversation.id, BEEPLE_USER_ID, beepleMessage);
+          }
+        } catch (messageError) {
+          console.error('[notifyGameOwnersAboutProposal] Error sending beeple message:', messageError);
+          // Continue even if message fails
+        }
+      } catch (notifyError) {
+        console.error(`[notifyGameOwnersAboutProposal] Error notifying owner ${ownerUserId}:`, notifyError);
+        // Continue with other owners even if one fails
+      }
+    }
+  };
+
   const handleProposeGame = async (game) => {
     console.log('[BrowseAndPropose] Propose game button clicked');
     console.log('[BrowseAndPropose] Initial checks:', {
@@ -1063,6 +1171,22 @@ const BrowseAndProposeScreen = () => {
         }];
       });
       
+      // Notify game owners about the proposal
+      try {
+        await notifyGameOwnersAboutProposal(
+          event.id,
+          game,
+          userId,
+          memberNames,
+          members,
+          proposalDoc.gameName,
+          event.name
+        );
+      } catch (notifyError) {
+        console.error('[BrowseAndPropose] Error notifying game owners:', notifyError);
+        // Don't fail the proposal if notification fails
+      }
+      
       Alert.alert('Success', 'Game proposed successfully!');
     } catch (error) {
       console.error('[BrowseAndPropose] Error proposing game:', error);
@@ -1088,36 +1212,6 @@ const BrowseAndProposeScreen = () => {
     setRatingModalGame(null);
   };
 
-  const handleOpenPersonalMatch = (game) => {
-    if (!userId) {
-      Alert.alert('Sign In Required', 'Please sign in to see Beeple\'s recommendations.');
-      return;
-    }
-    
-    const userCollection = collections[userId] || [];
-    if (userCollection.length === 0) {
-      Alert.alert('No Collection', 'Add games to your collection to see Beeple\'s recommendations.');
-      return;
-    }
-    
-    // Get BGG data for the game if not already loaded
-    const gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[game.bggId || game.id] };
-    
-    // Get user's custom weights if available
-    const customWeights = user?.personalMatchWeights || null;
-    
-    const recommendation = findGameSimilarities(gameWithBggData, userCollection, customWeights);
-    
-    setPersonalMatchGame(game);
-    setPersonalMatchText(recommendation);
-    setShowPersonalMatchModal(true);
-  };
-
-  const handleClosePersonalMatchModal = () => {
-    setShowPersonalMatchModal(false);
-    setPersonalMatchGame(null);
-    setPersonalMatchText(null);
-  };
 
   const handleRateGame = async (gameId, newRating) => {
     if (!event?.id || !db || !userId) return;
@@ -1259,12 +1353,52 @@ const BrowseAndProposeScreen = () => {
               Rate each game to help decide what to play.
             </Text>
             {proposedGames.map((proposal) => {
-              const gameId = proposal.gameId;
+              // Ensure gameId is always a string
+              const rawGameId = proposal.gameId;
+              const gameId = rawGameId ? String(rawGameId) : null;
+              
+              // Debug logging if gameId is not a simple value
+              if (gameId && (typeof rawGameId === 'object' || Array.isArray(rawGameId))) {
+                console.warn('[BrowseAndPropose] gameId is not a primitive:', {
+                  rawGameId,
+                  rawGameIdType: typeof rawGameId,
+                  convertedGameId: gameId,
+                  proposal
+                });
+              }
+              
+              if (!gameId) {
+                console.warn('[BrowseAndPropose] Missing gameId in proposal:', proposal);
+              }
+              
               const userRating = proposal.ratings?.[userId] ?? null;
               const proposerId = proposal.proposedBy;
-              const proposerName = memberNames[proposerId] || proposerId;
+              // Ensure proposerName is always a string
+              const rawProposerName = memberNames[proposerId] || proposerId;
+              const proposerName = typeof rawProposerName === 'string' ? rawProposerName : String(rawProposerName || proposerId || 'Unknown');
+              
+              // Debug if proposerName is not a string
+              if (typeof rawProposerName !== 'string' && rawProposerName !== null && rawProposerName !== undefined) {
+                console.warn('[BrowseAndPropose] proposerName is not a string:', {
+                  proposerId,
+                  rawProposerName,
+                  rawProposerNameType: typeof rawProposerName,
+                  convertedProposerName: proposerName
+                });
+              }
+              
               const proposerAvatar = memberAvatars[proposerId] || null;
-              const proposalVibeScore = vibeScores[gameId];
+              const proposalMatchScore = gameId ? matchScores[gameId] : undefined;
+              
+              // Debug logging to catch type issues
+              if (proposalMatchScore !== undefined && proposalMatchScore !== null && typeof proposalMatchScore !== 'number' && typeof proposalMatchScore !== 'string') {
+                console.warn('[BrowseAndPropose] Invalid proposalMatchScore type:', {
+                  gameId,
+                  proposalMatchScore,
+                  proposalMatchScoreType: typeof proposalMatchScore,
+                  proposalMatchScoreValue: JSON.stringify(proposalMatchScore)
+                });
+              }
               
               return (
                 <View key={gameId} style={styles.proposedGameItem}>
@@ -1278,17 +1412,24 @@ const BrowseAndProposeScreen = () => {
                     ) : (
                       <View style={styles.proposedGameThumbnailPlaceholder}>
                         <Text style={styles.proposedGameThumbnailText}>
-                          {(proposal.gameName || '?').charAt(0).toUpperCase()}
+                          {(() => {
+                            const gameName = typeof proposal.gameName === 'string' ? proposal.gameName : String(proposal.gameName || '?');
+                            return gameName.charAt(0).toUpperCase();
+                          })()}
                         </Text>
                       </View>
                     )}
                     <View style={styles.proposedGameInfo}>
                       <View style={styles.proposedGameTitleRow}>
-                        <Text style={styles.proposedGameTitle}>{proposal.gameName}</Text>
-                        {userId && proposalVibeScore !== undefined && proposalVibeScore !== null && (
-                          <View style={styles.proposedGameVibeScore}>
-                            <Text style={styles.vibeScoreIconSmall}>📊</Text>
-                            <Text style={styles.vibeScoreTextSmall}>{proposalVibeScore}</Text>
+                        <Text style={styles.proposedGameTitle}>
+                          {typeof proposal.gameName === 'string' ? proposal.gameName : String(proposal.gameName || 'Unknown Game')}
+                        </Text>
+                        {userId && proposalMatchScore !== undefined && proposalMatchScore !== null && (
+                          <View style={styles.proposedGameMatchScore}>
+                            <Text style={styles.matchScoreIconSmall}>💘</Text>
+                            <Text style={styles.matchScoreTextSmall}>
+                              {typeof proposalMatchScore === 'object' ? JSON.stringify(proposalMatchScore) : String(proposalMatchScore)}
+                            </Text>
                           </View>
                         )}
                       </View>
@@ -1358,9 +1499,16 @@ const BrowseAndProposeScreen = () => {
           <Text style={styles.sectionCopy}>
             {Array.isArray(enrichedGames) ? enrichedGames.length : 0} {Array.isArray(enrichedGames) && enrichedGames.length === 1 ? 'game' : 'games'} from {Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0} {Array.isArray(confirmedAttendees) && confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
           </Text>
-          <Text style={styles.sectionCopy}>
-            Tap "Beeple Recommends" on any game to see personalized recommendations based on your collection.
-          </Text>
+          
+          {/* Beeple Recommendations */}
+          {userId && Array.isArray(enrichedGames) && enrichedGames.length > 0 && collections[userId] && collections[userId].length > 0 && (
+            <BeepleRecommendations 
+              games={enrichedGames}
+              userCollection={collections[userId] || []}
+              onProposeGame={handleProposeGame}
+              userProposals={userProposals}
+            />
+          )}
           
           {!Array.isArray(enrichedGames) || enrichedGames.length === 0 ? (
             <Text style={styles.emptyText}>No games found from confirmed attendees for this date.</Text>
@@ -1374,7 +1522,17 @@ const BrowseAndProposeScreen = () => {
                   const canPropose = userProposals.size < 5 || isProposedByUser;
                   const owners = game._owners || [];
                   
-                  const vibeScore = vibeScores[gameId];
+                  const matchScore = matchScores[gameId];
+                  
+                  // Debug logging to catch type issues
+                  if (matchScore !== undefined && matchScore !== null && typeof matchScore !== 'number' && typeof matchScore !== 'string') {
+                    console.warn('[BrowseAndPropose] Invalid matchScore type:', {
+                      gameId,
+                      matchScore,
+                      matchScoreType: typeof matchScore,
+                      matchScoreValue: JSON.stringify(matchScore)
+                    });
+                  }
                   
                   return (
                     <View key={gameId || `game-${idx}`} style={styles.gameCardWrapper}>
@@ -1392,10 +1550,12 @@ const BrowseAndProposeScreen = () => {
                           />
                         </Pressable>
                       </View>
-                      {userId && vibeScore !== undefined && vibeScore !== null && (
-                        <View style={styles.vibeScoreBadge}>
-                          <Text style={styles.vibeScoreIcon}>📊</Text>
-                          <Text style={styles.vibeScoreText}>{vibeScore}</Text>
+                      {userId && matchScore !== undefined && matchScore !== null && (
+                        <View style={styles.matchScoreBadge}>
+                          <Text style={styles.matchScoreIcon}>💘</Text>
+                          <Text style={styles.matchScoreText}>
+                            {typeof matchScore === 'object' ? JSON.stringify(matchScore) : String(matchScore)}
+                          </Text>
                         </View>
                       )}
                       <View style={styles.gameActionsContainer}>
@@ -1411,14 +1571,6 @@ const BrowseAndProposeScreen = () => {
                           <View style={styles.proposedBadge}>
                             <Text style={styles.proposedBadgeText}>Proposed</Text>
                           </View>
-                        )}
-                        {userId && (
-                          <TouchableOpacity
-                            style={styles.personalMatchButton}
-                            onPress={() => handleOpenPersonalMatch(game)}
-                          >
-                            <Text style={styles.personalMatchButtonText}>Beeple Recommends</Text>
-                          </TouchableOpacity>
                         )}
                       </View>
                     </View>
@@ -1545,72 +1697,6 @@ const BrowseAndProposeScreen = () => {
         />
       )}
 
-      {/* Beeple Recommends Modal */}
-      {showPersonalMatchModal && personalMatchGame && (
-        <Modal
-          isOpen={showPersonalMatchModal}
-          onClose={handleClosePersonalMatchModal}
-          title={`Beeple Recommends: ${personalMatchGame.title || personalMatchGame.name || 'Game'}`}
-        >
-          <View style={styles.personalMatchModalContent}>
-            <View style={styles.beepleHeader}>
-              <BeepleAvatar size={50} />
-              <View style={styles.beepleHeaderText}>
-                <Text style={styles.beepleName}>Beeple</Text>
-                <Text style={styles.beepleSubtitle}>Your Game Recommendation Bot</Text>
-              </View>
-            </View>
-            {personalMatchText ? (
-              <Text style={styles.personalMatchText}>{personalMatchText}</Text>
-            ) : (
-              <Text style={styles.personalMatchText}>
-                Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities between this game and your collection. 
-                Try adding more games to your collection so I can give you better recommendations!
-              </Text>
-            )}
-            <TouchableOpacity
-              style={styles.customizeWeightsLink}
-              onPress={() => {
-                setShowPersonalMatchModal(false);
-                setShowPersonalMatchSettings(true);
-              }}
-            >
-              <Text style={styles.customizeWeightsLinkText}>
-                ⚙️ Customize Beeple's recommendation weights
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </Modal>
-      )}
-
-      {/* Beeple Recommends Settings Modal */}
-      {showPersonalMatchSettings && (
-        <Modal
-          isOpen={showPersonalMatchSettings}
-          onClose={() => {
-            setShowPersonalMatchSettings(false);
-            // Optionally reopen the personal match modal after closing settings
-            // setShowPersonalMatchModal(true);
-          }}
-          title="Beeple's Recommendation Weights"
-        >
-          <PersonalMatchSettings
-            onSave={() => {
-              setShowPersonalMatchSettings(false);
-              // Refresh the personal match if we had one open
-              if (personalMatchGame) {
-                const gameWithBggData = personalMatchGame._bggData 
-                  ? personalMatchGame 
-                  : { ...personalMatchGame, _bggData: gamesWithBggData[personalMatchGame.bggId || personalMatchGame.id] };
-                const customWeights = user?.personalMatchWeights || null;
-                const recommendation = findGameSimilarities(gameWithBggData, collections[userId] || [], customWeights);
-                setPersonalMatchText(recommendation);
-                setShowPersonalMatchModal(true);
-              }
-            }}
-          />
-        </Modal>
-      )}
     </View>
   );
 };
@@ -1748,7 +1834,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: theme.spacing.sm,
   },
-  proposedGameVibeScore: {
+  proposedGameMatchScore: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.woodLight,
@@ -1756,11 +1842,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: theme.borderRadius.sm,
   },
-  vibeScoreIconSmall: {
+  matchScoreIconSmall: {
     fontSize: 12,
     marginRight: 4,
   },
-  vibeScoreTextSmall: {
+  matchScoreTextSmall: {
     fontSize: 12,
     fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.textPrimary,
@@ -1998,72 +2084,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
   },
-  personalMatchButton: {
-    backgroundColor: '#FF8C00',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderBottomLeftRadius: theme.borderRadius.lg,
-    borderBottomRightRadius: theme.borderRadius.lg,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(201, 183, 156, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  personalMatchButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  personalMatchModalContent: {
-    paddingVertical: theme.spacing.md,
-  },
-  beepleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.lg,
-    paddingBottom: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.woodMedium,
-  },
-  beepleHeaderText: {
-    marginLeft: theme.spacing.md,
-    flex: 1,
-  },
-  beepleName: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.xs,
-  },
-  beepleSubtitle: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.textSecondary,
-  },
-  personalMatchText: {
-    fontSize: theme.typography.fontSize.base,
-    lineHeight: 24,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.md,
-  },
-  customizeWeightsLink: {
-    marginTop: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.woodLight,
-    borderWidth: 1,
-    borderColor: theme.colors.woodMedium,
-    alignItems: 'center',
-  },
-  customizeWeightsLinkText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.meepleRed,
-    fontWeight: theme.typography.fontWeight.medium,
-  },
-  vibeScoreBadge: {
+  matchScoreBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2075,11 +2096,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(201, 183, 156, 0.5)',
   },
-  vibeScoreIcon: {
+  matchScoreIcon: {
     fontSize: 14,
     marginRight: 4,
   },
-  vibeScoreText: {
+  matchScoreText: {
     fontSize: 12,
     fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.textPrimary,

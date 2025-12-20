@@ -1031,13 +1031,12 @@ export const EventsProvider = ({ children }) => {
 
       // Save membership to Firestore if db is available and event exists in Firestore
       if (db && event.id) {
+        const groupRef = db.collection('gamingGroups').doc(event.id);
+        
         try {
-          const groupRef = db.collection('gamingGroups').doc(event.id);
           const groupDoc = await groupRef.get();
           
           if (groupDoc.exists) {
-            const membersRef = groupRef.collection('members').doc(userId);
-            
             // Use current user's data from Auth context if this is the current user joining
             let userName = '';
             let userAvatarUrl = '';
@@ -1059,6 +1058,20 @@ export const EventsProvider = ({ children }) => {
               hasUserAvatarUrl: !!userAvatarUrl
             });
             
+            // First, update memberIds array in the group document
+            // This ensures the user is recognized as a member before creating the member document
+            // This order helps with Firestore security rules that check membership
+            console.log('[EventsContext] Updating memberIds array in group document');
+            await groupRef.update({
+              memberIds: firebase.firestore.FieldValue.arrayUnion(userId),
+              updatedAt: firebase.firestore.Timestamp.now(),
+            });
+            
+            console.log('[EventsContext] Group document updated successfully - user added to memberIds');
+            
+            // Then create/update the member document in the subcollection
+            // Now that user is in memberIds, they should have proper permissions
+            const membersRef = groupRef.collection('members').doc(userId);
             await membersRef.set({
               userId,
               userName: userName || userId, // Fallback to userId if no name found
@@ -1070,19 +1083,10 @@ export const EventsProvider = ({ children }) => {
             }, { merge: true });
             
             console.log('[EventsContext] Member document created/updated successfully');
-            
-            // Update memberIds array in the group document
-            console.log('[EventsContext] Updating memberIds array in group document');
-            await groupRef.update({
-              memberIds: firebase.firestore.FieldValue.arrayUnion(userId),
-              updatedAt: firebase.firestore.Timestamp.now(),
-            });
-            
-            console.log('[EventsContext] Group document updated successfully - user added to memberIds');
 
-            // Calculate vibe scores for new member (background task, non-blocking)
+            // Calculate match scores for new member (background task, non-blocking)
             try {
-              const { calculateVibeScoresForUser } = await import('../services/vibeScores');
+              const { calculateMatchScoresForUser } = await import('../services/matchScores');
               // Get user's collection and weights
               const userGamesSnapshot = await db.collection('userGames').doc(userId).collection('games').get();
               const userCollection = userGamesSnapshot.docs.map(doc => {
@@ -1106,11 +1110,11 @@ export const EventsProvider = ({ children }) => {
               const customWeights = userData?.personalMatchWeights || null;
 
               // Calculate scores in background (don't await)
-              calculateVibeScoresForUser(event.id, userId, userCollection, customWeights).catch(err => {
-                console.warn('[EventsContext] Error calculating vibe scores for new member:', err);
+              calculateMatchScoresForUser(event.id, userId, userCollection, customWeights).catch(err => {
+                console.warn('[EventsContext] Error calculating match scores for new member:', err);
               });
-            } catch (vibeScoreError) {
-              console.warn('[EventsContext] Error setting up vibe score calculation:', vibeScoreError);
+            } catch (matchScoreError) {
+              console.warn('[EventsContext] Error setting up match score calculation:', matchScoreError);
               // Non-critical, continue
             }
           }
@@ -1122,10 +1126,50 @@ export const EventsProvider = ({ children }) => {
             eventId: event.id,
             userId
           });
-          // Continue with local join even if Firestore update fails
-          // But log the error so we can debug permission issues
+          
+          // If it's a permission error, try a retry with a small delay
+          // Sometimes Firestore needs a moment to propagate the memberIds update
           if (error?.code === 'permission-denied') {
-            console.warn('[EventsContext] Permission denied when saving membership - user may not be able to access members subcollection');
+            console.warn('[EventsContext] Permission denied when saving membership - retrying after delay');
+            try {
+              // Wait a bit for Firestore to propagate the memberIds update
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Get user data for retry
+              let userName = '';
+              let userAvatarUrl = '';
+              if (user && userId === (user.uid || user.id)) {
+                userName = user.name || user.email || '';
+                userAvatarUrl = user.photoURL || user.avatarUrl || '';
+              } else {
+                const userData = await db.collection('users').doc(userId).get().catch(() => null);
+                const userDocData = userData?.data();
+                userName = userDocData?.name || userDocData?.email || '';
+                userAvatarUrl = userDocData?.avatarUrl || '';
+              }
+              
+              // Retry the member document creation
+              const membersRef = groupRef.collection('members').doc(userId);
+              await membersRef.set({
+                userId,
+                userName: userName || userId,
+                userAvatarUrl: userAvatarUrl || null,
+                role: 'member',
+                joinedAt: firebase.firestore.Timestamp.now(),
+                rsvpStatus: null,
+                rsvpStatuses: {},
+              }, { merge: true });
+              
+              console.log('[EventsContext] Member document created successfully on retry');
+            } catch (retryError) {
+              console.error('[EventsContext] Retry also failed:', retryError);
+              // Continue with local join even if Firestore update fails
+              // The user will be able to use the app locally, but Firestore sync will be incomplete
+              console.warn('[EventsContext] User joined locally but Firestore sync failed - some features may not work');
+            }
+          } else {
+            // For other errors, continue with local join
+            console.warn('[EventsContext] User joined locally but Firestore sync failed - some features may not work');
           }
         }
       }

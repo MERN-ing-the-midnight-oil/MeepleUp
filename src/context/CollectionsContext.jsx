@@ -102,10 +102,60 @@ export const CollectionsProvider = ({ children }) => {
             };
           }).filter(g => g.title !== 'Unknown Game');
           
-          if (games.length > 0) {
+          // Enrich games with BGG data from main games collection if missing
+          // Only enrich games that have bggId but are missing BGG metadata
+          const gamesNeedingEnrichment = games.filter(game => 
+            game.bggId && 
+            (!game.mechanics || (Array.isArray(game.mechanics) && game.mechanics.length === 0)) &&
+            (!game.categories || (Array.isArray(game.categories) && game.categories.length === 0)) &&
+            !game.publisher && 
+            !game.averageWeight
+          );
+          
+          if (gamesNeedingEnrichment.length > 0) {
+            console.log(`[Collections] Enriching ${gamesNeedingEnrichment.length} games with BGG data`);
+            const { getGameById } = await import('../services/gameDatabase');
+            const enrichedGames = await Promise.all(
+              games.map(async (game) => {
+                // If game needs enrichment, fetch from games collection
+                if (gamesNeedingEnrichment.includes(game)) {
+                  try {
+                    const bggData = await getGameById(game.bggId);
+                    if (bggData) {
+                      return {
+                        ...game,
+                        mechanics: (game.mechanics && Array.isArray(game.mechanics) && game.mechanics.length > 0) ? game.mechanics : (bggData.mechanics || null),
+                        categories: (game.categories && Array.isArray(game.categories) && game.categories.length > 0) ? game.categories : (bggData.categories || null),
+                        publishers: game.publishers || bggData.publishers || null,
+                        publisher: game.publisher || bggData.publisher || null,
+                        complexity: game.complexity || bggData.complexity || null,
+                        averageWeight: game.averageWeight || bggData.averageWeight || bggData.complexity || null,
+                      };
+                    }
+                  } catch (err) {
+                    // If fetch fails, just use the game as-is
+                    console.warn(`[Collections] Failed to enrich game ${game.bggId} with BGG data:`, err);
+                  }
+                }
+                return game;
+              })
+            );
+            
+            if (enrichedGames.length > 0) {
+              setCollections(prev => ({
+                ...prev,
+                [userId]: enrichedGames,
+              }));
+              return; // Early return after enrichment
+            }
+          }
+          
+          // If no enrichment needed, just set games as-is
+          
+          if (enrichedGames.length > 0) {
             setCollections(prev => ({
               ...prev,
-              [userId]: games,
+              [userId]: enrichedGames,
             }));
           }
         }

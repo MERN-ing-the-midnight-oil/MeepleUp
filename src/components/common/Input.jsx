@@ -18,6 +18,7 @@ const Input = React.forwardRef(({
   textAlignVertical = multiline ? 'top' : 'center',
   onFocus,
   onBlur,
+  placeholderTextColor,
   ...rest
 }, ref) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -43,7 +44,7 @@ const Input = React.forwardRef(({
         disabled && styles.disabled,
       ]}
       placeholder={placeholder}
-      placeholderTextColor={theme.colors.textSecondary}
+      placeholderTextColor={placeholderTextColor || theme.colors.textSecondary}
       value={value}
       onChangeText={onChangeText}
       onKeyPress={onKeyPress}

@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Pressable, Dimensions, useWindowDimensions } from 'react-native';
+import { View, Text, Image, StyleSheet, Pressable, Dimensions, useWindowDimensions, Alert, Animated } from 'react-native';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import GameDetailsModal from './GameDetailsModal';
+import DottedHeart from './DottedHeart';
 import { getColumnCount, BREAKPOINTS } from '../utils/responsive';
 import { theme, commonStyles } from '../utils/theme';
+import { useAuth } from '../context/AuthContext';
+import { useCollections } from '../context/CollectionsContext';
+import { db } from '../config/firebase';
+import firebase from '../config/firebase';
 
 /**
  * Game Card Component with BGG Thumbnails
@@ -14,6 +20,9 @@ import { theme, commonStyles } from '../utils/theme';
  * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
  */
 const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false }) => {
+  const { user } = useAuth();
+  const { collections, updateGameInCollection, addGameToCollection } = useCollections();
+  const userId = user?.uid || user?.id;
   console.log(
     '[GameCard] Rendering for game:',
     game.title || game.id,
@@ -29,6 +38,14 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   const [starRating, setStarRating] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
+  const [isFavorite, setIsFavorite] = useState(false);
+  
+  // Animation values for card press effects
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  
+  // Animation values for favorite heart shimmer effect
+  const shimmerOpacity = useRef(new Animated.Value(1)).current;
+  const shimmerScale = useRef(new Animated.Value(1)).current;
   
   // When inGrid is true or disableModal is true, we're in a grid layout and should use 100% width
   // Otherwise, calculate responsive width
@@ -44,7 +61,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     return StyleSheet.create({
       card: {
         backgroundColor: theme.colors.cardSurface,
-        borderRadius: 0, // Cards should have no rounded corners
+        borderRadius: theme.borderRadius.lg, // Rounded corners
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: 'rgba(201, 183, 156, 0.5)', // Subtle border for flat design
@@ -115,6 +132,110 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     };
   }, [game.title, game.id]);
 
+  // Initialize favorite status from game or user's collection
+  // Use a ref to track the previous favorite status to prevent unnecessary updates
+  const prevFavoriteStatusRef = useRef(null);
+  const gameIdRef = useRef(null);
+  
+  // Store the current game ID
+  useEffect(() => {
+    const currentGameId = game?.bggId || game?.id;
+    if (currentGameId !== gameIdRef.current) {
+      gameIdRef.current = currentGameId;
+      prevFavoriteStatusRef.current = null;
+    }
+  }, [game?.id, game?.bggId]);
+  
+  // Helper to get current favorite status for this specific game
+  const getFavoriteStatus = () => {
+    if (!userId) {
+      return false;
+    }
+
+    const gameId = game.bggId || game.id;
+    if (!gameId) {
+      return game.isFavorite || false;
+    }
+
+    const userGames = collections[userId] || [];
+    const userGame = userGames.find(g => {
+      if (game.bggId && g.bggId) {
+        return g.bggId === game.bggId;
+      }
+      const gId = g.bggId || g.id;
+      return gId === gameId;
+    });
+
+    return userGame?.isFavorite ?? game?.isFavorite ?? false;
+  };
+  
+  // Update favorite status only when THIS specific game's status changes
+  // We check collections on every render but only update state if the value actually changed
+  useEffect(() => {
+    const gameId = game.bggId || game.id;
+    
+    // Only proceed if we're still looking at the same game
+    if (gameId && gameIdRef.current !== gameId) {
+      return;
+    }
+
+    const newFavoriteStatus = getFavoriteStatus();
+    
+    // Only update if the favorite status actually changed for THIS specific game
+    if (prevFavoriteStatusRef.current !== newFavoriteStatus) {
+      setIsFavorite(newFavoriteStatus);
+      prevFavoriteStatusRef.current = newFavoriteStatus;
+    }
+  }, [
+    game?.id, 
+    game?.bggId, 
+    game?.isFavorite, 
+    userId,
+    // Include collections but use ref comparison to only update when THIS game's status changes
+    collections
+  ]);
+
+  // Shimmer animation for favorite hearts - glitter effect
+  useEffect(() => {
+    if (isFavorite) {
+      // Create a looping shimmer/glitter animation with more pronounced effect
+      const shimmerAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(shimmerOpacity, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(shimmerScale, {
+              toValue: 1.2,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.parallel([
+            Animated.timing(shimmerOpacity, {
+              toValue: 0.5,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(shimmerScale, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ]),
+        ])
+      );
+      shimmerAnimation.start();
+      return () => shimmerAnimation.stop();
+    } else {
+      // Reset to default when not favorite
+      shimmerOpacity.setValue(1);
+      shimmerScale.setValue(1);
+    }
+  }, [isFavorite]);
+
   // Memoize computed values to prevent unnecessary recalculations
   // Use thumbnail from preloadedBggData if game doesn't have one stored
   const thumbnail = useMemo(() => {
@@ -170,9 +291,137 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     setIsModalOpen(false);
   };
 
+  // Handle card press animation
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.95,
+      useNativeDriver: true,
+      tension: 300,
+      friction: 10,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 300,
+      friction: 7,
+    }).start();
+  };
+
+  const handleFavoriteToggle = async (e) => {
+    // Stop event propagation to prevent triggering parent handlers
+    if (e && e.stopPropagation) {
+      e.stopPropagation();
+    }
+    
+    if (!userId || !game) return;
+    
+    const newFavoriteStatus = !isFavorite;
+    setIsFavorite(newFavoriteStatus);
+    
+    const gameId = game.bggId || game.id;
+    if (!gameId) return;
+    
+    // Check if user owns the game in their collection
+    const userGames = collections[userId] || [];
+    const userGame = userGames.find(g => {
+      const gId = g.bggId || g.id;
+      return gId === gameId;
+    });
+    
+    if (userGame) {
+      // Update existing game
+      try {
+        await updateGameInCollection(userId, userGame.id, { isFavorite: newFavoriteStatus });
+      } catch (error) {
+        console.error('Error updating favorite status:', error);
+        Alert.alert('Error', 'Failed to update favorite status. Please try again.');
+        // Revert the state change
+        setIsFavorite(!newFavoriteStatus);
+      }
+    } else if (db) {
+      // Create new game entry with favorite status
+      try {
+        // Use bggId as document ID if available, otherwise use game.id or generate one
+        const docId = game.bggId || game.id || db.collection('userGames').doc(userId).collection('games').doc().id;
+        
+        const gameData = {
+          id: docId,
+          title: game.title || 'Unknown Game',
+          bggId: game.bggId || null,
+          image: game.image || game.thumbnail || null,
+          thumbnail: game.thumbnail || null,
+          description: game.description || '',
+          yearPublished: game.yearPublished || null,
+          minPlayers: game.minPlayers || null,
+          maxPlayers: game.maxPlayers || null,
+          playingTime: game.playingTime || null,
+          bggRating: game.bggRating || null,
+          isFavorite: newFavoriteStatus,
+          addedAt: firebase.firestore.Timestamp.now(),
+          updatedAt: firebase.firestore.Timestamp.now(),
+          source: 'manual',
+        };
+        
+        // Add to local collections immediately for instant feedback
+        addGameToCollection(userId, gameData);
+        
+        // Save to Firestore
+        await db.collection('userGames').doc(userId)
+          .collection('games').doc(docId)
+          .set(gameData, { merge: true });
+      } catch (error) {
+        console.error('Error creating favorite game entry:', error);
+        Alert.alert('Error', 'Failed to save favorite. Please try again.');
+        // Revert the state change
+        setIsFavorite(!newFavoriteStatus);
+      }
+    }
+  };
+
   try {
+    const animatedCardStyle = {
+      transform: [{ scale: scaleAnim }],
+    };
+
     return (
-      <View style={[dynamicStyles.card, styles.card]} pointerEvents={disableModal ? 'box-none' : 'auto'}>
+      <Animated.View style={[dynamicStyles.card, styles.card, animatedCardStyle]} pointerEvents={disableModal ? 'box-none' : 'auto'}>
+        {/* Favorite Heart Button - Upper Left */}
+        {userId && (
+          <Pressable
+            style={styles.favoriteButton}
+            onPress={handleFavoriteToggle}
+            onPressIn={(e) => {
+              // Stop propagation immediately on press
+              if (e && e.stopPropagation) {
+                e.stopPropagation();
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={isFavorite ? `Remove ${title} from favorites` : `Add ${title} to favorites`}
+          >
+            <Animated.View
+              style={{
+                opacity: isFavorite ? shimmerOpacity : 1,
+                transform: isFavorite ? [{ scale: shimmerScale }] : [],
+              }}
+            >
+              {isFavorite ? (
+                <FontAwesome5 
+                  name="heart" 
+                  size={16} 
+                  solid={true}
+                  color="#FFD700"
+                />
+              ) : (
+                <DottedHeart size={16} color="#555555" />
+              )}
+            </Animated.View>
+          </Pressable>
+        )}
+
         {/* Delete Button */}
         {onDelete && (
           <Pressable
@@ -188,6 +437,8 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
         {/* Clickable Card Content */}
         <Pressable
           onPress={disableModal ? undefined : openModal}
+          onPressIn={disableModal ? undefined : handlePressIn}
+          onPressOut={disableModal ? undefined : handlePressOut}
           style={styles.cardPressable}
           accessibilityRole="button"
           accessibilityLabel={disableModal ? undefined : `View details for ${title}`}
@@ -257,14 +508,14 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
           onClose={closeModal}
           preloadedBggData={preloadedBggData}
         />
-      </View>
+      </Animated.View>
     );
   } catch (error) {
     console.error('[GameCard] Error rendering game card:', error);
     return (
-      <View style={[dynamicStyles.card, styles.card]}>
+      <Animated.View style={[dynamicStyles.card, styles.card]}>
         <Text style={styles.title}>Error loading game</Text>
-      </View>
+      </Animated.View>
     );
   }
 };
@@ -289,6 +540,11 @@ const getCardWidth = (screenWidth, containerPadding = 0, gap = 8) => {
 const styles = StyleSheet.create({
   card: {
     // Base card styles - width will be overridden by dynamicStyles
+    borderRadius: theme.borderRadius.lg, // Rounded corners
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
+    elevation: 4,
   },
   cardPressable: {
     width: '100%',
@@ -310,6 +566,21 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.xs,
     fontWeight: theme.typography.fontWeight.bold,
     lineHeight: 14,
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: theme.spacing.xs,
+    left: theme.spacing.xs,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100, // Higher z-index to ensure it's above the card Pressable
+    elevation: 5, // Android elevation
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
   },
   thumbnailContainer: {
     width: '100%',

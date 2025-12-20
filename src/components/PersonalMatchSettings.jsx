@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { theme } from '../utils/theme';
+import FaderSlider from './FaderSlider';
 
 const PersonalMatchSettings = ({ onSave }) => {
   const { user, updateUser } = useAuth();
@@ -21,7 +22,7 @@ const PersonalMatchSettings = ({ onSave }) => {
   }, [user]);
 
   const handleWeightChange = (key, value) => {
-    const numValue = parseFloat(value);
+    const numValue = typeof value === 'number' ? value : parseFloat(value);
     if (isNaN(numValue) || numValue < 0) {
       return;
     }
@@ -74,25 +75,17 @@ const PersonalMatchSettings = ({ onSave }) => {
       </Text>
 
       {Object.entries(weights).map(([key, value]) => (
-        <View key={key} style={styles.weightRow}>
-          <View style={styles.weightLabelContainer}>
-            <Text style={styles.weightLabel}>
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-            </Text>
-            <Text style={styles.weightDescription}>
-              {weightDescriptions[key]}
-            </Text>
-          </View>
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.input}
-              value={value.toString()}
-              onChangeText={(text) => handleWeightChange(key, text)}
-              keyboardType="numeric"
-              selectTextOnFocus
-            />
-          </View>
-        </View>
+        <FaderSlider
+          key={key}
+          label={key.charAt(0).toUpperCase() + key.slice(1)}
+          description={weightDescriptions[key]}
+          value={value}
+          onValueChange={(newValue) => handleWeightChange(key, newValue)}
+          minimumValue={0}
+          maximumValue={5}
+          step={0.1}
+          disabled={saving}
+        />
       ))}
 
       <View style={styles.buttonContainer}>
@@ -126,42 +119,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.lg,
     lineHeight: 20,
-  },
-  weightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.md,
-    paddingBottom: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.woodMedium,
-  },
-  weightLabelContainer: {
-    flex: 1,
-    marginRight: theme.spacing.md,
-  },
-  weightLabel: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.xs,
-  },
-  weightDescription: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.textSecondary,
-    lineHeight: 16,
-  },
-  inputContainer: {
-    width: 80,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: theme.colors.woodMedium,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.sm,
-    fontSize: theme.typography.fontSize.base,
-    textAlign: 'center',
-    backgroundColor: theme.colors.surfaceColor,
-    color: theme.colors.textPrimary,
   },
   buttonContainer: {
     flexDirection: 'row',

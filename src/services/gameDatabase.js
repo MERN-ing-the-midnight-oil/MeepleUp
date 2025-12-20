@@ -580,6 +580,13 @@ export async function getGameById(gameId) {
       strategyGamesRank: game.strategyGamesRank || '',
       thematicRank: game.thematicRank || '',
       wargamesRank: game.wargamesRank || '',
+      // BGG data fields for recommendations
+      mechanics: game.mechanics || null,
+      categories: game.categories || null,
+      publishers: game.publishers || null,
+      publisher: game.publisher || null,
+      averageWeight: game.averageWeight || null,
+      complexity: game.complexity || null,
     };
   } catch (error) {
     console.error('[Game Database] Firestore getById error:', error);

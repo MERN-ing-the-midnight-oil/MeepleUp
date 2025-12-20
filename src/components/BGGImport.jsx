@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { useEvents } from '../context/EventsContext';
 import { fetchBGGCollection, getGameDetails } from '../utils/api';
-import { calculateVibeScoresForUser } from '../services/vibeScores';
+import { calculateMatchScoresForUser } from '../services/matchScores';
 import { bggLogoColor } from './BGGLogoAssets';
 import Input from './common/Input';
 import Button from './common/Button';
@@ -218,7 +218,7 @@ const BGGImport = ({ onImportComplete }) => {
       // Update skipped count
       skippedCount = games.length - gamesToImport.length;
 
-      // Recalculate vibe scores for all meepleups user is in (background task)
+      // Recalculate match scores for all meepleups user is in (background task)
       if (successCount > 0 && userIdentifier) {
         try {
           const userEvents = await getUserEvents(userIdentifier);
@@ -228,13 +228,13 @@ const BGGImport = ({ onImportComplete }) => {
           // Calculate scores for each meepleup in background
           userEvents.forEach(event => {
             if (event.id) {
-              calculateVibeScoresForUser(event.id, userIdentifier, userCollection, customWeights).catch(err => {
-                console.warn(`[BGGImport] Error calculating vibe scores for meepleup ${event.id}:`, err);
+              calculateMatchScoresForUser(event.id, userIdentifier, userCollection, customWeights).catch(err => {
+                console.warn(`[BGGImport] Error calculating match scores for meepleup ${event.id}:`, err);
               });
             }
           });
         } catch (err) {
-          console.warn('[BGGImport] Error setting up vibe score recalculation:', err);
+          console.warn('[BGGImport] Error setting up match score recalculation:', err);
           // Non-critical, continue
         }
       }

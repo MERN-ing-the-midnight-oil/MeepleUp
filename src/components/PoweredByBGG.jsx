@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Linking, Platform, Image, useWindowDimensions } from 'react-native';
 import { bggLogoSmall, bggLogoColor, bggLogoLarge, bggLogoExtraLarge, bggLogoBlack } from './BGGLogoAssets';
+import { theme } from '../utils/theme';
 
 /**
  * "Powered by BGG" Logo Component
@@ -28,6 +29,7 @@ import { bggLogoSmall, bggLogoColor, bggLogoLarge, bggLogoExtraLarge, bggLogoBla
  * @param {Object} props.style - Additional styles for container
  * @param {Object} props.textStyle - Additional styles for text
  * @param {number|Object} props.logoSource - Optional logo source (overrides variant and size)
+ * @param {boolean} props.stackedCards - Whether to display as stacked cards (default: false)
  */
 const PoweredByBGG = ({ 
   style, 
@@ -37,7 +39,8 @@ const PoweredByBGG = ({
   showLogo = true,
   autoSize = false,
   containerWidth = null,
-  logoSource: providedLogoSource = null 
+  logoSource: providedLogoSource = null,
+  stackedCards = false
 }) => {
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';

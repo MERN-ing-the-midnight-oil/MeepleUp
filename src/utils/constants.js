@@ -46,3 +46,6 @@ export const ROUTES = {
   CREATE_EVENT: '/create-event',
 };
 
+// Beeple bot user ID - used for system messages from Beeple
+export const BEEPLE_USER_ID = 'beeple';
+

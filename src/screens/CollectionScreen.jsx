@@ -75,22 +75,16 @@ const CollectionScreen = () => {
     }
   }, []);
   
-  // Calculate responsive column count - use 2 columns on mobile when 3 would be too small
-  // Threshold: if screen width < 700px, use 2 columns for better card size; otherwise use 3
+  // Always use 3 columns to match "propose a game" layout
   const numColumns = useMemo(() => {
-    if (width < 700) {
-      return 2; // 2 columns on mobile screens - cards will be ~48% width (bigger, less wasted space)
-    } else {
-      return 3; // 3 columns on tablets and larger - cards will be ~32% width
-    }
-  }, [width]);
+    return 3; // Always 3 columns - cards will be ~32% width
+  }, []);
   
-  // Calculate card width percentage based on number of columns
+  // Calculate card width percentage - use slightly less than 32% to account for spacing
+  // With 3 cards at 31% each = 93%, leaving 7% for 2 gaps (3.5% per gap)
   const cardWidthPercent = useMemo(() => {
-    // For 2 columns: ~48% width (leaving space for gap)
-    // For 3 columns: ~32% width (leaving space for gaps)
-    return numColumns === 2 ? '48%' : '32%';
-  }, [numColumns]);
+    return '31%'; // Slightly less than 32% to ensure 3 cards fit per row with proper spacing
+  }, []);
   
   // Responsive icon size - larger on bigger screens
   const iconSize = width > 768 ? 72 : 64;
@@ -500,7 +494,7 @@ const CollectionScreen = () => {
                   {games.map((game, index) => (
                     <View 
                       key={game.id || `game-${index}`} 
-                      style={[styles.gameCardWrapper, { width: cardWidthPercent }]}
+                      style={styles.gameCardWrapper}
                     >
                       {renderGameCard({ item: game })}
                     </View>
@@ -531,7 +525,7 @@ const CollectionScreen = () => {
           style={[styles.gamescannerIcon, { width: gamescannerIconSize, height: gamescannerIconSize }]}
           resizeMode="contain"
         />
-        <Text style={styles.gamescannerButtonTitle}>Import game titles with our AI scanner</Text>
+        <Text style={styles.gamescannerButtonTitle}>Import game titles with Image recognition</Text>
       </View>
     </Pressable>
   );
@@ -565,7 +559,7 @@ const CollectionScreen = () => {
       <>
         <View style={styles.menuContainer}>
           <Text style={styles.menuTitle}>
-            Please choose a method to create a games inventory. A games inventory will allow your meepleup friends to see what you have in common and discuss what to play at the next get-together.
+            Please choose a method to create a games inventory. A games inventory will allow your group members to see what you have in common and discuss what to play at the next get-together.
           </Text>
           
           {renderInventoryButton()}
@@ -1141,13 +1135,15 @@ const styles = StyleSheet.create({
   categoryGamesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xs,
     justifyContent: 'space-between',
-    gap: theme.spacing.md,
   },
   gameCardWrapper: {
-    // Width will be set dynamically based on numColumns
-    marginBottom: theme.spacing.md,
+    width: '32%', // Fixed width to match BrowseAndProposeScreen exactly
+    flexBasis: '32%', // Ensure flex respects the width
+    flexShrink: 0, // Prevent cards from shrinking
+    flexGrow: 0, // Prevent cards from growing
+    marginBottom: theme.spacing.sm,
     alignSelf: 'flex-start',
   },
   emptyCategoryText: {

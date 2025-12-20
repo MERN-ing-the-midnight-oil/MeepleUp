@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, Alert, Animated } from 'react-native';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+import DottedHeart from './DottedHeart';
 import { getGameById } from '../services/gameDatabase';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import CategoryBadge from './CategoryBadge';
@@ -11,8 +13,8 @@ import { theme, commonStyles } from '../utils/theme';
 import { findGameSimilarities } from '../utils/gameSimilarities';
 import PersonalMatchSettings from '../components/PersonalMatchSettings';
 import BeepleAvatar from '../components/BeepleAvatar';
-import { getVibeScore, calculateVibeScoresForGame } from '../services/vibeScores';
-import { calculateVibeScore } from '../utils/vibeScore';
+import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
+import { calculateMatchScore } from '../utils/matchScore';
 
 const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [] }) => {
   const { user } = useAuth();
@@ -25,9 +27,13 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   const [showPersonalMatch, setShowPersonalMatch] = useState(false);
   const [personalMatchText, setPersonalMatchText] = useState(null);
   const [showPersonalMatchSettings, setShowPersonalMatchSettings] = useState(false);
-  const [vibeScore, setVibeScore] = useState(null);
+  const [matchScore, setMatchScore] = useState(null);
   const isMountedRef = useRef(true);
   const userId = user?.uid || user?.id;
+  
+  // Animation values for favorite heart shimmer effect
+  const shimmerOpacity = useRef(new Animated.Value(1)).current;
+  const shimmerScale = useRef(new Animated.Value(1)).current;
 
   // Update favorite status when game changes (modal opens with new game)
   useEffect(() => {
@@ -53,6 +59,47 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
     setIsFavorite(userGame?.isFavorite || game?.isFavorite || false);
   }, [game?.id, game?.bggId, game?.isFavorite, userId, collections]);
 
+  // Shimmer animation for favorite hearts - glitter effect
+  useEffect(() => {
+    if (isFavorite) {
+      // Create a looping shimmer/glitter animation with more pronounced effect
+      const shimmerAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(shimmerOpacity, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(shimmerScale, {
+              toValue: 1.2,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.parallel([
+            Animated.timing(shimmerOpacity, {
+              toValue: 0.5,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(shimmerScale, {
+              toValue: 1,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+          ]),
+        ])
+      );
+      shimmerAnimation.start();
+      return () => shimmerAnimation.stop();
+    } else {
+      // Reset to default when not favorite
+      shimmerOpacity.setValue(1);
+      shimmerScale.setValue(1);
+    }
+  }, [isFavorite]);
+
 
   // Update bggData when preloadedBggData or game changes
   useEffect(() => {
@@ -61,25 +108,34 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
     }
   }, [preloadedBggData, game?.id, game?.bggId]);
 
-  // Load vibe score when game or eventId changes
+  // Load match score when game or eventId changes
   useEffect(() => {
     if (!game || !eventId || !userId) {
-      setVibeScore(null);
+      setMatchScore(null);
       return;
     }
 
-    const loadVibeScore = async () => {
+    const loadMatchScore = async () => {
       const gameId = game.bggId || game.id;
       if (!gameId) {
-        setVibeScore(null);
+        setMatchScore(null);
         return;
       }
 
       try {
         // Try to get stored score first
-        const storedScore = await getVibeScore(eventId, gameId, userId);
+        const storedScore = await getMatchScore(eventId, gameId, userId);
         if (storedScore !== null) {
-          setVibeScore(storedScore);
+          // Debug logging to catch type issues
+          if (typeof storedScore !== 'number' && typeof storedScore !== 'string') {
+            console.warn('[GameDetailsModal] Invalid storedScore type:', {
+              gameId,
+              storedScore,
+              storedScoreType: typeof storedScore,
+              storedScoreValue: JSON.stringify(storedScore)
+            });
+          }
+          setMatchScore(storedScore);
         } else {
           // Calculate on-demand if not stored
           const userCollection = collections[userId] || [];
@@ -89,25 +145,36 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               _bggData: bggData || preloadedBggData,
             };
             const customWeights = user?.personalMatchWeights || null;
-            const score = calculateVibeScore(gameWithBggData, userCollection, customWeights);
-            setVibeScore(score);
+            const score = calculateMatchScore(gameWithBggData, userCollection, customWeights);
+            
+            // Debug logging to catch type issues
+            if (score !== null && typeof score !== 'number' && typeof score !== 'string') {
+              console.warn('[GameDetailsModal] Invalid calculated score type:', {
+                gameId,
+                score,
+                scoreType: typeof score,
+                scoreValue: JSON.stringify(score)
+              });
+            }
+            
+            setMatchScore(score);
             // Store it for future use (non-blocking)
             if (score !== null && collections) {
-              calculateVibeScoresForGame(eventId, gameId, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
-                console.warn('[GameDetailsModal] Error storing vibe score:', err);
+              calculateMatchScoresForGame(eventId, gameId, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
+                console.warn('[GameDetailsModal] Error storing match score:', err);
               });
             }
           } else {
-            setVibeScore(null);
+            setMatchScore(null);
           }
         }
       } catch (error) {
-        console.warn('[GameDetailsModal] Error loading vibe score:', error);
-        setVibeScore(null);
+        console.warn('[GameDetailsModal] Error loading match score:', error);
+        setMatchScore(null);
       }
     };
 
-    loadVibeScore();
+    loadMatchScore();
   }, [game?.id, game?.bggId, eventId, userId, bggData, preloadedBggData, collections, user?.personalMatchWeights]);
 
   // Initialize badges and rating from preloaded data
@@ -361,12 +428,12 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
 
           {/* Game Details */}
           <View style={styles.modalDetails}>
-            {/* Vibe Score */}
-            {vibeScore !== null && vibeScore !== undefined && userId && (
-              <View style={styles.vibeScoreContainer}>
-                <Text style={styles.vibeScoreLabel}>📊 Personal Vibe Score</Text>
-                <Text style={styles.vibeScoreValue}>{vibeScore}</Text>
-                <Text style={styles.vibeScoreDescription}>
+            {/* Match Score */}
+            {matchScore !== null && matchScore !== undefined && userId && (
+              <View style={styles.matchScoreContainer}>
+                <Text style={styles.matchScoreLabel}>💘 Match Score</Text>
+                <Text style={styles.matchScoreValue}>{String(matchScore)}</Text>
+                <Text style={styles.matchScoreDescription}>
                   Based on your collection and preferences
                 </Text>
               </View>
@@ -544,12 +611,32 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                   onPress={handleFavoriteToggle}
                   activeOpacity={0.7}
                 >
-                  <Text style={[
-                    styles.favoriteButtonText,
-                    isFavorite && styles.favoriteButtonTextActive
-                  ]}>
-                    {isFavorite ? '👑 Favorite' : 'Mark as Favorite'}
-                  </Text>
+                  <View style={styles.favoriteButtonContent}>
+                    <Animated.View
+                      style={{
+                        opacity: isFavorite ? shimmerOpacity : 1,
+                        transform: isFavorite ? [{ scale: shimmerScale }] : [],
+                      }}
+                    >
+                      {isFavorite ? (
+                        <FontAwesome5 
+                          name="heart" 
+                          size={16} 
+                          solid={true}
+                          color="#FFD700"
+                          style={styles.favoriteButtonIcon}
+                        />
+                      ) : (
+                        <DottedHeart size={16} color="#555555" />
+                      )}
+                    </Animated.View>
+                    <Text style={[
+                      styles.favoriteButtonText,
+                      isFavorite && styles.favoriteButtonTextActive
+                    ]}>
+                      {isFavorite ? 'Favorite' : 'Mark as Favorite'}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               </View>
             )}
@@ -830,13 +917,22 @@ const styles = StyleSheet.create({
     borderColor: '#FFD700',
     backgroundColor: '#FFF9E6',
   },
+  favoriteButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  favoriteButtonIcon: {
+    marginRight: 4,
+  },
   favoriteButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: '#555555', // Darker grey when not liked
   },
   favoriteButtonTextActive: {
-    color: '#FF8C00',
+    color: '#FFD700', // Gold color when liked
   },
   modalOwnerSection: {
     marginTop: 16,
@@ -926,7 +1022,7 @@ const styles = StyleSheet.create({
     color: '#dc2626',
     fontWeight: '500',
   },
-  vibeScoreContainer: {
+  matchScoreContainer: {
     backgroundColor: '#FFF9E6',
     borderRadius: 8,
     padding: 16,
@@ -935,19 +1031,19 @@ const styles = StyleSheet.create({
     borderColor: '#FFD700',
     alignItems: 'center',
   },
-  vibeScoreLabel: {
+  matchScoreLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: '#333',
     marginBottom: 4,
   },
-  vibeScoreValue: {
+  matchScoreValue: {
     fontSize: 36,
     fontWeight: 'bold',
     color: '#dc2626',
     marginBottom: 4,
   },
-  vibeScoreDescription: {
+  matchScoreDescription: {
     fontSize: 12,
     color: '#666',
     textAlign: 'center',

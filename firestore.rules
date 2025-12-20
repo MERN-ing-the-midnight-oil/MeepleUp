@@ -68,28 +68,37 @@ service cloud.firestore {
     
     // Gaming Groups
     match /gamingGroups/{groupId} {
-      // Allow reading if authenticated AND (user is in memberIds OR user is the organizer)
-      // Also allow reading during join process - if user can query by joinCode, they should be able to read
-      // This handles cases where memberIds might not be properly set and allows join code flow
-      allow read: if isAuthenticated() && (
-        request.auth.uid in (resource.data.memberIds || []) ||
-        request.auth.uid == resource.data.organizerId ||
-        // Allow reading if group is active (not deleted) - this enables join code flow
-        // Users with join codes can read the group to verify it exists before joining
-        (resource.data.isActive != false && resource.data.deletedAt == null)
-      );
+      // Helper function to check if user can read a group
+      // For queries, get() works server-side to check document data
+      function canReadGroup() {
+        // If user has a member document, they can read the group (most reliable check, doesn't require group read)
+        // Otherwise, check group document data using get() (works server-side for both queries and direct reads)
+        return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+               (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+               (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId) ||
+               (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.isActive != false && 
+                get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.deletedAt == null);
+      }
+      
+      // Allow reading if authenticated AND user can read the group
+      // This works for both direct reads and queries
+      allow read: if isAuthenticated() && canReadGroup();
       allow create: if isAuthenticated();
       // Allow organizers to update/delete, or allow users to add themselves to memberIds when joining
       allow update: if isAuthenticated() && (
         request.auth.uid == resource.data.organizerId ||
         isOrganizerOrCoOrganizer(groupId) ||
-        // Allow users to add themselves to memberIds when joining
+        // Allow users to add themselves to memberIds when joining via join code
         // Check that only memberIds and updatedAt are being modified
         // and that the user is in the new memberIds
+        // Also verify the group is active (has a valid join code scenario)
         // Note: We allow this even if user is already in memberIds to handle edge cases
         // where memberIds exists but member document doesn't, or vice versa
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'updatedAt']) &&
-         request.auth.uid in (request.resource.data.memberIds || []))
+         request.auth.uid in (request.resource.data.memberIds || []) &&
+         // Ensure group is active (allows join code flow)
+         request.resource.data.isActive != false &&
+         request.resource.data.deletedAt == null)
       );
       allow delete: if isAuthenticated() && (
         request.auth.uid == resource.data.organizerId ||
@@ -272,6 +281,27 @@ service cloud.firestore {
           // Allow organizer to update/delete any nomination
           request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
         );
+      }
+
+      // Match Scores - Match Scores for games
+      match /matchScores/{gameId} {
+        // Helper function to check if user can access match scores
+        function canAccessMatchScores() {
+          // Check if user has a member document (most reliable, doesn't require group read)
+          return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
+                 // Otherwise check group document (requires read permission)
+                 (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+                 (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId);
+        }
+        
+        // Allow members to read match scores for all games in the group
+        allow read: if isAuthenticated() && canAccessMatchScores();
+        
+        // Allow members to create/update match scores (for calculation)
+        allow create, update: if isAuthenticated() && canAccessMatchScores();
+        
+        // Don't allow deletion (scores should be recalculated, not deleted)
+        allow delete: if false;
       }
 
       // Private conversations between members

@@ -1,6 +1,7 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { getBlockedUsers } from './blocking';
+import { notifyNewDirectMessage } from '../utils/notifications';
 
 /**
  * Generate a consistent conversation ID from two user IDs
@@ -172,6 +173,35 @@ export const sendMessage = async (eventId, conversationId, senderId, content) =>
       [`unreadCounts.${otherUserId}`]: firebase.firestore.FieldValue.increment(1),
     });
 
+    // Get sender's name and meepleup name for notification
+    let senderName = 'Someone';
+    let groupName = 'MeepleUp';
+    try {
+      const [senderDoc, groupDoc] = await Promise.all([
+        db.collection('users').doc(senderId).get(),
+        db.collection('gamingGroups').doc(eventId).get(),
+      ]);
+      
+      if (senderDoc.exists) {
+        senderName = senderDoc.data().name || senderName;
+      }
+      if (groupDoc.exists) {
+        groupName = groupDoc.data().name || groupName;
+      }
+    } catch (error) {
+      console.error('Error fetching names for notification:', error);
+    }
+
+    // Notify recipient about new message
+    await notifyNewDirectMessage(
+      otherUserId,
+      senderId,
+      senderName,
+      content.trim(),
+      eventId,
+      groupName
+    );
+
     return {
       id: messageDoc.id,
       ...messageData,
@@ -297,6 +327,114 @@ export const getUnreadCount = async (eventId, userId) => {
   } catch (error) {
     console.error('Error getting unread count:', error);
     return 0;
+  }
+};
+
+/**
+ * Find all meepleups where both users are members
+ * @param {string} userId1 - First user ID
+ * @param {string} userId2 - Second user ID
+ * @returns {Promise<Array>} Array of meepleup objects
+ */
+export const findSharedMeepleups = async (userId1, userId2) => {
+  if (!db || !userId1 || !userId2 || userId1 === userId2) {
+    return [];
+  }
+
+  try {
+    // Get all meepleups where userId1 is a member
+    const user1GroupsSnapshot = await db
+      .collection('gamingGroups')
+      .where('memberIds', 'array-contains', userId1)
+      .where('isActive', '==', true)
+      .get();
+
+    const sharedMeepleups = [];
+
+    for (const doc of user1GroupsSnapshot.docs) {
+      const groupData = doc.data();
+      const memberIds = groupData.memberIds || [];
+
+      // Check if userId2 is also a member
+      if (memberIds.includes(userId2)) {
+        sharedMeepleups.push({
+          id: doc.id,
+          name: groupData.name || 'Unnamed MeepleUp',
+          ...groupData,
+        });
+      }
+    }
+
+    return sharedMeepleups;
+  } catch (error) {
+    console.error('Error finding shared meepleups:', error);
+    return [];
+  }
+};
+
+/**
+ * Send a direct message from profile modal
+ * Finds a shared meepleup and sends the message there
+ * @param {string} senderId - User ID sending the message
+ * @param {string} recipientId - User ID receiving the message
+ * @param {string} content - Message content
+ * @returns {Promise<object>} Message data or null if no shared meepleup
+ */
+export const sendDirectMessage = async (senderId, recipientId, content) => {
+  if (!db || !senderId || !recipientId || !content?.trim() || senderId === recipientId) {
+    throw new Error('Invalid parameters for direct message');
+  }
+
+  try {
+    // Find shared meepleups
+    const sharedMeepleups = await findSharedMeepleups(senderId, recipientId);
+
+    if (sharedMeepleups.length === 0) {
+      throw new Error('You must be in at least one MeepleUp together to send messages');
+    }
+
+    // Use the first shared meepleup (or could let user choose)
+    const meepleup = sharedMeepleups[0];
+
+    // Get or create conversation
+    const conversation = await getOrCreateConversation(meepleup.id, senderId, recipientId);
+
+    if (!conversation) {
+      throw new Error('Failed to create conversation');
+    }
+
+    // Send the message
+    const message = await sendMessage(meepleup.id, conversation.id, senderId, content);
+
+    // Get sender's name for notification
+    let senderName = 'Someone';
+    try {
+      const senderDoc = await db.collection('users').doc(senderId).get();
+      if (senderDoc.exists) {
+        senderName = senderDoc.data().name || senderName;
+      }
+    } catch (error) {
+      console.error('Error fetching sender name:', error);
+    }
+
+    // Notify recipient
+    await notifyNewDirectMessage(
+      recipientId,
+      senderId,
+      senderName,
+      content,
+      meepleup.id,
+      meepleup.name
+    );
+
+    return {
+      message,
+      meepleup,
+      conversation,
+    };
+  } catch (error) {
+    console.error('Error sending direct message:', error);
+    throw error;
   }
 };
 

@@ -157,7 +157,6 @@ const EventHub = () => {
   const [activeTab, setActiveTab] = useState(getInitialTab);
   const [addCodeBusy, setAddCodeBusy] = useState(false);
   const [deletingCodes, setDeletingCodes] = useState(new Set()); // Track which codes are being deleted
-  const [showEditSchedule, setShowEditSchedule] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
     selectedDates: [], // Array of { date: Date, startTime: Date, endTime: Date, location: string, address: string, note: string }
     usualStartTime: null, // Optional - no default
@@ -184,8 +183,6 @@ const EventHub = () => {
   const scheduleScrollRef = useRef(null);
   const dateEntryPositions = useRef({}); // Map of index to Y position
   const scrollPositionRef = useRef(0); // Track scroll position to prevent jumps
-  const editScheduleScrollRef = useRef(null); // Ref for Edit Schedule modal ScrollView
-  const editScheduleDatePositions = useRef({}); // Map of index to Y position in Edit Schedule modal
   const isUpdatingRSVPRef = useRef(false); // Track if RSVP update is in progress to prevent modal from closing
   const [memberNames, setMemberNames] = useState({});
   const [memberRSVPs, setMemberRSVPs] = useState({}); // { [userId]: { [dateKey]: status } }
@@ -240,7 +237,6 @@ const EventHub = () => {
   const [showNoConfirmedAttendeesModal, setShowNoConfirmedAttendeesModal] = useState(false);
   const [selectedMemberForAction, setSelectedMemberForAction] = useState(null); // { userId, displayName, role, canShareJoinCode }
   // Collapsible sections state
-  const [isInviteGuestsExpanded, setIsInviteGuestsExpanded] = useState(false);
   const [isMembersExpanded, setIsMembersExpanded] = useState(false);
   // Past events modal state
   const [showPastEventsModal, setShowPastEventsModal] = useState(false);
@@ -1257,50 +1253,6 @@ const EventHub = () => {
     );
   };
 
-  const handleEditSchedule = async () => {
-    if (!isOrganizerOrCoOrganizer) {
-      Alert.alert('Error', 'Only organizers can edit the schedule.');
-      return;
-    }
-
-    if (scheduleForm.selectedDates.length === 0) {
-      Alert.alert('Error', 'Please select at least one date for the event.');
-      return;
-    }
-
-    try {
-      // Convert dates to ISO strings for storage
-      const eventDates = scheduleForm.selectedDates.map(d => ({
-        date: d.date.toISOString(),
-        startTime: d.startTime.toISOString(),
-        endTime: d.endTime.toISOString(),
-        location: d.location || scheduleForm.location || '',
-        address: d.address || d.exactLocation || scheduleForm.address || scheduleForm.exactLocation || '',
-        note: d.note || '',
-      }));
-
-      const updateData = {
-        eventDates,
-        // Keep scheduledFor for backward compatibility (use first date)
-        scheduledFor: scheduleForm.selectedDates[0]?.date.toISOString() || '',
-      };
-
-      // Only include usual times if they're set
-      if (scheduleForm.usualStartTime) {
-        updateData.usualStartTime = scheduleForm.usualStartTime.toISOString();
-      }
-      if (scheduleForm.usualEndTime) {
-        updateData.usualEndTime = scheduleForm.usualEndTime.toISOString();
-      }
-
-      await updateEventSchedule(event.id, userId, updateData);
-      setShowEditSchedule(false);
-      Alert.alert('Success', 'Schedule updated successfully.');
-    } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to update schedule. Please try again.');
-      console.error(error);
-    }
-  };
 
   const handleSaveDefaultTime = async () => {
     if (!isOrganizerOrCoOrganizer) {
@@ -1450,35 +1402,80 @@ const EventHub = () => {
     }
   };
 
-  const handleShareInvite = async () => {
-    try {
-      const shareMessage = `Join my MeepleUp "${event.name}"!\n\nJoin code: ${event.joinCode}`;
-      await Share.share({
-        message: shareMessage,
-        title: `Join ${event.name} on MeepleUp`,
-      });
-    } catch (error) {
-      console.error('Error sharing invite:', error);
-    }
-  };
-
-  const handleAddJoinCode = async () => {
-    if (addCodeBusy) {
-      return;
-    }
-
-    try {
-      setAddCodeBusy(true);
-      const newCode = await addJoinCode(event.id);
+  const handleInviteMembers = async () => {
+    // For organizers, show options to share existing code or create new code
+    if (isOrganizerOrCoOrganizer) {
       Alert.alert(
-        'New code created',
-        `Your new join code is: ${newCode}`,
+        'Invite Members',
+        'Choose an option:',
+        [
+          {
+            text: 'Share existing invite',
+            onPress: async () => {
+              try {
+                const joinCodes = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+                const codeToShare = joinCodes[0] || event.joinCode;
+                const shareMessage = `Join my MeepleUp "${event.name}"!\n\nJoin code: ${codeToShare}`;
+                await Share.share({
+                  message: shareMessage,
+                  title: `Join ${event.name} on MeepleUp`,
+                });
+              } catch (error) {
+                console.error('Error sharing invite:', error);
+              }
+            },
+          },
+          {
+            text: 'Create new code and share',
+            onPress: async () => {
+              if (addCodeBusy) {
+                return;
+              }
+              // Check if we've reached the limit of 10 active join codes
+              const joinCodes = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+              if (joinCodes.length >= 10) {
+                Alert.alert(
+                  'Limit reached',
+                  'You can have a maximum of 10 active join codes. Please delete an existing code before creating a new one.',
+                );
+                return;
+              }
+              try {
+                setAddCodeBusy(true);
+                const newCode = await addJoinCode(event.id);
+                const shareMessage = `Join my MeepleUp "${event.name}"!\n\nJoin code: ${newCode}`;
+                await Share.share({
+                  message: shareMessage,
+                  title: `Join ${event.name} on MeepleUp`,
+                });
+              } catch (error) {
+                Alert.alert('Could not create code', 'Please try again in a moment.');
+                console.error(error);
+              } finally {
+                setAddCodeBusy(false);
+              }
+            },
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+        ],
+        { cancelable: true }
       );
-    } catch (error) {
-      Alert.alert('Could not create code', 'Please try again in a moment.');
-      console.error(error);
-    } finally {
-      setAddCodeBusy(false);
+    } else {
+      // For members with canShareJoinCode, just share the invite
+      try {
+        const joinCodes = event.joinCodes || (event.joinCode ? [event.joinCode] : []);
+        const codeToShare = joinCodes[0] || event.joinCode;
+        const shareMessage = `Join my MeepleUp "${event.name}"!\n\nJoin code: ${codeToShare}`;
+        await Share.share({
+          message: shareMessage,
+          title: `Join ${event.name} on MeepleUp`,
+        });
+      } catch (error) {
+        console.error('Error sharing invite:', error);
+      }
     }
   };
 
@@ -1707,75 +1704,43 @@ const EventHub = () => {
         {/* Invite Members Section + All Event Actions */}
         {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
           <View style={styles.section}>
-            <TouchableOpacity
-              style={styles.collapsibleHeader}
-              onPress={() => setIsInviteGuestsExpanded(!isInviteGuestsExpanded)}
-            >
-              <Text style={styles.sectionTitle}>Invite Members</Text>
-              <Text style={styles.expandIcon}>{isInviteGuestsExpanded ? '▼' : '▶'}</Text>
-            </TouchableOpacity>
-            
             {/* Simple button list */}
             <View style={styles.buttonList}>
               {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
                 <TouchableOpacity
                   style={styles.buttonListItem}
-                  onPress={handleShareInvite}
-                >
-                  <Text style={styles.buttonListText}>📤 Share invite</Text>
-                </TouchableOpacity>
-              )}
-              {isOrganizerOrCoOrganizer && (
-                <TouchableOpacity
-                  style={styles.buttonListItem}
-                  onPress={handleAddJoinCode}
+                  onPress={handleInviteMembers}
                   disabled={addCodeBusy}
                 >
                   <Text style={[styles.buttonListText, addCodeBusy && styles.buttonListTextDisabled]}>
-                    {addCodeBusy ? '⏳ Creating code...' : '➕ New join code'}
+                    {addCodeBusy ? '⏳ Creating code...' : '👥 Invite Members'}
                   </Text>
                 </TouchableOpacity>
               )}
-              {isOrganizerOrCoOrganizer && (
-                <TouchableOpacity
-                  style={styles.buttonListItem}
-                  onPress={handleEditSchedule}
-                >
-                  <Text style={styles.buttonListText}>💾 Save schedule</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                style={styles.buttonListItem}
-                onPress={handleExportToCalendar}
-              >
-                <Text style={styles.buttonListText}>📆 Export calendar</Text>
-              </TouchableOpacity>
             </View>
             
-            {isInviteGuestsExpanded && (
-              <View style={styles.inviteBlock}>
-                <Text style={styles.inviteLabel}>Active join codes</Text>
-                {(event.joinCodes || (event.joinCode ? [event.joinCode] : [])).map((code, index) => {
-                  const isDeleting = deletingCodes.has(code);
-                  return (
-                    <View key={index} style={styles.joinCodeRow}>
-                      <Text style={styles.inviteCode}>{code}</Text>
-                      {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
-                        <TouchableOpacity
-                          onPress={() => handleDeleteJoinCode(code)}
-                          disabled={isDeleting}
-                          style={[styles.deleteCodeButton, isDeleting && styles.deleteCodeButtonDisabled]}
-                        >
-                          <Text style={styles.deleteCodeButtonText}>
-                            {isDeleting ? 'Deleting...' : 'Delete'}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            )}
+            <View style={styles.inviteBlock}>
+              <Text style={styles.inviteLabel}>Active join codes</Text>
+              {(event.joinCodes || (event.joinCode ? [event.joinCode] : [])).slice(0, 10).map((code, index) => {
+                const isDeleting = deletingCodes.has(code);
+                return (
+                  <View key={index} style={styles.joinCodeRow}>
+                    <Text style={styles.inviteCode}>{code}</Text>
+                    {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
+                      <TouchableOpacity
+                        onPress={() => handleDeleteJoinCode(code)}
+                        disabled={isDeleting}
+                        style={[styles.deleteCodeButton, isDeleting && styles.deleteCodeButtonDisabled]}
+                      >
+                        <Text style={styles.deleteCodeButtonText}>
+                          {isDeleting ? 'Deleting...' : 'Delete'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
           </View>
         )}
 
@@ -2088,6 +2053,16 @@ const EventHub = () => {
             />
           </View>
         )}
+
+        {/* Export Calendar Button */}
+        <View style={styles.pastEventsButtonContainer}>
+          <Button
+            label="📆 Export calendar"
+            onPress={handleExportToCalendar}
+            variant="outline"
+            style={styles.pastEventsButton}
+          />
+        </View>
       </View>
 
       {/* Past Events Modal */}
@@ -5271,7 +5246,7 @@ const EventHub = () => {
           onPress={() => setActiveTab(TABS.EVENT)}
         >
           <Text style={[styles.tabText, activeTab === TABS.EVENT && styles.tabTextActive]}>
-            Event
+            Logistics
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -5821,187 +5796,6 @@ const EventHub = () => {
         </Modal>
       )}
 
-      <Modal
-        isOpen={showEditSchedule}
-        onClose={() => setShowEditSchedule(false)}
-        title="Edit Schedule"
-        fullScreen={true}
-      >
-        <ScrollView 
-          ref={editScheduleScrollRef}
-          style={styles.modalContentNoPadding} 
-          contentContainerStyle={styles.modalScrollContent}
-        >
-          {/* Calendar Date Picker */}
-          <View style={styles.modalFieldContainerNoPadding}>
-            <Text style={[styles.fieldLabel, { paddingHorizontal: 20 }]}>Select Event Dates</Text>
-            <View style={[styles.longPressInstructionBox, { marginHorizontal: 20, marginBottom: 12 }]}>
-              <Text style={styles.longPressInstructionText}>
-                📅 <Text style={styles.longPressInstructionBold}>Long-press</Text> a date to add it to your schedule (highlighted in green). The date will be created with default times if available. Tap a selected date to view its details.
-            </Text>
-            </View>
-            <View style={[styles.calendarContainer, { 
-              marginLeft: -24, 
-              marginRight: -24, 
-              width: Dimensions.get('window').width,
-              paddingHorizontal: 0,
-              paddingLeft: 0,
-              paddingRight: 0,
-            }]}>
-              <CalendarDatePicker
-              selectedDates={scheduleForm.selectedDates}
-              onDatesChange={handleDatesChange}
-              minDate={new Date()}
-              usualStartTime={scheduleForm.usualStartTime}
-              usualEndTime={scheduleForm.usualEndTime}
-              onDateTimeEdit={(dateIndex, timeType) => {
-                // When user taps on a time in the calendar, open the time picker
-                setShowTimePicker({ type: timeType || 'start', dateIndex });
-              }}
-              onDatePress={(dateIndex, dateInfo) => {
-                // For organizers in Edit Schedule, open edit modal when tapping a selected date
-                if (isOrganizerOrCoOrganizer && scheduleForm.selectedDates && scheduleForm.selectedDates[dateIndex]) {
-                  const dateItem = scheduleForm.selectedDates[dateIndex];
-                  setSelectedDateDetail({
-                    ...dateItem,
-                    index: dateIndex,
-                    isEditScheduleContext: true, // Flag to indicate we're in Edit Schedule context
-                  });
-                  setEditingDateDetailForm({
-                    date: dateItem.date instanceof Date ? dateItem.date : new Date(dateItem.date),
-                    startTime: dateItem.startTime instanceof Date ? dateItem.startTime : new Date(dateItem.startTime),
-                    endTime: dateItem.endTime instanceof Date ? dateItem.endTime : new Date(dateItem.endTime),
-                    location: dateItem.location || '',
-                    address: dateItem.address || '',
-                    note: dateItem.note || '',
-                  });
-                  setIsEditingDateDetail(true);
-                  setShowDateDetailModal(true);
-                } else if (scheduleForm.selectedDates && scheduleForm.selectedDates[dateIndex]) {
-                  // For non-organizers or fallback, scroll to date details
-                  const dateItem = scheduleForm.selectedDates[dateIndex];
-                  setTimeout(() => {
-                    const position = editScheduleDatePositions.current[dateIndex];
-                    if (position !== undefined && editScheduleScrollRef.current) {
-                      editScheduleScrollRef.current.scrollTo({
-                        y: Math.max(0, position - 20), // Add some padding from top
-                        animated: true,
-                      });
-                    }
-                  }, 100);
-                }
-              }}
-            />
-            </View>
-          </View>
-
-
-          {event.scheduledFor && (
-            <View style={styles.modalActions}>
-              <Button
-                label="📤 Export to Calendar"
-                onPress={handleExportToCalendar}
-                variant="outline"
-                style={styles.modalButton}
-              />
-            </View>
-          )}
-          <View style={styles.modalActions}>
-            <Button
-              label="💾 Save"
-              onPress={handleEditSchedule}
-              style={styles.modalButton}
-            />
-            <Button
-              label="❌ Cancel"
-              onPress={() => setShowEditSchedule(false)}
-              variant="outline"
-              style={styles.modalButton}
-            />
-          </View>
-        </ScrollView>
-
-        {/* Time Picker Modal */}
-        {showTimePicker.type && (
-          Platform.OS === 'ios' ? (
-            <Modal
-              isOpen={true}
-              onClose={() => setShowTimePicker({ type: null, dateIndex: null })}
-              title={
-                showTimePicker.type === 'usualStart' ? 'Usual Start Time' :
-                showTimePicker.type === 'usualEnd' ? 'Usual End Time' :
-                showTimePicker.type === 'start' ? 'Start Time' :
-                'End Time'
-              }
-            >
-              <View style={styles.timePickerModalContent}>
-                <DateTimePicker
-                  value={
-                    showTimePicker.type === 'usualStart' ? (scheduleForm.usualStartTime || new Date(new Date().setHours(18, 0, 0, 0))) :
-                    showTimePicker.type === 'usualEnd' ? (scheduleForm.usualEndTime || new Date(new Date().setHours(22, 0, 0, 0))) :
-                    showTimePicker.dateIndex !== null && scheduleForm.selectedDates[showTimePicker.dateIndex]
-                      ? (showTimePicker.type === 'start' 
-                          ? scheduleForm.selectedDates[showTimePicker.dateIndex].startTime
-                          : scheduleForm.selectedDates[showTimePicker.dateIndex].endTime)
-                      : new Date()
-                  }
-                  mode="time"
-                  display="spinner"
-                  is24Hour={false}
-                  onChange={(event, date) => {
-                    if (date) {
-                      handleTimeChange(event, date, showTimePicker.type, showTimePicker.dateIndex);
-                    }
-                  }}
-                  style={{ width: '100%', height: 200 }}
-                />
-                <View style={styles.iosPickerActions}>
-                  {(showTimePicker.type === 'usualStart' || showTimePicker.type === 'usualEnd') && (
-                    <Button
-                      label="Clear"
-                      onPress={() => {
-                        if (showTimePicker.type === 'usualStart') {
-                          setScheduleForm(prev => ({ ...prev, usualStartTime: null }));
-                        } else if (showTimePicker.type === 'usualEnd') {
-                          setScheduleForm(prev => ({ ...prev, usualEndTime: null }));
-                        }
-                        setShowTimePicker({ type: null, dateIndex: null });
-                      }}
-                      variant="outline"
-                      style={styles.modalButton}
-                    />
-                  )}
-                  <Button
-                    label="✅ Done"
-                    onPress={() => setShowTimePicker({ type: null, dateIndex: null })}
-                    style={styles.modalButton}
-                  />
-                </View>
-              </View>
-            </Modal>
-          ) : (
-            showTimePicker.type && (
-              <DateTimePicker
-                value={
-                  showTimePicker.type === 'usualStart' ? (scheduleForm.usualStartTime || new Date(new Date().setHours(18, 0, 0, 0))) :
-                  showTimePicker.type === 'usualEnd' ? (scheduleForm.usualEndTime || new Date(new Date().setHours(22, 0, 0, 0))) :
-                  showTimePicker.dateIndex !== null && scheduleForm.selectedDates[showTimePicker.dateIndex]
-                    ? (showTimePicker.type === 'start' 
-                        ? scheduleForm.selectedDates[showTimePicker.dateIndex].startTime
-                        : scheduleForm.selectedDates[showTimePicker.dateIndex].endTime)
-                    : new Date()
-                }
-                mode="time"
-                display="default"
-                is24Hour={false}
-                onChange={(event, date) => {
-                  handleTimeChange(event, date, showTimePicker.type, showTimePicker.dateIndex);
-                }}
-              />
-            )
-          )
-        )}
-      </Modal>
 
       {/* Default Time Picker Modal */}
       {showDefaultTimePicker.type && (
@@ -8651,7 +8445,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f7f5',
   },
   dateListTextBlock: {
     flex: 1,

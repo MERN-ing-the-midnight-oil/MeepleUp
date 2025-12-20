@@ -446,7 +446,14 @@ const Onboarding = () => {
             scrollEventThrottle={16}
           >
           <View style={styles.content}>
-            <Text style={styles.title}>Welcome to MeepleUp!</Text>
+            <Text 
+              style={[styles.title, { fontSize: Math.min(width * 0.15, 60) }]} 
+              numberOfLines={1} 
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.5}
+            >
+              Welcome to MeepleUp!
+            </Text>
           <View style={[styles.bggLogoContainer, { width: width * 0.5 }]}>
             <PoweredByBGG 
               size="extraLarge" 
@@ -458,6 +465,9 @@ const Onboarding = () => {
           {/* User's MeepleUps */}
           {Array.isArray(sortedEvents) && sortedEvents.length > 0 && (
             <View style={styles.eventsSection}>
+              <View style={styles.membershipsToken}>
+                <Text style={styles.membershipsTokenText}>Your Memberships</Text>
+              </View>
               {sortedEvents.map((event) => {
                 if (!event || !event.id) return null;
                 const userIdentifier = user?.uid || user?.id;
@@ -488,6 +498,7 @@ const Onboarding = () => {
                     onMemberPress={(userId, userName, avatarUrl) => {
                       setSelectedUserForProfile({ userId, userName, avatarUrl });
                     }}
+                    navigation={navigation}
                   />
                 );
               })}
@@ -510,20 +521,26 @@ const Onboarding = () => {
           <View style={styles.options}>
             <Pressable
               style={({ pressed }) => [
-                styles.optionCard,
-                pressed && styles.optionCardPressed,
+                styles.organizeCard,
+                pressed && styles.organizeCardPressed,
               ]}
               onPress={() => handleModeChange('create')}
             >
-              <View style={styles.optionTitleContainer}>
-                <Text style={styles.plusSymbol}>+</Text>
-                <Text style={styles.optionTitle}>Organize</Text>
+              <View style={styles.organizeTitleContainer}>
+                <Text style={styles.organizeTitle}>Organize a new MeepleUp</Text>
+                <View style={styles.gameCube}>
+                  <View style={styles.cubeFaceTop}>
+                    <Text style={styles.cubePlus}>+</Text>
+                  </View>
+                  <View style={styles.cubeFaceFront}></View>
+                  <View style={styles.cubeFaceRight}></View>
+                </View>
               </View>
-              <Text style={styles.optionText}>
+              <Text style={styles.organizeSubtitle}>
                 Organize your own gaming group and share a join code with friends.
               </Text>
             </Pressable>
-            </View>
+          </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1148,18 +1165,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontSize: theme.typography.fontSize.h1,
     fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.meepleRed,
-    backgroundColor: theme.colors.woodLight,
+    backgroundColor: 'transparent',
     paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.borderRadius.md,
     marginBottom: theme.spacing.xl,
     textAlign: 'center',
   },
   bggLogoContainer: {
-    marginBottom: theme.spacing['2xl'],
+    marginBottom: theme.spacing['2xl'] * 4,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
@@ -1207,12 +1221,15 @@ const styles = StyleSheet.create({
   backButton: {
     marginBottom: theme.spacing.xl,
     alignSelf: 'flex-start',
+    borderRadius: 0,
   },
   input: {
     marginBottom: theme.spacing.lg,
+    borderRadius: 0,
   },
   fullButton: {
     width: '100%',
+    borderRadius: 0,
   },
   error: {
     color: theme.colors.error,
@@ -1279,7 +1296,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.woodLight,
     borderWidth: 2,
     borderColor: theme.colors.woodMedium,
-    borderRadius: theme.borderRadius.md,
+    borderRadius: 0,
     padding: theme.spacing.md,
   },
   pickerText: {
@@ -1317,7 +1334,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surfaceColor,
     borderWidth: 2,
     borderColor: theme.colors.woodMedium,
-    borderRadius: theme.borderRadius.md,
+    borderRadius: 0,
     paddingVertical: theme.spacing.sm,
     paddingHorizontal: theme.spacing.md,
     minHeight: 44,
@@ -1340,6 +1357,7 @@ const styles = StyleSheet.create({
   },
   calendarButton: {
     marginTop: theme.spacing.sm,
+    borderRadius: 0,
   },
   modalContent: {
     padding: theme.spacing.xl,
@@ -1361,6 +1379,7 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     marginBottom: theme.spacing.md,
+    borderRadius: 0,
   },
   iosPickerActions: {
     marginTop: theme.spacing.lg,
@@ -1375,6 +1394,37 @@ const styles = StyleSheet.create({
   eventsSection: {
     width: '100%',
     marginBottom: theme.spacing['2xl'],
+    position: 'relative',
+  },
+  membershipsToken: {
+    alignSelf: 'center',
+    backgroundColor: '#b89d7a', // Cardboard tan/brown color
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing.md * 1.5,
+    paddingVertical: theme.spacing.sm * 1.5,
+    marginBottom: -theme.spacing.sm, // Overlap the top card slightly
+    zIndex: 10, // Ensure it appears above the cards
+    // Sharp shadows on bottom and left for thick card-stock appearance
+    shadowColor: '#000',
+    shadowOffset: { width: -3, height: 4 }, // Negative width for left shadow, positive height for bottom
+    shadowOpacity: 0.6,
+    shadowRadius: 3, // Sharp, less diffuse shadow
+    elevation: 6, // Android shadow
+    // Thicker borders on bottom and left for depth
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderColor: '#6b5435', // Darker brown border
+    borderStyle: 'solid',
+  },
+  membershipsTokenText: {
+    fontSize: theme.typography.fontSize.sm * 1.5,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: '#2b1f14', // Dark brown text on cardboard for good contrast
+    textShadowColor: 'rgba(255, 255, 255, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
   eventsSectionTitle: {
     fontSize: theme.typography.fontSize.lg,
@@ -1385,7 +1435,7 @@ const styles = StyleSheet.create({
   },
   eventCard: {
     backgroundColor: theme.colors.cardSurface,
-    borderRadius: theme.borderRadius.lg,
+    // borderRadius removed - let EventCard component's borderRadius (20px) take effect
     borderWidth: 2,
     borderColor: theme.colors.meepleRed,
     marginBottom: theme.spacing.md,
@@ -1416,7 +1466,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.woodLight,
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.sm,
-    borderRadius: theme.borderRadius.md,
+    borderRadius: 0,
     flex: 1,
   },
   eventCardArrow: {
@@ -1439,11 +1489,108 @@ const styles = StyleSheet.create({
   },
   joinSection: {
     marginBottom: theme.spacing['2xl'],
+    // No background - let the wood show through behind the cardboard
+    // No padding or border - the cardboard container has its own styling
+  },
+  organizeCard: {
+    marginBottom: theme.spacing['2xl'],
+    backgroundColor: '#b89d7a', // Cardboard tan/brown color
+    borderRadius: theme.borderRadius.md,
     padding: theme.spacing.xl,
-    backgroundColor: theme.colors.surfaceColor,
-    borderRadius: theme.borderRadius.lg,
+    // Shadows only on bottom and left - less diffuse
+    shadowColor: '#000',
+    shadowOffset: { width: -4, height: 6 }, // Negative width for left shadow, positive height for bottom
+    shadowOpacity: 0.5,
+    shadowRadius: 6, // Less diffuse shadow
+    elevation: 8, // Android shadow
+    // Thinner borders on top and right, thicker on bottom and left for perspective
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderColor: '#6b5435', // Darker brown border
+    borderStyle: 'solid',
+  },
+  organizeCardPressed: {
+    opacity: 0.9,
+  },
+  organizeTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+    gap: theme.spacing.md,
+  },
+  organizeTitle: {
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.bold,
+    color: '#2b1f14', // Dark brown text on cardboard for good contrast
+    textShadowColor: 'rgba(255, 255, 255, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+    flex: 1,
+  },
+  gameCube: {
+    width: 36,
+    height: 36,
+    position: 'relative',
+  },
+  cubeFaceTop: {
+    position: 'absolute',
+    width: 28,
+    height: 28,
+    backgroundColor: theme.colors.meepleRed,
     borderWidth: 1,
-    borderColor: theme.colors.woodMedium,
+    borderColor: '#a02d22', // Darker red for border
+    justifyContent: 'center',
+    alignItems: 'center',
+    top: 0,
+    left: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 2,
+    elevation: 5,
+  },
+  cubeFaceFront: {
+    position: 'absolute',
+    width: 28,
+    height: 20,
+    backgroundColor: '#a02d22', // Darker red for front face
+    borderWidth: 1,
+    borderColor: '#8b2519',
+    top: 20,
+    left: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  cubeFaceRight: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    backgroundColor: '#8b2519', // Darkest red for right face
+    borderWidth: 1,
+    borderColor: '#6b1c12',
+    top: 20,
+    right: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 3, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  cubePlus: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: theme.typography.fontWeight.bold,
+    textAlign: 'center',
+  },
+  organizeSubtitle: {
+    fontSize: theme.typography.fontSize.base,
+    color: '#4a3d2f', // Darker brown text on cardboard
+    lineHeight: theme.typography.fontSize.base * theme.typography.lineHeight.normal,
   },
   joinTitle: {
     fontSize: theme.typography.fontSize['2xl'],
@@ -1479,6 +1626,7 @@ const styles = StyleSheet.create({
   },
   successModalButton: {
     width: '100%',
+    borderRadius: 0,
   },
 });
 

@@ -1,15 +1,15 @@
 /**
- * Vibe Scores Service
- * Manages calculation and storage of Personal Vibe Scores for games in meepleups
+ * Match Scores Service
+ * Manages calculation and storage of Match Scores for games in meepleups
  */
 
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
-import { calculateVibeScore } from '../utils/vibeScore';
+import { calculateMatchScore } from '../utils/matchScore';
 import { getGameDetails } from '../utils/api';
 
 /**
- * Calculate and store vibe scores for a game for all members of a meepleup
+ * Calculate and store match scores for a game for all members of a meepleup
  * @param {string} eventId - The meepleup/event ID
  * @param {string} gameId - The game ID (BGG ID)
  * @param {Object} game - The game object (optional, will fetch if not provided)
@@ -17,19 +17,22 @@ import { getGameDetails } from '../utils/api';
  * @param {Object} memberWeights - User weights { userId: { publisher: 3, ... } }
  * @returns {Promise<void>}
  */
-export const calculateVibeScoresForGame = async (eventId, gameId, game = null, collections = {}, memberWeights = {}) => {
+export const calculateMatchScoresForGame = async (eventId, gameId, game = null, collections = {}, memberWeights = {}) => {
   if (!db || !eventId || !gameId) {
-    console.warn('[VibeScores] Missing required parameters');
+    console.warn('[MatchScores] Missing required parameters');
     return;
   }
+
+  // Ensure gameId is a string (Firestore document IDs must be strings)
+  const gameIdStr = String(gameId);
 
   try {
     // Get game data if not provided
     let gameData = game;
     if (!gameData) {
-      gameData = await getGameDetails(gameId);
+      gameData = await getGameDetails(gameIdStr);
       if (!gameData) {
-        console.warn(`[VibeScores] Could not fetch game data for ${gameId}`);
+        console.warn(`[MatchScores] Could not fetch game data for ${gameIdStr}`);
         return;
       }
     }
@@ -39,7 +42,7 @@ export const calculateVibeScoresForGame = async (eventId, gameId, game = null, c
       .collection('members').get();
 
     if (membersSnapshot.empty) {
-      console.log('[VibeScores] No members found for meepleup');
+      console.log('[MatchScores] No members found for meepleup');
       return;
     }
 
@@ -71,7 +74,7 @@ export const calculateVibeScoresForGame = async (eventId, gameId, game = null, c
             };
           });
         } catch (err) {
-          console.warn(`[VibeScores] Error fetching collection for user ${userId}:`, err);
+          console.warn(`[MatchScores] Error fetching collection for user ${userId}:`, err);
           continue;
         }
       }
@@ -93,8 +96,8 @@ export const calculateVibeScoresForGame = async (eventId, gameId, game = null, c
         }
       }
 
-      // Calculate vibe score
-      const score = calculateVibeScore(gameData, userCollection, customWeights);
+      // Calculate match score
+      const score = calculateMatchScore(gameData, userCollection, customWeights);
       
       if (score !== null) {
         scores[userId] = score;
@@ -104,24 +107,24 @@ export const calculateVibeScoresForGame = async (eventId, gameId, game = null, c
 
     // Store scores in Firestore
     if (Object.keys(updates).length > 0) {
-      const vibeScoreRef = db.collection('gamingGroups').doc(eventId)
-        .collection('vibeScores').doc(gameId);
+      const matchScoreRef = db.collection('gamingGroups').doc(eventId)
+        .collection('matchScores').doc(gameIdStr);
       
-      await vibeScoreRef.set({
-        gameId,
+      await matchScoreRef.set({
+        gameId: gameIdStr,
         scores: updates,
         updatedAt: firebase.firestore.Timestamp.now(),
       }, { merge: true });
 
-      console.log(`[VibeScores] Calculated scores for ${Object.keys(updates).length} members for game ${gameId}`);
+      console.log(`[MatchScores] Calculated scores for ${Object.keys(updates).length} members for game ${gameIdStr}`);
     }
   } catch (error) {
-    console.error('[VibeScores] Error calculating vibe scores:', error);
+    console.error('[MatchScores] Error calculating match scores:', error);
   }
 };
 
 /**
- * Calculate vibe scores for all games in a meepleup for a specific user
+ * Calculate match scores for all games in a meepleup for a specific user
  * Called when a new member joins or when a user's collection changes
  * @param {string} eventId - The meepleup/event ID
  * @param {string} userId - The user ID
@@ -129,9 +132,9 @@ export const calculateVibeScoresForGame = async (eventId, gameId, game = null, c
  * @param {Object} customWeights - User's custom weights (optional)
  * @returns {Promise<void>}
  */
-export const calculateVibeScoresForUser = async (eventId, userId, userCollection = [], customWeights = null) => {
+export const calculateMatchScoresForUser = async (eventId, userId, userCollection = [], customWeights = null) => {
   if (!db || !eventId || !userId || !userCollection || userCollection.length === 0) {
-    console.warn('[VibeScores] Missing required parameters or empty collection');
+    console.warn('[MatchScores] Missing required parameters or empty collection');
     return;
   }
 
@@ -141,7 +144,7 @@ export const calculateVibeScoresForUser = async (eventId, userId, userCollection
       .collection('members').get();
 
     if (membersSnapshot.empty) {
-      console.log('[VibeScores] No members found for meepleup');
+      console.log('[MatchScores] No members found for meepleup');
       return;
     }
 
@@ -157,7 +160,9 @@ export const calculateVibeScoresForUser = async (eventId, userId, userCollection
         
         memberGamesSnapshot.forEach(doc => {
           const data = doc.data();
-          const gameId = data.bggId || doc.id;
+          // Ensure gameId is always a string (Firestore document IDs must be strings)
+          const rawGameId = data.bggId || doc.id;
+          const gameId = rawGameId ? String(rawGameId) : null;
           if (gameId && !allGames.has(gameId)) {
             allGames.set(gameId, {
               id: doc.id,
@@ -173,12 +178,12 @@ export const calculateVibeScoresForUser = async (eventId, userId, userCollection
           }
         });
       } catch (err) {
-        console.warn(`[VibeScores] Error fetching games for member ${memberId}:`, err);
+        console.warn(`[MatchScores] Error fetching games for member ${memberId}:`, err);
         // Continue with other members
       }
     }
 
-    console.log(`[VibeScores] Found ${allGames.size} unique games in meepleup`);
+    console.log(`[MatchScores] Found ${allGames.size} unique games in meepleup`);
 
     // Calculate score for each game
     // Use batches to avoid Firestore limits (500 operations per batch)
@@ -192,12 +197,15 @@ export const calculateVibeScoresForUser = async (eventId, userId, userCollection
       let batchUpdateCount = 0;
 
       for (const [gameId, game] of batchGames) {
+        // Ensure gameId is always a string (Firestore document IDs must be strings)
+        const gameIdStr = String(gameId);
+        
         // Try to get full game data from gameDatabase if needed
         let gameData = game;
         if (!gameData.mechanics && !gameData.categories && gameData.bggId) {
           try {
             const { getGameById } = await import('../services/gameDatabase');
-            const fullGameData = await getGameById(gameData.bggId);
+            const fullGameData = await getGameById(String(gameData.bggId));
             if (fullGameData) {
               gameData = {
                 ...gameData,
@@ -214,14 +222,15 @@ export const calculateVibeScoresForUser = async (eventId, userId, userCollection
           }
         }
 
-        const score = calculateVibeScore(gameData, userCollection, customWeights);
+        const score = calculateMatchScore(gameData, userCollection, customWeights);
         
         if (score !== null) {
-          const vibeScoreRef = db.collection('gamingGroups').doc(eventId)
-            .collection('vibeScores').doc(gameId);
+          // gameIdStr is already defined above
+          const matchScoreRef = db.collection('gamingGroups').doc(eventId)
+            .collection('matchScores').doc(gameIdStr);
           
-          batch.set(vibeScoreRef, {
-            gameId,
+          batch.set(matchScoreRef, {
+            gameId: gameIdStr,
             [`scores.${userId}`]: score,
             updatedAt: firebase.firestore.Timestamp.now(),
           }, { merge: true });
@@ -236,64 +245,76 @@ export const calculateVibeScoresForUser = async (eventId, userId, userCollection
     }
 
     if (totalUpdated > 0) {
-      console.log(`[VibeScores] Calculated scores for ${totalUpdated} games for user ${userId}`);
+      console.log(`[MatchScores] Calculated scores for ${totalUpdated} games for user ${userId}`);
     }
   } catch (error) {
-    console.error('[VibeScores] Error calculating vibe scores for user:', error);
+    console.error('[MatchScores] Error calculating match scores for user:', error);
   }
 };
 
 /**
- * Get vibe score for a specific game and user
+ * Get match score for a specific game and user
  * @param {string} eventId - The meepleup/event ID
  * @param {string} gameId - The game ID
  * @param {string} userId - The user ID
- * @returns {Promise<number|null>} The vibe score or null if not found
+ * @returns {Promise<number|null>} The match score or null if not found
  */
-export const getVibeScore = async (eventId, gameId, userId) => {
+export const getMatchScore = async (eventId, gameId, userId) => {
   if (!db || !eventId || !gameId || !userId) {
     return null;
   }
 
+  // Ensure gameId is a string (Firestore document IDs must be strings)
+  const gameIdStr = String(gameId);
+
   try {
-    const vibeScoreDoc = await db.collection('gamingGroups').doc(eventId)
-      .collection('vibeScores').doc(gameId).get();
+    const matchScoreDoc = await db.collection('gamingGroups').doc(eventId)
+      .collection('matchScores').doc(gameIdStr).get();
     
-    if (vibeScoreDoc.exists) {
-      const data = vibeScoreDoc.data();
-      return data.scores?.[userId] || null;
+    if (matchScoreDoc.exists) {
+      const data = matchScoreDoc.data();
+      const score = data.scores?.[userId];
+      // Ensure we return a number or null, never an object
+      if (score !== null && score !== undefined) {
+        const numScore = typeof score === 'number' ? score : Number(score);
+        return isNaN(numScore) ? null : numScore;
+      }
+      return null;
     }
     
     return null;
   } catch (error) {
-    console.error('[VibeScores] Error getting vibe score:', error);
+    console.error('[MatchScores] Error getting match score:', error);
     return null;
   }
 };
 
 /**
- * Get all vibe scores for a game
+ * Get all match scores for a game
  * @param {string} eventId - The meepleup/event ID
  * @param {string} gameId - The game ID
  * @returns {Promise<Object>} Object mapping userId to score
  */
-export const getVibeScoresForGame = async (eventId, gameId) => {
+export const getMatchScoresForGame = async (eventId, gameId) => {
   if (!db || !eventId || !gameId) {
     return {};
   }
 
+  // Ensure gameId is a string (Firestore document IDs must be strings)
+  const gameIdStr = String(gameId);
+
   try {
-    const vibeScoreDoc = await db.collection('gamingGroups').doc(eventId)
-      .collection('vibeScores').doc(gameId).get();
+    const matchScoreDoc = await db.collection('gamingGroups').doc(eventId)
+      .collection('matchScores').doc(gameIdStr).get();
     
-    if (vibeScoreDoc.exists) {
-      const data = vibeScoreDoc.data();
+    if (matchScoreDoc.exists) {
+      const data = matchScoreDoc.data();
       return data.scores || {};
     }
     
     return {};
   } catch (error) {
-    console.error('[VibeScores] Error getting vibe scores:', error);
+    console.error('[MatchScores] Error getting match scores:', error);
     return {};
   }
 };

@@ -17,6 +17,7 @@ import { theme, commonStyles } from '../utils/theme';
 import { formatDate } from '../utils/helpers';
 import { validateJoinCode } from '../utils/api';
 import { useUnifiedNavigation } from '../utils/navigation';
+import { useNavigation } from '@react-navigation/native';
 import { db } from '../config/firebase';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -28,6 +29,7 @@ import UserProfileModal from '../components/UserProfileModal';
 
 const EventsScreen = () => {
   const navigate = useUnifiedNavigation();
+  const navigation = Platform.OS !== 'web' ? useNavigation() : null;
   const { user } = useAuth();
   const { width } = useWindowDimensions();
   const { isMobile, isTablet } = useResponsive();
@@ -498,6 +500,7 @@ const EventsScreen = () => {
                   onMemberPress={(userId, userName, avatarUrl) => {
                     setSelectedUserForProfile({ userId, userName, avatarUrl });
                   }}
+                  navigation={navigation}
                 />
               );
             })}

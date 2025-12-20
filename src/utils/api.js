@@ -495,6 +495,12 @@ export const getGameDetails = async (gameId) => {
           wargamesRank: firestoreGame.wargamesRank || '',
           childrensGamesRank: firestoreGame.childrensGamesRank || '',
           cgsRank: firestoreGame.cgsRank || '',
+          // BGG data fields for recommendations
+          mechanics: firestoreGame.mechanics || null,
+          categories: firestoreGame.categories || null,
+          publishers: firestoreGame.publishers || null,
+          publisher: firestoreGame.publisher || null,
+          averageWeight: firestoreGame.averageWeight || firestoreGame.complexity || null,
         };
         hasThumbnail = !!(gameData.thumbnail || gameData.image);
       }
@@ -534,6 +540,13 @@ export const getGameDetails = async (gameId) => {
           if (!gameData.wargamesRank && bggData.wargamesRank) gameData.wargamesRank = bggData.wargamesRank;
           if (!gameData.childrensGamesRank && bggData.childrensGamesRank) gameData.childrensGamesRank = bggData.childrensGamesRank;
           if (!gameData.cgsRank && bggData.cgsRank) gameData.cgsRank = bggData.cgsRank;
+          
+          // Update BGG data fields for recommendations if they're missing
+          if (!gameData.mechanics && bggData.mechanics) gameData.mechanics = bggData.mechanics;
+          if (!gameData.categories && bggData.categories) gameData.categories = bggData.categories;
+          if (!gameData.publishers && bggData.publishers) gameData.publishers = bggData.publishers;
+          if (!gameData.publisher && bggData.publisher) gameData.publisher = bggData.publisher;
+          if (!gameData.averageWeight && (bggData.averageWeight || bggData.complexity)) gameData.averageWeight = bggData.averageWeight || bggData.complexity;
           
           // Cache BGG data to Firestore for future use (non-blocking)
           try {
@@ -595,6 +608,12 @@ export const getGameDetails = async (gameId) => {
             wargamesRank: bggData.wargamesRank || '',
             childrensGamesRank: bggData.childrensGamesRank || '',
             cgsRank: bggData.cgsRank || '',
+            // BGG data fields for recommendations
+            mechanics: bggData.mechanics || null,
+            categories: bggData.categories || null,
+            publishers: bggData.publishers || null,
+            publisher: bggData.publisher || null,
+            averageWeight: bggData.averageWeight || bggData.complexity || null,
           };
           
           // Cache BGG data to Firestore for future use (non-blocking)

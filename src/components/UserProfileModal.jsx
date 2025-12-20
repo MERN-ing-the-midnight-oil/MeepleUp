@@ -11,11 +11,14 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
+import { useEvents } from '../context/EventsContext';
 import { db } from '../config/firebase';
 import Modal from './common/Modal';
 import GameCard from './GameCard';
 import { blockUser, unblockUser, isUserBlocked, reportUser } from '../services/blocking';
+import { sendDirectMessage, findSharedMeepleups } from '../services/messaging';
 import Input from './common/Input';
+import Button from './common/Button';
 import { theme } from '../utils/theme';
 
 // All game categories in order
@@ -30,6 +33,7 @@ const UserProfileModal = ({
 }) => {
   const { user: currentUser } = useAuth();
   const { getUserCollection } = useCollections();
+  const { getUserEvents } = useEvents();
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState('profile'); // 'profile', 'library', 'message'
@@ -41,6 +45,9 @@ const UserProfileModal = ({
   const [reportDescription, setReportDescription] = useState('');
   const [reporting, setReporting] = useState(false);
   const [blocking, setBlocking] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [sharedMeepleups, setSharedMeepleups] = useState([]);
+  const [selectedMeepleup, setSelectedMeepleup] = useState(null);
 
   useEffect(() => {
     if (isOpen && userId) {
@@ -52,8 +59,24 @@ const UserProfileModal = ({
       setShowReportModal(false);
       setReportReason('');
       setReportDescription('');
+      setSelectedMeepleup(null);
+      loadSharedMeepleups();
     }
   }, [isOpen, userId]);
+
+  const loadSharedMeepleups = async () => {
+    if (!userId || !currentUser) return;
+    const currentUserId = currentUser?.uid || currentUser?.id;
+    try {
+      const shared = await findSharedMeepleups(currentUserId, userId);
+      setSharedMeepleups(shared);
+      if (shared.length > 0) {
+        setSelectedMeepleup(shared[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading shared meepleups:', error);
+    }
+  };
 
   const checkIfBlocked = async () => {
     if (!userId || !currentUser) return;
@@ -118,10 +141,47 @@ const UserProfileModal = ({
     setUserGames(games);
   };
 
-  const handleSendMessage = () => {
-    // TODO: Implement messaging functionality
-    // For now, show an alert
-    alert('Messaging feature coming soon!');
+  const handleSendMessage = async () => {
+    if (!messageText.trim()) {
+      Alert.alert('Message Required', 'Please enter a message to send.');
+      return;
+    }
+
+    if (!userId || !currentUser) {
+      Alert.alert('Error', 'Unable to send message. Please try again.');
+      return;
+    }
+
+    const currentUserId = currentUser?.uid || currentUser?.id;
+    
+    if (sharedMeepleups.length === 0) {
+      Alert.alert(
+        'No Shared MeepleUps',
+        'You must be in at least one MeepleUp together to send messages.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setSendingMessage(true);
+    try {
+      await sendDirectMessage(currentUserId, userId, messageText.trim());
+      Alert.alert('Message Sent', 'Your message has been sent successfully!', [
+        { text: 'OK', onPress: () => {
+          setMessageText('');
+          setView('profile');
+        }}
+      ]);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to send message. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   const handleBlockUser = async () => {
@@ -274,10 +334,20 @@ const UserProfileModal = ({
             </Text>
           </TouchableOpacity>
 
-          {!isCurrentUser && (
+          {!isCurrentUser && !isBlocked && (
             <TouchableOpacity
               style={[styles.actionButton, styles.messageButton]}
-              onPress={() => setView('message')}
+              onPress={() => {
+                if (sharedMeepleups.length === 0) {
+                  Alert.alert(
+                    'No Shared MeepleUps',
+                    'You must be in at least one MeepleUp together to send messages.',
+                    [{ text: 'OK' }]
+                  );
+                } else {
+                  setView('message');
+                }
+              }}
             >
               <Text style={styles.actionButtonText}>💬 Send Message</Text>
             </TouchableOpacity>
@@ -342,6 +412,22 @@ const UserProfileModal = ({
   };
 
   const renderMessageView = () => {
+    if (sharedMeepleups.length === 0) {
+      return (
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+          <View style={styles.messageHeader}>
+            <Text style={styles.messageTitle}>Send Message</Text>
+            <Text style={styles.messageSubtitle}>To: {userProfile?.name || 'User'}</Text>
+          </View>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>
+              You must be in at least one MeepleUp together to send messages.
+            </Text>
+          </View>
+        </ScrollView>
+      );
+    }
+
     return (
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.messageHeader}>
@@ -349,20 +435,54 @@ const UserProfileModal = ({
           <Text style={styles.messageSubtitle}>To: {userProfile?.name || 'User'}</Text>
         </View>
 
+        {sharedMeepleups.length > 1 && (
+          <View style={styles.meepleupSelector}>
+            <Text style={styles.messageLabel}>Send via MeepleUp:</Text>
+            {sharedMeepleups.map((meepleup) => (
+              <TouchableOpacity
+                key={meepleup.id}
+                style={[
+                  styles.meepleupOption,
+                  selectedMeepleup === meepleup.id && styles.meepleupOptionSelected,
+                ]}
+                onPress={() => setSelectedMeepleup(meepleup.id)}
+              >
+                <Text
+                  style={[
+                    styles.meepleupOptionText,
+                    selectedMeepleup === meepleup.id && styles.meepleupOptionTextSelected,
+                  ]}
+                >
+                  {meepleup.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <View style={styles.messageForm}>
           <Text style={styles.messageLabel}>Message:</Text>
-          <View style={styles.messageInputContainer}>
-            <Text style={styles.messageInputPlaceholder}>
-              Messaging feature coming soon! This will allow you to send direct messages to other users.
-            </Text>
-          </View>
+          <Input
+            value={messageText}
+            onChangeText={setMessageText}
+            placeholder="Type your message here..."
+            multiline
+            numberOfLines={6}
+            style={styles.messageInput}
+            maxLength={1000}
+          />
+          <Text style={styles.messageCharCount}>
+            {messageText.length}/1000 characters
+          </Text>
 
-          <TouchableOpacity
-            style={[styles.actionButton, styles.sendButton]}
+          <Button
             onPress={handleSendMessage}
+            disabled={!messageText.trim() || sendingMessage}
+            loading={sendingMessage}
+            style={[styles.sendButton, !messageText.trim() && styles.sendButtonDisabled]}
           >
-            <Text style={styles.actionButtonText}>Send Message</Text>
-          </TouchableOpacity>
+            {sendingMessage ? 'Sending...' : 'Send Message'}
+          </Button>
         </View>
       </ScrollView>
     );
@@ -618,18 +738,42 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 8,
   },
-  messageInputContainer: {
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    padding: 12,
+  messageInput: {
     minHeight: 120,
+    marginBottom: 8,
+    textAlignVertical: 'top',
+  },
+  messageCharCount: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
     marginBottom: 16,
   },
-  messageInputPlaceholder: {
+  meepleupSelector: {
+    marginBottom: 20,
+  },
+  meepleupOption: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginBottom: 8,
+    backgroundColor: '#fff',
+  },
+  meepleupOptionSelected: {
+    borderColor: '#4a90e2',
+    backgroundColor: '#f0f7ff',
+  },
+  meepleupOptionText: {
     fontSize: 14,
-    color: '#999',
-    fontStyle: 'italic',
+    color: '#333',
+  },
+  meepleupOptionTextSelected: {
+    color: '#4a90e2',
+    fontWeight: '600',
+  },
+  sendButtonDisabled: {
+    opacity: 0.5,
   },
   backButton: {
     padding: 16,

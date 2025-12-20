@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { EventsProvider } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
 import { AvailabilityProvider } from './context/AvailabilityContext';
+import { NotificationProvider } from './context/NotificationContext';
 import WebNavigation from './components/WebNavigation';
 import ParallaxBackground from './components/ParallaxBackground';
 import Onboarding from './screens/Onboarding';
@@ -126,7 +127,9 @@ const App = () => {
       <AvailabilityProvider>
         <EventsProvider>
           <CollectionsProvider>
-            <AppContent />
+            <NotificationProvider>
+              <AppContent />
+            </NotificationProvider>
           </CollectionsProvider>
         </EventsProvider>
       </AvailabilityProvider>

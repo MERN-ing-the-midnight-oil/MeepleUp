@@ -125,6 +125,76 @@ export const isNotificationEnabled = (preferences, notificationType) => {
 };
 
 /**
+ * Notify meepleup members when someone adds games to their collection
+ * @param {string} userId - User ID who added games
+ * @param {string} userName - Name of user who added games
+ * @param {number} gameCount - Number of games added
+ */
+export const notifyGameAdditions = async (userId, userName, gameCount) => {
+  if (!userId || !db || !gameCount || gameCount <= 0) {
+    return;
+  }
+
+  try {
+    // Find all meepleups this user belongs to
+    const groupsSnapshot = await db
+      .collection('gamingGroups')
+      .where('memberIds', 'array-contains', userId)
+      .get();
+
+    if (groupsSnapshot.empty) {
+      return;
+    }
+
+    const batch = db.batch();
+    let notificationCount = 0;
+
+    for (const groupDoc of groupsSnapshot.docs) {
+      const groupData = groupDoc.data();
+      const groupId = groupDoc.id;
+      const groupName = groupData.name || 'your MeepleUp';
+      const memberIds = groupData.memberIds || [];
+
+      // Notify all other members
+      for (const memberId of memberIds) {
+        if (memberId === userId) continue; // Skip the user who added games
+
+        // Get member's preferences
+        const preferences = await getUserNotificationPreferences(memberId);
+        
+        if (isNotificationEnabled(preferences, 'meepleupChanges')) {
+          const notificationsRef = db.collection('users').doc(memberId).collection('notifications');
+          const notificationId = notificationsRef.doc().id;
+
+          const message = `${userName} added ${gameCount} new game${gameCount > 1 ? 's' : ''} to their collection in ${groupName}`;
+
+          const notification = {
+            id: notificationId,
+            type: 'game_added',
+            groupId: groupId,
+            fromUserId: userId,
+            fromUserName: userName,
+            message: message,
+            read: false,
+            createdAt: firebase.firestore.Timestamp.now(),
+          };
+
+          batch.set(notificationsRef.doc(notificationId), notification);
+          notificationCount++;
+        }
+      }
+    }
+
+    if (notificationCount > 0) {
+      await batch.commit();
+      console.log(`Created ${notificationCount} game addition notifications for user ${userId}`);
+    }
+  } catch (error) {
+    console.error('Error notifying about game additions:', error);
+  }
+};
+
+/**
  * Notify members of a MeepleUp about changes (posts, comments, updates)
  * @param {string} groupId - MeepleUp/Group ID
  * @param {string} excludeUserId - User ID to exclude from notifications (the one who made the change)
@@ -565,6 +635,130 @@ export const calculateZipcodeDistance = (zipcode1, zipcode2) => {
   }
 
   return estimatedDistance;
+};
+
+/**
+ * Notify user about a new direct message
+ * @param {string} recipientId - User ID receiving the message
+ * @param {string} senderId - User ID sending the message
+ * @param {string} senderName - Name of sender
+ * @param {string} messagePreview - Preview of the message
+ * @param {string} groupId - MeepleUp ID where message was sent
+ * @param {string} groupName - MeepleUp name
+ */
+export const notifyNewDirectMessage = async (
+  recipientId,
+  senderId,
+  senderName,
+  messagePreview,
+  groupId,
+  groupName
+) => {
+  if (!recipientId || !senderId || !db) {
+    return;
+  }
+
+  try {
+    // Get recipient's notification preferences
+    const preferences = await getUserNotificationPreferences(recipientId);
+
+    // Create in-app notification
+    const notificationId = await createNotification(recipientId, {
+      type: 'new_message',
+      groupId: groupId,
+      fromUserId: senderId,
+      fromUserName: senderName,
+      message: `${senderName} sent you a message in ${groupName || 'a MeepleUp'}`,
+    });
+
+    // Send push notification if enabled
+    if (preferences?.meepleupChanges !== false) {
+      try {
+        await sendPushNotification(recipientId, `${senderName}: ${messagePreview.substring(0, 50)}${messagePreview.length > 50 ? '...' : ''}`, {
+          type: 'new_message',
+          groupId: groupId,
+          groupName: groupName,
+          senderId: senderId,
+          senderName: senderName,
+        });
+      } catch (pushError) {
+        console.error('Error sending push notification for DM:', pushError);
+      }
+    }
+
+    // Send email if enabled
+    if (preferences?.meepleupChangesEmail === true && notificationId) {
+      try {
+        await sendDirectMessageEmail(recipientId, senderName, messagePreview, groupName, groupId);
+      } catch (emailError) {
+        console.error('Error sending email notification for DM:', emailError);
+      }
+    }
+  } catch (error) {
+    console.error('Error notifying about direct message:', error);
+  }
+};
+
+/**
+ * Send email notification for direct message
+ * @param {string} recipientId - User ID receiving the message
+ * @param {string} senderName - Name of sender
+ * @param {string} messagePreview - Preview of the message
+ * @param {string} groupName - MeepleUp name
+ * @param {string} groupId - MeepleUp ID
+ */
+const sendDirectMessageEmail = async (recipientId, senderName, messagePreview, groupName, groupId) => {
+  if (!recipientId || !db) {
+    return;
+  }
+
+  try {
+    const recipientDoc = await db.collection('users').doc(recipientId).get();
+    if (!recipientDoc.exists) {
+      console.warn(`Cannot send email: user ${recipientId} not found`);
+      return;
+    }
+
+    const recipientData = recipientDoc.data();
+    const recipientEmail = recipientData.email;
+
+    if (!recipientEmail) {
+      console.warn(`Cannot send email: user ${recipientId} has no email`);
+      return;
+    }
+
+    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
+    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendDirectMessageEmail`;
+
+    try {
+      const response = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: recipientEmail,
+          subject: `New message from ${senderName} in ${groupName || 'MeepleUp'}`,
+          senderName: senderName,
+          messagePreview: messagePreview,
+          groupName: groupName || 'MeepleUp',
+          groupId: groupId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Email service returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`Direct message email sent to ${recipientEmail}`, result);
+    } catch (error) {
+      console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
+    }
+  } catch (error) {
+    console.error('Error in sendDirectMessageEmail:', error);
+  }
 };
 
 /**

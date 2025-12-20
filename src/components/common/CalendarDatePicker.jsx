@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { getHolidayForDate, HolidayIcon } from '../../utils/holidays';
+import storage from '../../utils/storage';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -34,7 +35,11 @@ const CalendarDatePicker = ({
   const startYear = today.getFullYear();
   
   const [currentMonthIndex, setCurrentMonthIndex] = useState(0);
+  const [isInitialized, setIsInitialized] = useState(false);
   const scrollViewRef = useRef(null);
+  
+  // Storage key for persisting the last viewed month
+  const STORAGE_KEY = 'calendar_last_month_index';
 
   // Helper function to convert date to key - use LOCAL time components
   const dateToKey = (date) => {
@@ -163,6 +168,51 @@ const CalendarDatePicker = ({
   // Parent container should handle any necessary padding
   const availableWidth = screenWidth;
   const dayWidth = Math.floor(availableWidth / 7); // Each day gets exactly 1/7 of width
+
+  // Load saved month index on mount
+  useEffect(() => {
+    const loadSavedMonth = async () => {
+      try {
+        const savedIndex = await storage.getItem(STORAGE_KEY);
+        if (savedIndex !== null) {
+          const index = parseInt(savedIndex, 10);
+          // Validate that the index is within bounds (we always generate 12 months)
+          const maxMonths = 12;
+          if (index >= 0 && index < maxMonths) {
+            setCurrentMonthIndex(index);
+            // Scroll to the saved position after a brief delay to ensure layout is complete
+            setTimeout(() => {
+              scrollViewRef.current?.scrollTo({
+                x: index * screenWidth,
+                animated: false,
+              });
+            }, 100);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading saved month index:', error);
+      } finally {
+        setIsInitialized(true);
+      }
+    };
+    
+    loadSavedMonth();
+  }, []); // Only run on mount
+
+  // Save month index whenever it changes (but not on initial load)
+  useEffect(() => {
+    if (isInitialized) {
+      const saveMonthIndex = async () => {
+        try {
+          await storage.setItem(STORAGE_KEY, currentMonthIndex.toString());
+        } catch (error) {
+          console.error('Error saving month index:', error);
+        }
+      };
+      
+      saveMonthIndex();
+    }
+  }, [currentMonthIndex, isInitialized]);
 
   const handleScroll = (event) => {
     const offsetX = event.nativeEvent.contentOffset.x;

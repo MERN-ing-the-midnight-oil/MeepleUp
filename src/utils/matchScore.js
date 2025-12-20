@@ -1,13 +1,13 @@
 /**
- * Calculates a Personal Vibe Score (0-100) for a game based on user's collection
+ * Calculates a Match Score (0-100) for a game based on user's collection
  * Uses the same matching logic as Personal Match but returns a numeric score
  * 
  * @param {Object} game - The game to score
  * @param {Array} userCollection - User's owned games from CollectionsContext
  * @param {Object} customWeights - Optional custom weights for matching criteria
- * @returns {number} Vibe score from 0-100, or null if insufficient data
+ * @returns {number} Match score from 0-100, or null if insufficient data
  */
-export const calculateVibeScore = (game, userCollection, customWeights = null) => {
+export const calculateMatchScore = (game, userCollection, customWeights = null) => {
   if (!game || !userCollection || userCollection.length === 0) {
     return null;
   }

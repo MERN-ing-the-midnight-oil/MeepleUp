@@ -69,7 +69,7 @@
 
 .game-card {
   background-color: var(--surface-color);
-  border-radius: 0; /* Cards should have no rounded corners */
+  border-radius: var(--radius-lg); /* Rounded corners */
   overflow: hidden;
   box-shadow: none; /* Flat design - no shadows */
   border: 1px solid rgba(201, 183, 156, 0.5); /* Subtle border for definition */

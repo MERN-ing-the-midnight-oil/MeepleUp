@@ -563,7 +563,7 @@ const GameCard = ({ game, onDelete }) => {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
-    borderRadius: 0, // Cards should have no rounded corners
+    borderRadius: 16, // Rounded corners (theme.borderRadius.lg)
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(201, 183, 156, 0.5)', // Subtle border for flat design
@@ -687,7 +687,7 @@ const styles = StyleSheet.create({
   styledCardContainer: {
     width: '100%',
     minHeight: 67, // Reduced by one third
-    borderRadius: 0, // Cards should have no rounded corners
+    borderRadius: 16, // Rounded corners (theme.borderRadius.lg)
     overflow: 'hidden',
   },
   styledCardContainerFallback: {

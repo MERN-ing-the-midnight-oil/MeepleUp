@@ -154,7 +154,7 @@ export const commonStyles = {
   // Card styles - flat design with subtle border
   card: {
     backgroundColor: theme.colors.cardSurface,
-    borderRadius: 0, // Cards should have no rounded corners
+    borderRadius: theme.borderRadius.lg, // Rounded corners
     padding: theme.spacing.lg,
     marginBottom: theme.spacing.md,
     borderWidth: 1,
