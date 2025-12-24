@@ -69,6 +69,7 @@ const styles = StyleSheet.create({
   input: {
     ...commonStyles.input,
     minHeight: 44,
+    color: '#000000', // Black text
   },
   inputFocused: {
     ...commonStyles.inputFocused,

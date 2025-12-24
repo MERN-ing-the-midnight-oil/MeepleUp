@@ -36,37 +36,43 @@ const JoinForm = ({
       
       <View style={styles.joinCodeFields}>
         <View style={styles.holeWrapper}>
-          <Input
-            placeholder="battery"
-            value={joinCodeWord1}
-            onChangeText={(text) => onJoinCodeWordChange(1, text)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.joinCodeInput}
-            placeholderTextColor="rgba(43, 31, 20, 0.5)"
-          />
+          <View style={styles.whiteRectangle}>
+            <Input
+              placeholder="battery"
+              value={joinCodeWord1}
+              onChangeText={(text) => onJoinCodeWordChange(1, text)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.joinCodeInput}
+              placeholderTextColor="rgba(0, 0, 0, 0.5)"
+            />
+          </View>
         </View>
         <View style={styles.holeWrapper}>
-          <Input
-            placeholder="horse"
-            value={joinCodeWord2}
-            onChangeText={(text) => onJoinCodeWordChange(2, text)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.joinCodeInput}
-            placeholderTextColor="rgba(43, 31, 20, 0.5)"
-          />
+          <View style={styles.whiteRectangle}>
+            <Input
+              placeholder="horse"
+              value={joinCodeWord2}
+              onChangeText={(text) => onJoinCodeWordChange(2, text)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.joinCodeInput}
+              placeholderTextColor="rgba(0, 0, 0, 0.5)"
+            />
+          </View>
         </View>
         <View style={styles.holeWrapper}>
-          <Input
-            placeholder="staple"
-            value={joinCodeWord3}
-            onChangeText={(text) => onJoinCodeWordChange(3, text)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.joinCodeInput}
-            placeholderTextColor="rgba(43, 31, 20, 0.5)"
-          />
+          <View style={styles.whiteRectangle}>
+            <Input
+              placeholder="staple"
+              value={joinCodeWord3}
+              onChangeText={(text) => onJoinCodeWordChange(3, text)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.joinCodeInput}
+              placeholderTextColor="rgba(0, 0, 0, 0.5)"
+            />
+          </View>
         </View>
       </View>
       
@@ -131,37 +137,53 @@ const styles = StyleSheet.create({
   },
   holeWrapper: {
     flex: 1,
-    // Hole edge - darker border to simulate punched hole edge
-    backgroundColor: 'rgba(0, 0, 0, 0.3)', // Semi-transparent dark edge
-    borderRadius: 10,
-    padding: 2, // Creates the border/edge effect
-    // Inset shadow effect on top and right
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: -2, // Negative for inset effect (may not work on Android)
-  },
-  joinCodeInput: {
-    flex: 1,
-    marginBottom: 0,
     // Wood background - looks like hole showing the wood table beneath
     backgroundColor: '#d4b896', // Wood table base color
-    // Inset shadow borders on top and right to create depth
-    borderTopWidth: 1,
-    borderRightWidth: 1,
+    // Match the card's bottom and left border styling on top and right
+    borderTopWidth: 4,
+    borderRightWidth: 4,
     borderBottomWidth: 0,
     borderLeftWidth: 0,
-    borderTopColor: 'rgba(0, 0, 0, 0.2)', // Subtle dark border for inset shadow
-    borderRightColor: 'rgba(0, 0, 0, 0.2)',
+    borderTopColor: '#6b5435', // Same as card's border color
+    borderRightColor: '#6b5435',
     borderRadius: 8,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
-    color: '#2b1f14', // Dark text for visibility on wood background
+    padding: theme.spacing.sm, // Padding so wood shows around white rectangles
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  whiteRectangle: {
+    // White rectangle that contains the text - sized to fit content
+    backgroundColor: '#ffffff',
+    borderRadius: 0, // Sharp corners
+    paddingHorizontal: 3, // Just a few pixels
+    paddingVertical: 3, // Just a few pixels
+    alignSelf: 'flex-start', // Size to content width
+    minWidth: 60, // Minimum width for placeholder visibility
+    // Thin black borders on left and bottom
+    borderLeftWidth: 1,
+    borderBottomWidth: 1,
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+    borderLeftColor: '#000000',
+    borderBottomColor: '#000000',
+  },
+  joinCodeInput: {
+    // Override all Input component defaults first
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    marginBottom: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    // Pure black text
+    color: '#000000',
     fontSize: theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.medium,
+    fontWeight: theme.typography.fontWeight.bold, // Bold text
     fontFamily: Platform.OS === 'ios' ? 'Courier' : Platform.OS === 'android' ? 'monospace' : 'Courier New',
-    minHeight: 44,
+    minHeight: 24,
+    textAlign: 'left',
+    // Ensure no opacity is applied
+    opacity: 1,
   },
   joinButton: {
     width: '100%',

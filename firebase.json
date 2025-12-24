@@ -4,6 +4,9 @@
   },
   "storage": {
     "rules": "firebase-storage-rules.txt"
+  },
+  "functions": {
+    "source": "functions"
   }
 }
 

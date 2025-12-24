@@ -145,7 +145,7 @@ const Onboarding = () => {
 
   const handleCreateEvent = async () => {
     if (!user) {
-      setError('Please sign in before organizing a MeepleUp.');
+      setError('Please sign in before creating a MeepleUp.');
       return;
     }
 
@@ -280,13 +280,21 @@ const Onboarding = () => {
       setShowCalendarModal(false);
       setError('');
 
-      // Navigate directly to the newly created MeepleUp
-      navigation.replace('EventHub', {
-        eventId: newEvent.id,
-        joinCode: newEvent.joinCode,
-      });
+      Alert.alert(
+        'MeepleUp Created',
+        'Your MeepleUp has been created successfully!',
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.replace('EventHub', {
+              eventId: newEvent.id,
+              joinCode: newEvent.joinCode,
+            }),
+          },
+        ],
+      );
     } catch (err) {
-      setError('Failed to organize MeepleUp. Please try again.');
+      setError('Failed to create MeepleUp. Please try again.');
       console.error(err);
     } finally {
       setLoading(false);
@@ -647,7 +655,7 @@ const Onboarding = () => {
           variant="outline"
           style={styles.backButton}
         />
-        <Text style={styles.title}>Organize a MeepleUp</Text>
+        <Text style={styles.title}>Create a MeepleUp</Text>
         <Text style={styles.subtitle}>
           Fill in the details and we&apos;ll generate a join code to share with friends.
         </Text>
@@ -820,7 +828,7 @@ const Onboarding = () => {
         </View>
 
         <Button
-          label={loading ? 'Organizing...' : 'Organize MeepleUp'}
+          label={loading ? 'Creating...' : 'Create This MeepleUp'}
           onPress={handleCreateEvent}
           disabled={loading}
           style={styles.fullButton}
@@ -887,7 +895,7 @@ const Onboarding = () => {
             </View>
           </View>
 
-          <View style={styles.modalFieldContainer}>
+          <View style={[styles.modalFieldContainer, { marginBottom: theme.spacing.xs }]}>
             <Text style={styles.fieldLabel}>Long press to set dates, tap to edit times</Text>
             <CalendarDatePicker
               selectedDates={selectedDates}
@@ -945,7 +953,7 @@ const Onboarding = () => {
             />
           </View>
 
-          <View style={styles.modalActions}>
+          <View style={[styles.modalActions, { marginTop: 0 }]}>
             <Button
               label="Done"
               onPress={() => setShowCalendarModal(false)}
@@ -1416,7 +1424,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: theme.spacing.xl,
+    padding: theme.spacing.md,
     justifyContent: 'center',
   },
   title: {
@@ -1424,7 +1432,7 @@ const styles = StyleSheet.create({
     color: theme.colors.meepleRed,
     backgroundColor: 'transparent',
     paddingHorizontal: theme.spacing.lg,
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.spacing.md,
     textAlign: 'center',
   },
   bggLogoContainer: {
@@ -1438,7 +1446,7 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.textSecondary,
     textAlign: 'center',
-    marginBottom: theme.spacing['2xl'],
+    marginBottom: theme.spacing.lg,
   },
   options: {
     marginBottom: theme.spacing.lg,
@@ -1474,7 +1482,7 @@ const styles = StyleSheet.create({
     lineHeight: theme.typography.fontSize.sm * theme.typography.lineHeight.normal,
   },
   backButton: {
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.spacing.md,
     alignSelf: 'flex-start',
     borderRadius: 0,
   },
@@ -1493,7 +1501,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   section: {
-    marginBottom: theme.spacing['2xl'],
+    marginBottom: theme.spacing.lg,
   },
   sectionTitle: {
     fontSize: theme.typography.fontSize.xl,
@@ -1502,7 +1510,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
   },
   subsection: {
-    marginBottom: theme.spacing['2xl'],
+    marginBottom: theme.spacing.lg,
     paddingLeft: theme.spacing.sm,
   },
   subsectionTitle: {
@@ -1512,7 +1520,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   fieldContainer: {
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.spacing.md,
   },
   fieldLabel: {
     fontSize: theme.typography.fontSize.sm,

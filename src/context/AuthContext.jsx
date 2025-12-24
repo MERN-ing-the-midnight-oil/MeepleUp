@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import storage from '../utils/storage';
-import firebase, { auth, db } from '../config/firebase';
+import firebase, { auth, db, functions } from '../config/firebase';
 
 // Helper to get the verification URL
 const getVerificationUrl = () => {
@@ -636,8 +636,14 @@ export const AuthProvider = ({ children }) => {
       } else {
         console.log('🍎 [Apple OAuth] Using native Apple Authentication');
         // Native: Use expo-apple-authentication
-        const AppleAuthenticationModule = await import('expo-apple-authentication');
-        const AppleAuthentication = AppleAuthenticationModule.default || AppleAuthenticationModule;
+        let AppleAuthentication;
+        try {
+          const AppleAuthenticationModule = await import('expo-apple-authentication');
+          AppleAuthentication = AppleAuthenticationModule.default || AppleAuthenticationModule;
+        } catch (importError) {
+          console.error('🍎 [Apple OAuth] ❌ Failed to import expo-apple-authentication:', importError);
+          throw new Error('Apple Sign-In is not available. Please ensure expo-apple-authentication is installed.');
+        }
         
         // Check if Apple Authentication is available
         console.log('🍎 [Apple OAuth] Checking if Apple Authentication is available...');
@@ -651,12 +657,24 @@ export const AuthProvider = ({ children }) => {
 
         // Request authentication
         console.log('🍎 [Apple OAuth] Requesting Apple authentication...');
-        const appleCredential = await AppleAuthentication.signInAsync({
-          requestedScopes: [
-            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-            AppleAuthentication.AppleAuthenticationScope.EMAIL,
-          ],
-        });
+        let appleCredential;
+        try {
+          appleCredential = await AppleAuthentication.signInAsync({
+            requestedScopes: [
+              AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+              AppleAuthentication.AppleAuthenticationScope.EMAIL,
+            ],
+          });
+        } catch (signInError) {
+          // Handle user cancellation
+          if (signInError.code === 'ERR_CANCELED' || signInError.code === 'ERR_REQUEST_CANCELED') {
+            console.log('🍎 [Apple OAuth] User canceled Apple Sign-In');
+            throw new Error('Sign-in was canceled');
+          }
+          console.error('🍎 [Apple OAuth] ❌ Apple Sign-In error:', signInError);
+          throw signInError;
+        }
+        
         console.log('🍎 [Apple OAuth] Apple authentication response received:', {
           hasIdentityToken: !!appleCredential.identityToken,
           hasAuthorizationCode: !!appleCredential.authorizationCode,
@@ -669,24 +687,55 @@ export const AuthProvider = ({ children }) => {
           throw new Error('Apple Sign-In failed: No identity token received');
         }
 
-        // Create Firebase credential from Apple identity token
-        console.log('🍎 [Apple OAuth] Creating Firebase credential from Apple token...');
-        const appleAuthCredential = firebase.auth.AppleAuthProvider.credential(
-          appleCredential.identityToken,
-          appleCredential.authorizationCode
-        );
-
-        console.log('🍎 [Apple OAuth] Signing in with Firebase credential...');
-        credential = await auth.signInWithCredential(appleAuthCredential);
+        // For native Apple Sign-In, Firebase compat mode's OAuthProvider.credential() doesn't work
+        // We need to use a Cloud Function to verify the token and get a custom Firebase token
+        console.log('🍎 [Apple OAuth] Verifying Apple token with Cloud Function...');
+        console.log('🍎 [Apple OAuth] Token details:', {
+          identityTokenLength: appleCredential.identityToken?.length,
+          hasAuthorizationCode: !!appleCredential.authorizationCode,
+          authorizationCodeLength: appleCredential.authorizationCode?.length,
+          identityTokenPreview: appleCredential.identityToken?.substring(0, 20) + '...',
+        });
+        
+        // Call Cloud Function to verify Apple token and get custom Firebase token
+        if (!functions) {
+          throw new Error('Firebase Functions not available. Please ensure Firebase Functions is properly configured.');
+        }
+        
+        const verifyAppleSignIn = functions.httpsCallable('verifyAppleSignIn');
+        const result = await verifyAppleSignIn({
+          identityToken: appleCredential.identityToken,
+          authorizationCode: appleCredential.authorizationCode,
+        });
+        
+        const { customToken, uid, email, emailVerified } = result.data;
+        
+        if (!customToken) {
+          throw new Error('Failed to get custom token from Cloud Function');
+        }
+        
+        console.log('🍎 [Apple OAuth] ✅ Custom token received from Cloud Function');
+        console.log('🍎 [Apple OAuth] Signing in with custom token...');
+        
+        // Sign in with the custom token
+        credential = await auth.signInWithCustomToken(customToken);
         console.log('🍎 [Apple OAuth] Firebase sign-in successful');
+        
+        // Update email if provided and not already set
+        if (email && !credential.user.email) {
+          await credential.user.updateEmail(email);
+        }
+        if (emailVerified && credential.user.emailVerified !== emailVerified) {
+          await credential.user.sendEmailVerification();
+        }
 
         // Update user profile with name if provided (only on first sign-in)
-        if (credential.additionalUserInfo?.isNewUser && appleCredential.fullName) {
+        if (appleCredential.fullName) {
           const displayName = appleCredential.fullName.givenName && appleCredential.fullName.familyName
             ? `${appleCredential.fullName.givenName} ${appleCredential.fullName.familyName}`
             : appleCredential.fullName.givenName || appleCredential.fullName.familyName || '';
           
-          if (displayName) {
+          if (displayName && !credential.user.displayName) {
             console.log('🍎 [Apple OAuth] Updating user display name:', displayName);
             await credential.user.updateProfile({ displayName });
           }
@@ -698,8 +747,22 @@ export const AuthProvider = ({ children }) => {
         throw new Error('Failed to sign in with Apple');
       }
 
-      // Check if this is a new user or existing user
-      const isNewUser = credential.additionalUserInfo?.isNewUser || false;
+      // Check if this is a new user by checking Firestore
+      // signInWithCustomToken doesn't provide additionalUserInfo, so we check Firestore
+      let isNewUser = false;
+      if (db) {
+        try {
+          const userDoc = await db.collection('users').doc(credential.user.uid).get();
+          isNewUser = !userDoc.exists;
+        } catch (error) {
+          // If we can't check, assume existing user to be safe
+          console.warn('🍎 [Apple OAuth] Could not check if user is new:', error);
+          isNewUser = credential.additionalUserInfo?.isNewUser || false;
+        }
+      } else {
+        // Fallback to additionalUserInfo if available
+        isNewUser = credential.additionalUserInfo?.isNewUser || false;
+      }
       console.log('🍎 [Apple OAuth] User info:', {
         uid: credential.user.uid,
         email: credential.user.email,
@@ -859,47 +922,89 @@ export const AuthProvider = ({ children }) => {
   };
 
   const refreshUser = async () => {
+    console.log('[AuthContext] refreshUser called');
     if (!auth.currentUser) {
+      console.log('[AuthContext] refreshUser: No current user, returning null');
       return null;
     }
 
-    await auth.currentUser.reload();
+    // Try to reload auth user, but don't fail if it doesn't work (e.g., when offline)
+    console.log('[AuthContext] Attempting to reload auth user...');
+    const reloadStartTime = Date.now();
+    try {
+      await Promise.race([
+        auth.currentUser.reload(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Auth reload timeout')), 5000))
+      ]);
+      console.log('[AuthContext] Auth user reloaded in', Date.now() - reloadStartTime, 'ms');
+    } catch (reloadError) {
+      const elapsed = Date.now() - reloadStartTime;
+      console.warn('[AuthContext] Auth user reload failed or timed out after', elapsed, 'ms:', reloadError);
+      console.warn('[AuthContext] Continuing without reload - will use cached auth data');
+      // Don't throw - continue with existing auth.currentUser data
+    }
+
+    console.log('[AuthContext] Getting profile from storage...');
+    const storageStartTime = Date.now();
     const stored = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const profile = stored ? JSON.parse(stored) : {};
+    console.log('[AuthContext] Got profile from storage in', Date.now() - storageStartTime, 'ms');
+
+    console.log('[AuthContext] Mapping and setting user...');
     const mappedUser = mapUser(auth.currentUser, profile);
     setUser(mappedUser);
+    console.log('[AuthContext] refreshUser completed');
     return mappedUser;
   };
 
   const updateUser = async (updates = {}) => {
+    console.log('[AuthContext] updateUser called with updates:', {
+      ...updates,
+      bio: updates.bio ? updates.bio.substring(0, 50) + '...' : updates.bio,
+      bioLength: updates.bio?.length || 0,
+    });
+
     if (!auth.currentUser) {
+      console.error('[AuthContext] updateUser: No authenticated user');
       throw new Error('No authenticated user');
     }
 
+    console.log('[AuthContext] Getting current profile from storage...');
+    const storageStartTime = Date.now();
     const currentProfileRaw = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const currentProfile = currentProfileRaw ? JSON.parse(currentProfileRaw) : {};
+    console.log('[AuthContext] Got current profile in', Date.now() - storageStartTime, 'ms');
 
     const nextProfile = {
       ...currentProfile,
       ...updates,
     };
+    console.log('[AuthContext] Merged profile created');
 
     // Update Firebase Auth profile if name or photoURL changed
     const authUpdates = {};
     if (typeof updates.name === 'string' && updates.name.trim() !== auth.currentUser.displayName) {
       authUpdates.displayName = updates.name.trim();
+      console.log('[AuthContext] Will update displayName');
     }
     if (typeof updates.photoURL === 'string' && updates.photoURL !== auth.currentUser.photoURL) {
       authUpdates.photoURL = updates.photoURL;
+      console.log('[AuthContext] Will update photoURL');
     }
     
     if (Object.keys(authUpdates).length > 0) {
+      console.log('[AuthContext] Updating Firebase Auth profile...');
+      const authUpdateStartTime = Date.now();
       await auth.currentUser.updateProfile(authUpdates);
+      console.log('[AuthContext] Firebase Auth profile updated in', Date.now() - authUpdateStartTime, 'ms');
+    } else {
+      console.log('[AuthContext] No Firebase Auth updates needed');
     }
 
     // Save to Firestore
     if (db) {
       try {
+        console.log('[AuthContext] Preparing Firestore update...');
         const userRef = db.collection('users').doc(auth.currentUser.uid);
         const userData = {
           id: auth.currentUser.uid,
@@ -922,17 +1027,76 @@ export const AuthProvider = ({ children }) => {
           userData.personalMatchWeights = nextProfile.personalMatchWeights;
         }
 
-        await userRef.set(userData, { merge: true });
+        console.log('[AuthContext] Saving to Firestore...', {
+          ...userData,
+          bio: userData.bio?.substring(0, 50) + '...',
+          bioLength: userData.bio?.length || 0,
+        });
+        const firestoreStartTime = Date.now();
+        
+        // Add timeout to prevent hanging
+        const firestoreTimeout = 10000; // 10 seconds
+        const firestorePromise = userRef.set(userData, { merge: true });
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Firestore update timed out after ${firestoreTimeout}ms`));
+          }, firestoreTimeout);
+        });
+        
+        try {
+          await Promise.race([firestorePromise, timeoutPromise]);
+          console.log('[AuthContext] Firestore update completed in', Date.now() - firestoreStartTime, 'ms');
+        } catch (firestoreError) {
+          const elapsed = Date.now() - firestoreStartTime;
+          console.error('[AuthContext] Firestore update failed or timed out after', elapsed, 'ms:', firestoreError);
+          console.error('[AuthContext] Firestore error details:', {
+            message: firestoreError.message,
+            stack: firestoreError.stack,
+            code: firestoreError.code,
+            name: firestoreError.name,
+          });
+          // Don't throw - continue anyway, we still save to local storage
+          // This prevents the entire save from failing when offline
+          console.warn('[AuthContext] Continuing with local storage save despite Firestore error');
+        }
       } catch (firestoreError) {
-        console.error('Error updating Firestore:', firestoreError);
+        console.error('[AuthContext] Unexpected error in Firestore update block:', firestoreError);
+        console.error('[AuthContext] Firestore error details:', {
+          message: firestoreError.message,
+          stack: firestoreError.stack,
+          code: firestoreError.code,
+        });
         // Continue anyway, we still saved to local storage
       }
+    } else {
+      console.log('[AuthContext] No db instance, skipping Firestore update');
     }
 
+    console.log('[AuthContext] Saving profile to local storage...');
+    const saveProfileStartTime = Date.now();
     const savedProfile = await saveProfile(auth.currentUser.uid, nextProfile);
-    await auth.currentUser.reload();
+    console.log('[AuthContext] Profile saved to local storage in', Date.now() - saveProfileStartTime, 'ms');
+
+    // Try to reload auth user, but don't fail if it doesn't work (e.g., when offline)
+    console.log('[AuthContext] Attempting to reload auth user...');
+    const reloadStartTime = Date.now();
+    try {
+      await Promise.race([
+        auth.currentUser.reload(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Auth reload timeout')), 5000))
+      ]);
+      console.log('[AuthContext] Auth user reloaded in', Date.now() - reloadStartTime, 'ms');
+    } catch (reloadError) {
+      const elapsed = Date.now() - reloadStartTime;
+      console.warn('[AuthContext] Auth user reload failed or timed out after', elapsed, 'ms:', reloadError);
+      console.warn('[AuthContext] Continuing without reload - profile is saved locally');
+      // Don't throw - the profile is already saved to local storage
+    }
+
+    console.log('[AuthContext] Mapping and setting user...');
     const updatedUser = mapUser(auth.currentUser, savedProfile);
     setUser(updatedUser);
+    console.log('[AuthContext] updateUser completed successfully');
     return updatedUser;
   };
 

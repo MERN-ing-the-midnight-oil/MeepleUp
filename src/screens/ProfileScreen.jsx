@@ -14,6 +14,7 @@ import { useResponsive, getResponsiveValue } from '../utils/responsive';
 const ProfileScreen = () => {
   const { width } = useWindowDimensions();
   const { isMobile, isTablet, isDesktop } = useResponsive();
+  const isSmallScreen = width ? width < 400 : false;
   const {
     user,
     updateUser,
@@ -142,7 +143,7 @@ const ProfileScreen = () => {
       await refreshUser();
       setUserData(prev => ({ ...prev, name: editingName.trim() }));
       setIsEditingName(false);
-      setMessage('Name updated successfully!');
+      Alert.alert('Success', 'Name updated successfully!');
     } catch (error) {
       setMessage(error.message || 'Failed to update name. Please try again.');
       console.error('Name update error:', error);
@@ -157,31 +158,67 @@ const ProfileScreen = () => {
   };
 
   const handleSubmit = async () => {
+    console.log('[ProfileScreen] handleSubmit called');
+    console.log('[ProfileScreen] Current userData:', {
+      bio: userData.bio?.substring(0, 50) + '...',
+      bggUsername: userData.bggUsername,
+      zipcode: userData.zipcode,
+      bioLength: userData.bio?.length || 0,
+    });
+
     // Validate zipcode before submitting
+    console.log('[ProfileScreen] Validating zipcode...');
     const zipcodeValidationError = validateZipcode(userData.zipcode);
     if (zipcodeValidationError) {
+      console.log('[ProfileScreen] Zipcode validation failed:', zipcodeValidationError);
       setZipcodeError(zipcodeValidationError);
       setMessage('');
       return;
     }
+    console.log('[ProfileScreen] Zipcode validation passed');
 
+    console.log('[ProfileScreen] Setting saving state to true');
     setSaving(true);
     setMessage('');
     setZipcodeError('');
 
     try {
-      await updateUser({
+      const updateData = {
         bio: userData.bio,
         bggUsername: userData.bggUsername,
         zipcode: userData.zipcode.trim() || '', // Save as zipcode, trim whitespace
+      };
+      console.log('[ProfileScreen] Calling updateUser with data:', {
+        ...updateData,
+        bio: updateData.bio?.substring(0, 50) + '...',
+        bioLength: updateData.bio?.length || 0,
       });
+      
+      const updateStartTime = Date.now();
+      await updateUser(updateData);
+      const updateDuration = Date.now() - updateStartTime;
+      console.log('[ProfileScreen] updateUser completed in', updateDuration, 'ms');
+
+      console.log('[ProfileScreen] Calling refreshUser...');
+      const refreshStartTime = Date.now();
       await refreshUser();
-      setMessage('Profile updated successfully!');
+      const refreshDuration = Date.now() - refreshStartTime;
+      console.log('[ProfileScreen] refreshUser completed in', refreshDuration, 'ms');
+
+      console.log('[ProfileScreen] Profile update successful');
+      Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
+      console.error('[ProfileScreen] Profile update error:', error);
+      console.error('[ProfileScreen] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
       setMessage(error.message || 'Failed to update profile. Please try again.');
-      console.error('Profile update error:', error);
     } finally {
+      console.log('[ProfileScreen] Setting saving state to false');
       setSaving(false);
+      console.log('[ProfileScreen] handleSubmit completed');
     }
   };
 
@@ -349,7 +386,7 @@ const ProfileScreen = () => {
         // Update user profile with new photo URL
         await updateUserPhoto(photoURL);
         await refreshUser();
-        setMessage('Profile picture updated successfully!');
+        Alert.alert('Success', 'Profile picture updated successfully!');
       }
     } catch (error) {
       console.error('Photo upload error:', error);
@@ -380,7 +417,7 @@ const ProfileScreen = () => {
         {/* Profile Picture Section */}
         <View style={[
           styles.profilePictureSection,
-          width < 400 && styles.profilePictureSectionMobile
+          isSmallScreen && styles.profilePictureSectionMobile
         ]}>
           <View style={styles.profilePictureContainer}>
             {user?.photoURL ? (
@@ -443,7 +480,7 @@ const ProfileScreen = () => {
           </View>
           <View style={[
             styles.profileInfo,
-            width < 400 && styles.profileInfoMobile
+            isSmallScreen && styles.profileInfoMobile
           ]}>
             {isEditingName ? (
               <View style={styles.nameEditContainer}>
@@ -539,11 +576,6 @@ const ProfileScreen = () => {
           />
         </View>
 
-        {message ? (
-          <View style={[styles.message, styles.successMessage]}>
-            <Text style={styles.messageText}>{message}</Text>
-          </View>
-        ) : null}
 
         <Button
           label={`💾 ${saving ? 'Saving...' : 'Save Profile'}`}

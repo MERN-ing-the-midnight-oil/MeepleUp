@@ -69,15 +69,28 @@ service cloud.firestore {
     // Gaming Groups
     match /gamingGroups/{groupId} {
       // Helper function to check if user can read a group
-      // For queries, get() works server-side to check document data
+      // For queries, we check resource.data directly (available during query evaluation)
+      // For direct reads, resource.data is also available
       function canReadGroup() {
-        // If user has a member document, they can read the group (most reliable check, doesn't require group read)
-        // Otherwise, check group document data using get() (works server-side for both queries and direct reads)
-        return exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
-               (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
-               (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId) ||
-               (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.isActive != false && 
-                get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.deletedAt == null);
+        // For queries and direct reads, resource.data is available - check it directly
+        // This avoids get() calls which can fail during queries
+        
+        // Check if user is in memberIds (primary check for members)
+        let memberIds = resource.data.memberIds;
+        let isInMemberIds = memberIds != null && request.auth.uid in memberIds;
+        
+        // Check if user is the organizer
+        let isOrganizer = request.auth.uid == resource.data.organizerId;
+        
+        // Allow reading groups that are not deleted (enables join code flow)
+        // This is permissive - allows reading any group that hasn't been deleted
+        // The isActive check is removed to simplify and ensure join code queries work
+        // Groups can be filtered client-side if needed
+        let notDeleted = resource.data.deletedAt == null;
+        
+        // Return true if user is member/organizer OR group is not deleted
+        // This allows join code queries to work
+        return isInMemberIds || isOrganizer || notDeleted;
       }
       
       // Allow reading if authenticated AND user can read the group

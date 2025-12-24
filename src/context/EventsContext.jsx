@@ -900,8 +900,9 @@ export const EventsProvider = ({ children }) => {
           try {
             const eventsRef = db.collection('gamingGroups');
             
-            // Query by joinCode only (uses single-field index, more reliable)
-            // Then filter for active events in memory
+            // Query by joinCode only (single-field index)
+            // Security rules will allow reading active groups even for non-members
+            // We filter for active events in memory after the query
             let snapshot = await eventsRef
               .where('joinCode', '==', normalized)
               .limit(10) // Get a few matches in case there are archived events with same code

@@ -7,6 +7,7 @@ import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import TextListGameIdentifier from '../components/TextListGameIdentifier';
 import GameCard from '../components/GameCard';
 import BGGImport from '../components/BGGImport';
+import PoweredByBGG from '../components/PoweredByBGG';
 import { getGameById } from '../services/gameDatabase';
 import { getGameDetails } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
@@ -554,9 +555,15 @@ const CollectionScreen = () => {
       return null;
     }
     
+    // Calculate logo width to fit screen with comfortable margins (40px on each side)
+    const logoContainerWidth = Math.max(width - 80, 200); // Min 200px, max screen width - 80px margins
+    
     console.log('[CollectionScreen] renderHeader: rendering header content');
     return (
       <>
+        <View style={styles.bggLogoTopContainer}>
+          <PoweredByBGG size="auto" containerWidth={logoContainerWidth} />
+        </View>
         <View style={styles.menuContainer}>
           <Text style={styles.menuTitle}>
             Please choose a method to create a games inventory. A games inventory will allow your group members to see what you have in common and discuss what to play at the next get-together.
@@ -715,6 +722,9 @@ const CollectionScreen = () => {
             >
               {showMenu && (
                 <>
+                  <View style={styles.bggLogoTopContainer}>
+                    <PoweredByBGG size="auto" containerWidth={Math.max(width - 80, 200)} />
+                  </View>
                   <View style={styles.menuContainer}>
                     <Text style={styles.menuTitle}>
                       Please choose a method to create a games inventory. A games inventory will allow your meepleup friends to see what you have in common and discuss what to play at the next get-together.
@@ -824,7 +834,10 @@ const styles = StyleSheet.create({
   },
   bggLogoTopContainer: {
     alignItems: 'center',
-    marginBottom: theme.spacing.sm,
+    justifyContent: 'center',
+    marginBottom: theme.spacing.md,
+    paddingTop: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
   },
   menuContainer: {
     paddingVertical: theme.spacing.xl,
