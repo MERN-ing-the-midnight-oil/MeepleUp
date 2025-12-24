@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert, Image, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
@@ -32,6 +33,8 @@ const ProfileScreen = () => {
     bggUsername: '',
     zipcode: '',
   });
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingName, setEditingName] = useState('');
   const [zipcodeError, setZipcodeError] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -70,6 +73,7 @@ const ProfileScreen = () => {
         bggUsername: user.bggUsername || '',
         zipcode: user.zipcode || user.location || '', // Support both for backward compatibility
       });
+      setEditingName(user.name || '');
     }
   }, [user]);
 
@@ -117,6 +121,41 @@ const ProfileScreen = () => {
     }
   };
 
+  const handleNameEdit = () => {
+    setIsEditingName(true);
+    setEditingName(userData.name);
+  };
+
+  const handleNameSave = async () => {
+    if (editingName.trim() === '') {
+      Alert.alert('Error', 'Name cannot be empty');
+      return;
+    }
+    
+    setSaving(true);
+    setMessage('');
+    
+    try {
+      await updateUser({
+        name: editingName.trim(),
+      });
+      await refreshUser();
+      setUserData(prev => ({ ...prev, name: editingName.trim() }));
+      setIsEditingName(false);
+      setMessage('Name updated successfully!');
+    } catch (error) {
+      setMessage(error.message || 'Failed to update name. Please try again.');
+      console.error('Name update error:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleNameCancel = () => {
+    setIsEditingName(false);
+    setEditingName(userData.name);
+  };
+
   const handleSubmit = async () => {
     // Validate zipcode before submitting
     const zipcodeValidationError = validateZipcode(userData.zipcode);
@@ -132,7 +171,6 @@ const ProfileScreen = () => {
 
     try {
       await updateUser({
-        name: userData.name,
         bio: userData.bio,
         bggUsername: userData.bggUsername,
         zipcode: userData.zipcode.trim() || '', // Save as zipcode, trim whitespace
@@ -145,6 +183,10 @@ const ProfileScreen = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const getWordCount = (text) => {
+    return text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
   };
 
   const handlePasswordChange = async () => {
@@ -332,12 +374,14 @@ const ProfileScreen = () => {
       >
         <View style={styles.header}>
         <Text style={styles.title}>Profile/Settings</Text>
-        <Text style={styles.subtitle}>{user?.email || ''}</Text>
       </View>
 
       <View style={styles.form}>
         {/* Profile Picture Section */}
-        <View style={styles.profilePictureSection}>
+        <View style={[
+          styles.profilePictureSection,
+          width < 400 && styles.profilePictureSectionMobile
+        ]}>
           <View style={styles.profilePictureContainer}>
             {user?.photoURL ? (
               <Image 
@@ -385,14 +429,58 @@ const ProfileScreen = () => {
                 <ActivityIndicator size="large" color="#fff" />
               </View>
             )}
-          </View>
-          <View style={styles.profilePictureActions}>
-            <Button
-              label={uploadingPhoto ? 'Uploading...' : 'Change Photo'}
+            <TouchableOpacity
+              style={styles.editPhotoButton}
               onPress={handlePhotoUpload}
               disabled={uploadingPhoto}
-              variant="outline"
-            />
+            >
+              {uploadingPhoto ? (
+                <ActivityIndicator size="small" color={theme.colors.textPrimary} />
+              ) : (
+                <MaterialIcons name="edit" size={16} color={theme.colors.textPrimary} />
+              )}
+            </TouchableOpacity>
+          </View>
+          <View style={[
+            styles.profileInfo,
+            width < 400 && styles.profileInfoMobile
+          ]}>
+            {isEditingName ? (
+              <View style={styles.nameEditContainer}>
+                <TextInput
+                  value={editingName}
+                  onChangeText={setEditingName}
+                  style={styles.nameInput}
+                  autoFocus
+                  maxLength={50}
+                />
+                <TouchableOpacity
+                  style={styles.nameSaveButton}
+                  onPress={handleNameSave}
+                  disabled={saving}
+                >
+                  <MaterialIcons name="check" size={18} color={theme.colors.feltGreen} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.nameCancelButton}
+                  onPress={handleNameCancel}
+                  disabled={saving}
+                >
+                  <MaterialIcons name="close" size={18} color={theme.colors.error} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.nameRow}>
+                <Text style={styles.profileName}>{userData.name || 'No name'}</Text>
+                <TouchableOpacity
+                  style={styles.nameEditButton}
+                  onPress={handleNameEdit}
+                >
+                  <MaterialIcons name="edit" size={16} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            )}
+            <Text style={styles.profileEmail}>{user?.email || ''}</Text>
           </View>
         </View>
 
@@ -408,40 +496,46 @@ const ProfileScreen = () => {
               <Text style={[styles.messageText, styles.successText]}>{verificationStatus.message}</Text>
             ) : null}
             <Button
-              label={verificationStatus.loading ? 'Please wait...' : 'Resend verification email'}
+              label={`📧 ${verificationStatus.loading ? 'Please wait...' : 'Resend verification email'}`}
               onPress={handleResendVerification}
               disabled={verificationStatus.loading}
-              style={styles.messageButton}
+              style={[styles.messageButton, styles.compactButton]}
             />
             <Button
-              label="I have verified"
+              label="✓ I have verified"
               onPress={handleVerifyRefresh}
               disabled={verificationStatus.loading}
               variant="outline"
+              style={styles.compactButton}
             />
           </View>
         )}
 
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Name</Text>
-          <Input
-            value={userData.name}
-            onChangeText={(text) => handleChange('name', text)}
-            placeholder="Enter your name"
-            style={styles.input}
-          />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Bio</Text>
+        <View style={styles.bioCard}>
+          <View style={styles.bioHeader}>
+            <Text style={styles.bioLabel}>Bio</Text>
+            <Text style={[
+              styles.wordCount,
+              getWordCount(userData.bio) > 450 && styles.wordCountWarning,
+              getWordCount(userData.bio) >= 500 && styles.wordCountError
+            ]}>
+              {getWordCount(userData.bio)} / 500 words
+            </Text>
+          </View>
           <TextInput
             value={userData.bio}
-            onChangeText={(text) => handleChange('bio', text)}
-            placeholder="Tell us about yourself"
-            style={[styles.input, styles.textArea]}
+            onChangeText={(text) => {
+              const wordCount = getWordCount(text);
+              if (wordCount <= 500) {
+                handleChange('bio', text);
+              }
+            }}
+            placeholder="Tell us about yourself (500 word limit)"
+            style={styles.bioInput}
             multiline
-            numberOfLines={4}
+            numberOfLines={6}
             textAlignVertical="top"
+            maxLength={3000}
           />
         </View>
 
@@ -452,46 +546,37 @@ const ProfileScreen = () => {
         ) : null}
 
         <Button
-          label={saving ? 'Saving...' : 'Save Profile'}
+          label={`💾 ${saving ? 'Saving...' : 'Save Profile'}`}
           onPress={handleSubmit}
           disabled={saving}
-          style={styles.saveButton}
+          style={[styles.saveButton, styles.compactButton]}
         />
       </View>
 
-      <View style={styles.form}>
+      <View style={styles.buttonGroup}>
         <Button
-          label="Notification Settings"
+          label="🔔 Notification Settings"
           onPress={() => setShowNotificationModal(true)}
           variant="outline"
-          style={styles.saveButton}
+          style={[styles.compactButton, styles.tightButton]}
         />
-      </View>
-
-      <View style={styles.form}>
         <Button
-          label="Beeple's Recommendation Weights"
+          label="🤖 Beeple's Recommendation Weights"
           onPress={() => setShowPersonalMatchModal(true)}
           variant="outline"
-          style={styles.saveButton}
+          style={[styles.compactButton, styles.tightButton]}
         />
-      </View>
-
-      <View style={styles.form}>
         <Button
-          label="Update Password"
+          label="🔒 Update Password"
           onPress={() => setShowPasswordModal(true)}
           variant="outline"
-          style={styles.saveButton}
+          style={[styles.compactButton, styles.tightButton]}
         />
-      </View>
-
-      <View style={styles.form}>
         <Button
-          label="Logout"
+          label="🚪 Logout"
           onPress={logout}
           variant="outline"
-          style={styles.logoutButton}
+          style={[styles.logoutButton, styles.compactButton, styles.tightButton]}
         />
       </View>
 
@@ -502,10 +587,10 @@ const ProfileScreen = () => {
             Deleting your account will permanently remove all your data, including your profile, games, events, and posts. This action cannot be undone.
           </Text>
           <Button
-            label="Delete Account"
+            label="🗑️ Delete Account"
             onPress={() => setShowDeleteModal(true)}
             variant="outline"
-            style={styles.deleteButton}
+            style={[styles.deleteButton, styles.compactButton]}
           />
         </View>
       </View>
@@ -594,7 +679,7 @@ const ProfileScreen = () => {
 
           <View style={styles.passwordModalButtons}>
             <Button
-              label="Cancel"
+              label="✕ Cancel"
               onPress={() => {
                 setShowPasswordModal(false);
                 setPasswordState({
@@ -607,14 +692,14 @@ const ProfileScreen = () => {
                 });
               }}
               variant="outline"
-              style={styles.cancelButton}
+              style={[styles.cancelButton, styles.compactButton]}
               disabled={passwordState.loading}
             />
             <Button
-              label={passwordState.loading ? 'Updating...' : 'Update password'}
+              label={`🔒 ${passwordState.loading ? 'Updating...' : 'Update password'}`}
               onPress={handlePasswordChange}
               disabled={passwordState.loading}
-              style={styles.saveButton}
+              style={[styles.saveButton, styles.compactButton]}
             />
           </View>
         </View>
@@ -656,13 +741,13 @@ const ProfileScreen = () => {
           </View>
           <View style={styles.deleteModalButtons}>
             <Button
-              label="Cancel"
+              label="✕ Cancel"
               onPress={() => {
                 setShowDeleteModal(false);
                 setDeleteConfirmText('');
               }}
               variant="outline"
-              style={styles.cancelButton}
+              style={[styles.cancelButton, styles.compactButton]}
               disabled={deleting}
             />
             {deleting && (
@@ -671,9 +756,9 @@ const ProfileScreen = () => {
               </Text>
             )}
             <Button
-              label={deleting ? 'Deleting Account...' : 'Delete My Account'}
+              label={`🗑️ ${deleting ? 'Deleting Account...' : 'Delete My Account'}`}
               onPress={handleDeleteAccount}
-              style={styles.confirmDeleteButton}
+              style={[styles.confirmDeleteButton, styles.compactButton]}
               disabled={deleting || deleteConfirmText.toLowerCase() !== 'delete'}
             />
           </View>
@@ -837,15 +922,128 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   profilePictureSection: {
-    alignItems: 'center',
-    marginBottom: theme.spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: theme.spacing.lg,
     paddingBottom: theme.spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.woodMedium,
+    gap: theme.spacing.md,
+  },
+  profilePictureSectionMobile: {
+    flexDirection: 'column',
+    alignItems: 'center',
   },
   profilePictureContainer: {
     position: 'relative',
-    marginBottom: theme.spacing.md,
+  },
+  profileInfo: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  profileInfoMobile: {
+    alignItems: 'center',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+    gap: theme.spacing.xs,
+  },
+  profileName: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+  },
+  nameEditButton: {
+    padding: theme.spacing.xs,
+  },
+  nameEditContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    flex: 1,
+  },
+  nameInput: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.woodMedium,
+    paddingBottom: theme.spacing.xs,
+  },
+  nameSaveButton: {
+    padding: theme.spacing.xs,
+  },
+  nameCancelButton: {
+    padding: theme.spacing.xs,
+  },
+  profileEmail: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+  },
+  bioCard: {
+    backgroundColor: theme.colors.cardSurface,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+  },
+  bioHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  bioLabel: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+  },
+  wordCount: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
+  },
+  wordCountWarning: {
+    color: theme.colors.warning,
+  },
+  wordCountError: {
+    color: theme.colors.error,
+  },
+  bioInput: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    minHeight: 120,
+    padding: theme.spacing.sm,
+    textAlignVertical: 'top',
+  },
+  buttonGroup: {
+    padding: theme.spacing.lg,
+    gap: theme.spacing.xs,
+  },
+  tightButton: {
+    marginBottom: theme.spacing.xs,
+  },
+  editPhotoButton: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: theme.colors.surfaceColor,
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.woodMedium,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   profilePicture: {
     backgroundColor: theme.colors.woodMedium,
@@ -869,9 +1067,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  profilePictureActions: {
-    width: '100%',
-    maxWidth: 300,
+  compactButton: {
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    minHeight: 36,
   },
   passwordModalContent: {
     padding: theme.spacing.sm,
