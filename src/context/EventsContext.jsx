@@ -900,6 +900,13 @@ export const EventsProvider = ({ children }) => {
           try {
             const eventsRef = db.collection('gamingGroups');
             
+            console.log(`[EventsContext] Join code query attempt ${attempt + 1}/${maxRetries}:`, {
+              normalizedCode: normalized,
+              userId: userId,
+              hasAuth: !!user,
+              authUid: user?.uid || user?.id || 'none'
+            });
+            
             // Query by joinCode only (single-field index)
             // Security rules will allow reading active groups even for non-members
             // We filter for active events in memory after the query
@@ -908,17 +915,22 @@ export const EventsProvider = ({ children }) => {
               .limit(10) // Get a few matches in case there are archived events with same code
               .get();
             
+            console.log(`[EventsContext] Join code query succeeded, found ${snapshot.docs.length} documents`);
+            
             // If indexed query returns empty, try fallback approach
             // This handles cases where the index hasn't been initialized yet
             // Only try fallback once per join attempt to avoid expensive repeated queries
             if (snapshot.empty && !fallbackTried) {
               fallbackTried = true;
+              console.log('[EventsContext] Primary query returned empty, trying fallback query...');
               try {
                 // Query recent events and filter in memory (bypasses index requirement)
                 const recentSnapshot = await eventsRef
                   .orderBy('createdAt', 'desc')
                   .limit(100) // Get recent events to search through
                   .get();
+                
+                console.log(`[EventsContext] Fallback query succeeded, found ${recentSnapshot.docs.length} recent documents to filter`);
                 
                 // Filter for matching joinCode/joinCodes and active status in memory
                 const matchingDocs = recentSnapshot.docs.filter(doc => {
@@ -945,7 +957,19 @@ export const EventsProvider = ({ children }) => {
                   };
                 }
               } catch (fallbackError) {
-                console.error('Error in fallback query for join code:', fallbackError);
+                const isPermissionError = fallbackError?.code === 'permission-denied' || 
+                                        fallbackError?.message?.includes('permission') ||
+                                        fallbackError?.message?.includes('Missing or insufficient permissions');
+                console.error('[EventsContext] Error in fallback query for join code:', {
+                  errorCode: fallbackError?.code,
+                  errorMessage: fallbackError?.message,
+                  isPermissionError,
+                  normalizedCode: normalized,
+                  userId: userId,
+                  hasAuth: !!user,
+                  authUid: user?.uid || user?.id || 'none',
+                  error: fallbackError
+                });
                 // Continue with original empty snapshot
               }
             }
@@ -971,6 +995,8 @@ export const EventsProvider = ({ children }) => {
               }
               return true; // Fallback already filtered
             });
+            
+            console.log(`[EventsContext] After filtering, found ${activeDocs.length} active documents matching join code`);
             
             if (activeDocs.length > 0) {
               const doc = activeDocs[0];
@@ -1073,12 +1099,28 @@ export const EventsProvider = ({ children }) => {
               await new Promise(resolve => setTimeout(resolve, delay));
             }
           } catch (error) {
-            console.error('Error querying Firestore for join code:', error);
+            const isPermissionError = error?.code === 'permission-denied' || 
+                                    error?.message?.includes('permission') ||
+                                    error?.message?.includes('Missing or insufficient permissions');
+            
+            console.error(`[EventsContext] Error querying Firestore for join code (attempt ${attempt + 1}/${maxRetries}):`, {
+              errorCode: error?.code,
+              errorMessage: error?.message,
+              isPermissionError,
+              normalizedCode: normalized,
+              userId: userId,
+              hasAuth: !!user,
+              authUid: user?.uid || user?.id || 'none',
+              error: error
+            });
             
             // If not the last attempt, wait before retrying
             if (attempt < maxRetries - 1) {
               const delay = baseDelay * Math.pow(2, attempt);
+              console.log(`[EventsContext] Retrying join code query after ${delay}ms delay...`);
               await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+              console.error('[EventsContext] All join code query attempts failed. Last error:', error);
             }
           }
         }
@@ -1127,6 +1169,10 @@ export const EventsProvider = ({ children }) => {
             });
             
             console.log('[EventsContext] Group document updated successfully - user added to memberIds');
+            
+            // Small delay to allow Firestore to propagate the memberIds update
+            // This helps avoid permission errors when creating the member document
+            await new Promise(resolve => setTimeout(resolve, 100));
             
             // Then create/update the member document in the subcollection
             // Now that user is in memberIds, they should have proper permissions

@@ -554,7 +554,7 @@ const Onboarding = () => {
                 </View>
               </View>
               <Text style={styles.organizeSubtitle}>
-                Organize your own gaming group and share a join code with friends.
+                Organize a new or established gaming group and share a join code with friends.
               </Text>
             </Pressable>
           </View>

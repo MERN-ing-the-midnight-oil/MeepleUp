@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, useWindowDimensions } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { theme } from '../utils/theme';
@@ -21,6 +22,7 @@ const DEFAULT_WEIGHTS = {
 
 const BeepleRecommendations = ({ games, userCollection, onProposeGame, userProposals = new Set(), eventId = null }) => {
   const { width } = useWindowDimensions();
+  const navigation = useNavigation();
   const { user, updateUser } = useAuth();
   const { collections, updateGameInCollection, addGameToCollection } = useCollections();
   const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
@@ -439,7 +441,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           </View>
           <Text style={styles.emptyText}>
             Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities between these games and your collection. 
-            Try adding more games to your collection so I can give you better recommendations!
+            Try <Text style={styles.linkText} onPress={() => navigation.navigate('Collection')}>adding more games to your collection</Text> so I can give you better recommendations!
           </Text>
           
           {/* Show sliders even when no recommendations */}
@@ -719,6 +721,11 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     textAlign: 'center',
     padding: theme.spacing.md,
+  },
+  linkText: {
+    color: theme.colors.meepleRed,
+    textDecorationLine: 'underline',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   gameCardContainer: {
     position: 'relative',

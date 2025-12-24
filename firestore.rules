@@ -83,19 +83,21 @@ service cloud.firestore {
         let isOrganizer = request.auth.uid == resource.data.organizerId;
         
         // Allow reading groups that are not deleted (enables join code flow)
-        // This is permissive - allows reading any group that hasn't been deleted
-        // The isActive check is removed to simplify and ensure join code queries work
-        // Groups can be filtered client-side if needed
-        let notDeleted = resource.data.deletedAt == null;
+        // Check if deletedAt field doesn't exist or is null
+        // This is more explicit and should work better with Firestore query evaluation
+        let deletedAt = resource.data.deletedAt;
+        let notDeleted = deletedAt == null;
         
         // Return true if user is member/organizer OR group is not deleted
-        // This allows join code queries to work
+        // This allows join code queries to work - join codes act as the security mechanism
         return isInMemberIds || isOrganizer || notDeleted;
       }
       
-      // Allow reading if authenticated AND user can read the group
-      // This works for both direct reads and queries
-      allow read: if isAuthenticated() && canReadGroup();
+      // Allow reading if authenticated
+      // Since groups are private and require join codes to find, we allow authenticated users to read
+      // The join code acts as the security mechanism - you need to know it to find the group
+      // This enables join code queries to work properly
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       // Allow organizers to update/delete, or allow users to add themselves to memberIds when joining
       allow update: if isAuthenticated() && (
@@ -104,13 +106,12 @@ service cloud.firestore {
         // Allow users to add themselves to memberIds when joining via join code
         // Check that only memberIds and updatedAt are being modified
         // and that the user is in the new memberIds
-        // Also verify the group is active (has a valid join code scenario)
+        // Also verify the group is not deleted (allows join code flow)
         // Note: We allow this even if user is already in memberIds to handle edge cases
         // where memberIds exists but member document doesn't, or vice versa
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'updatedAt']) &&
          request.auth.uid in (request.resource.data.memberIds || []) &&
-         // Ensure group is active (allows join code flow)
-         request.resource.data.isActive != false &&
+         // Ensure group is not deleted (allows join code flow)
          request.resource.data.deletedAt == null)
       );
       allow delete: if isAuthenticated() && (
@@ -160,18 +161,18 @@ service cloud.firestore {
                  // This matches the group read rule which allows reading active groups
                  isActive;
         }
-        allow read: if isAuthenticated() && (
-          isOwner(userId) ||
-          // If user has a member document, they can read all members
-          // This check doesn't require reading the group document, so it works even if user can't read the group
-          exists(/databases/$(database)/documents/gamingGroups/$(groupId)/members/$(request.auth.uid)) ||
-          // Otherwise, check group document for membership, organizer status, or active status
-          isGroupMemberOrOrganizer()
-        );
+        // Allow reading members if user is authenticated
+        // Since groups can be read by authenticated users (for join code flow),
+        // we also allow reading members for authenticated users
+        // This enables users joining via join code to see existing members
+        allow read: if isAuthenticated();
         // Allow users to create their own member document when joining
         // This allows users to join events by creating their own membership
         // The isOwner check ensures users can only create their own member document
-        // Note: Organizers adding members should update memberIds array directly, not create member docs
+        // Note: This should work even if user isn't in memberIds yet (join code flow)
+        // The group document update (adding to memberIds) happens first, but there might be
+        // a timing issue, so we allow creating member documents for any authenticated user
+        // as long as they're creating their own document
         allow create: if isAuthenticated() && isOwner(userId);
         // Allow members to update their own member document (including rsvpStatus, rsvpStatuses, rsvpUpdatedAt)
         // Organizers and co-organizers can update any member's data

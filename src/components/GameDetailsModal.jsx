@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, Alert, Animated } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import DottedHeart from './DottedHeart';
 import { getGameById } from '../services/gameDatabase';
@@ -17,6 +18,7 @@ import { getMatchScore, calculateMatchScoresForGame } from '../services/matchSco
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 
 const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = new Set(), userProposalLimit = 5 }) => {
+  const navigation = useNavigation();
   const { user } = useAuth();
   const { updateGameInCollection, addGameToCollection, collections } = useCollections();
   const [bggData, setBggData] = useState(preloadedBggData);
@@ -714,7 +716,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                     </View>
                     <Text style={styles.personalMatchText}>
                       Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities between this game and your collection. 
-                      Try adding more games to your collection so I can give you better recommendations!
+                      Try <Text style={styles.linkText} onPress={() => navigation.navigate('Collection')}>adding more games to your collection</Text> so I can give you better recommendations!
                     </Text>
                   </View>
                 )}
@@ -1110,6 +1112,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#333',
+  },
+  linkText: {
+    color: '#dc2626',
+    textDecorationLine: 'underline',
+    fontWeight: '600',
   },
   customizeWeightsLink: {
     marginTop: 12,
