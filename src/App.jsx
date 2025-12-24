@@ -5,6 +5,7 @@ import { EventsProvider } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
 import { AvailabilityProvider } from './context/AvailabilityContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { SubscriptionProvider } from './context/SubscriptionContext';
 import WebNavigation from './components/WebNavigation';
 import ParallaxBackground from './components/ParallaxBackground';
 import Onboarding from './screens/Onboarding';
@@ -14,6 +15,7 @@ import EventHub from './screens/EventHub';
 import BrowseAndProposeScreen from './screens/BrowseAndProposeScreen';
 import CollectionScreen from './screens/CollectionScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import SubscriptionScreen from './components/SubscriptionScreen';
 
 // Wrapper to pass URL search params to Auth component as route params
 const AuthWrapper = () => {
@@ -115,6 +117,14 @@ const AppContent = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/subscription"
+          element={
+            <ProtectedRoute>
+              <SubscriptionScreen />
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/events" replace />} />
       </Routes>
     </Router>
@@ -124,15 +134,17 @@ const AppContent = () => {
 const App = () => {
   return (
     <AuthProvider>
-      <AvailabilityProvider>
-        <EventsProvider>
-          <CollectionsProvider>
-            <NotificationProvider>
-              <AppContent />
-            </NotificationProvider>
-          </CollectionsProvider>
-        </EventsProvider>
-      </AvailabilityProvider>
+      <SubscriptionProvider>
+        <AvailabilityProvider>
+          <EventsProvider>
+            <CollectionsProvider>
+              <NotificationProvider>
+                <AppContent />
+              </NotificationProvider>
+            </CollectionsProvider>
+          </EventsProvider>
+        </AvailabilityProvider>
+      </SubscriptionProvider>
     </AuthProvider>
   );
 };

@@ -29,11 +29,14 @@ const Onboarding = () => {
   const [eventName, setEventName] = useState('');
   const [eventLocation, setEventLocation] = useState('');
   const [eventAddress, setEventAddress] = useState('');
-  const [selectedDates, setSelectedDates] = useState([]); // Array of { date: Date, startTime: Date, endTime: Date }
+  const [selectedDates, setSelectedDates] = useState([]); // Array of { date: Date, startTime: Date, endTime: Date, location?: string, note?: string }
   const [usualStartTime, setUsualStartTime] = useState(null); // Optional - no default
   const [usualEndTime, setUsualEndTime] = useState(null); // Optional - no default
   const [showTimePicker, setShowTimePicker] = useState({ type: null, dateIndex: null }); // { type: 'usualStart' | 'usualEnd' | 'start' | 'end', dateIndex: number }
   const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [editingDateIndex, setEditingDateIndex] = useState(null); // Index of date being edited
+  const [editingDateForm, setEditingDateForm] = useState({ location: '', note: '' }); // Form state for editing date
+  const [pendingEditDateIndex, setPendingEditDateIndex] = useState(null); // Store date index when closing edit modal to open time picker
   const [eventDescription, setEventDescription] = useState('');
   const [rsvpRequired, setRsvpRequired] = useState(true);
   // Public meepleups feature removed - all meepleups are private
@@ -47,6 +50,17 @@ const Onboarding = () => {
   const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
+  const selectedDatesRef = useRef(selectedDates);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    selectedDatesRef.current = selectedDates;
+  }, [selectedDates]);
+  
+  // Debug: Log when editingDateIndex changes
+  useEffect(() => {
+    console.log('[Onboarding] editingDateIndex changed to:', editingDateIndex);
+  }, [editingDateIndex]);
 
   const handleModeChange = (nextMode) => {
     setError('');
@@ -64,6 +78,8 @@ const Onboarding = () => {
       setJoinCodeWord2('');
       setJoinCodeWord3('');
       setShowCalendarModal(false);
+      setEditingDateIndex(null);
+      setEditingDateForm({ location: '', note: '' });
     }
     setMode(nextMode);
   };
@@ -167,11 +183,21 @@ const Onboarding = () => {
           endTime: endTimeObj.toISOString(),
         };
         
+        // Include per-date location and note if they exist
+        if (d.location && d.location.trim()) {
+          converted.location = d.location.trim();
+        }
+        if (d.note && d.note.trim()) {
+          converted.note = d.note.trim();
+        }
+        
         console.log(`[Onboarding] Converting date ${index + 1}:`, {
           original: {
             date: d.date instanceof Date ? d.date.toISOString() : d.date,
             startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
             endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+            location: d.location,
+            note: d.note,
           },
           converted: converted,
         });
@@ -254,24 +280,11 @@ const Onboarding = () => {
       setShowCalendarModal(false);
       setError('');
 
-      Alert.alert(
-        'MeepleUp Organized',
-        `Share this membership link or code so trusted guests can join:\n\nCode: ${newEvent.joinCode}`,
-        [
-          {
-            text: 'View MeepleUp',
-            onPress: () => navigation.replace('EventHub', {
-              eventId: newEvent.id,
-              joinCode: newEvent.joinCode,
-            }),
-          },
-          {
-            text: 'Done',
-            style: 'cancel',
-            onPress: () => handleModeChange('choice'),
-          },
-        ],
-      );
+      // Navigate directly to the newly created MeepleUp
+      navigation.replace('EventHub', {
+        eventId: newEvent.id,
+        joinCode: newEvent.joinCode,
+      });
     } catch (err) {
       setError('Failed to organize MeepleUp. Please try again.');
       console.error(err);
@@ -528,12 +541,8 @@ const Onboarding = () => {
             >
               <View style={styles.organizeTitleContainer}>
                 <Text style={styles.organizeTitle}>Organize a new MeepleUp</Text>
-                <View style={styles.gameCube}>
-                  <View style={styles.cubeFaceTop}>
-                    <Text style={styles.cubePlus}>+</Text>
-                  </View>
-                  <View style={styles.cubeFaceFront}></View>
-                  <View style={styles.cubeFaceRight}></View>
+                <View style={styles.addCircle}>
+                  <Text style={styles.circlePlus}>+</Text>
                 </View>
               </View>
               <Text style={styles.organizeSubtitle}>
@@ -656,7 +665,6 @@ const Onboarding = () => {
             {/* MeepleUp Name */}
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>MeepleUp Name <Text style={styles.requiredAsterisk}>*</Text></Text>
-              <Text style={styles.fieldExample}>Example: "Tuesday Game Night at Joe's"</Text>
               <Input
                 placeholder="Give your event a name"
                 value={eventName}
@@ -671,9 +679,6 @@ const Onboarding = () => {
             {/* Date & Time */}
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>Date & Time <Text style={styles.requiredAsterisk}>*</Text></Text>
-              <Text style={styles.fieldExample}>
-                Select dates from the calendar. Set default times that will apply to all selected dates.
-              </Text>
               
               {/* Usual Time */}
               <View style={styles.timeRow}>
@@ -721,6 +726,30 @@ const Onboarding = () => {
                   </Pressable>
                 </View>
               </View>
+            </View>
+
+            {/* Location */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.fieldLabel}>Default Location <Text style={styles.requiredAsterisk}>*</Text></Text>
+              <Input
+                placeholder="Jason's house"
+                value={eventLocation}
+                onChangeText={(text) => {
+                  setEventLocation(text);
+                  setError('');
+                }}
+                style={styles.input}
+              />
+              <Text style={styles.fieldLabel}>Address</Text>
+              <Input
+                placeholder="123 Tolkien Dr."
+                value={eventAddress}
+                onChangeText={(text) => {
+                  setEventAddress(text);
+                  setError('');
+                }}
+                style={styles.input}
+              />
 
               {/* Calendar Button */}
               <Button
@@ -733,60 +762,11 @@ const Onboarding = () => {
               />
             </View>
 
-            {/* Location */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Location <Text style={styles.requiredAsterisk}>*</Text></Text>
-              <Text style={styles.fieldExample}>Example: "Jason's house" or "Nelson's Market"</Text>
-              <Input
-                placeholder="Jason's house"
-                value={eventLocation}
-                onChangeText={(text) => {
-                  setEventLocation(text);
-                  setError('');
-                }}
-                style={styles.input}
-              />
-              <Text style={styles.fieldLabel}>Address</Text>
-              <Text style={styles.fieldExample}>Example: "123 Tolkien Dr."</Text>
-              <Input
-                placeholder="123 Tolkien Dr."
-                value={eventAddress}
-                onChangeText={(text) => {
-                  setEventAddress(text);
-                  setError('');
-                }}
-                style={styles.input}
-              />
-            </View>
-          </View>
-
-          {/* Access Control */}
-          <View style={styles.subsection}>
-            <Text style={styles.subsectionTitle}>Access Control</Text>
-            
-            {/* Who can join? */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Who can join?</Text>
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleLabelContainer}>
-                  <Text style={styles.toggleLabel}>Private: Invite only</Text>
-                  <Text style={styles.toggleDescription}>
-                    A join code will be generated for this event
-                  </Text>
-                </View>
-              </View>
-            </View>
-
             {/* RSVP Required */}
             <View style={styles.fieldContainer}>
               <View style={styles.toggleRow}>
                 <View style={styles.toggleLabelContainer}>
                   <Text style={styles.toggleLabel}>RSVP Required?</Text>
-                  <Text style={styles.toggleDescription}>
-                    {rsvpRequired 
-                      ? 'Members must RSVP Going/Maybe/No' 
-                      : 'Attendance is optional/flexible'}
-                  </Text>
                 </View>
                 <Switch
                   value={rsvpRequired}
@@ -804,7 +784,6 @@ const Onboarding = () => {
           {/* MeepleUp Description */}
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>MeepleUp Description</Text>
-            <Text style={styles.fieldExample}>Example: "Bring snacks! We'll be playing heavy euros."</Text>
             <Input
               placeholder="Bring snacks! We'll be playing heavy euros."
               value={eventDescription}
@@ -825,7 +804,6 @@ const Onboarding = () => {
           {/* Member Limit */}
           <View style={styles.fieldContainer}>
             <Text style={styles.fieldLabel}>Member Limit</Text>
-            <Text style={styles.fieldExample}>Example: "Max 6 players" (leave blank = unlimited)</Text>
             <Input
               placeholder="Leave blank for unlimited"
               value={memberLimit}
@@ -848,6 +826,8 @@ const Onboarding = () => {
           style={styles.fullButton}
         />
       </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
 
       {/* Calendar Modal */}
       <Modal
@@ -859,9 +839,6 @@ const Onboarding = () => {
         <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent}>
           <View style={styles.modalFieldContainer}>
             <Text style={styles.fieldLabel}>Usual Time</Text>
-            <Text style={styles.fieldHint}>
-              Set the default start and end times. These will be used for all selected dates unless you edit individual dates.
-            </Text>
             
             <View style={styles.timeRow}>
               <View style={styles.timeInputContainer}>
@@ -911,10 +888,7 @@ const Onboarding = () => {
           </View>
 
           <View style={styles.modalFieldContainer}>
-            <Text style={styles.fieldLabel}>Select Event Dates</Text>
-            <Text style={styles.fieldHint}>
-              Scroll through the calendar to see the next 12 months. Tap dates to select or deselect them. Selected dates show their times below. Tap a date's time on the calendar to edit it individually.
-            </Text>
+            <Text style={styles.fieldLabel}>Long press to set dates, tap to edit times</Text>
             <CalendarDatePicker
               selectedDates={selectedDates}
               onDatesChange={(newDates) => {
@@ -937,6 +911,37 @@ const Onboarding = () => {
               onDateTimeEdit={(dateIndex, timeType) => {
                 setShowTimePicker({ type: timeType || 'start', dateIndex });
               }}
+              onDatePress={(dateIndex, dateInfo) => {
+                console.log('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
+                
+                // Close calendar modal first
+                setShowCalendarModal(false);
+                
+                // Use setTimeout to ensure calendar modal closes before opening edit modal
+                // Use ref to get latest selectedDates
+                setTimeout(() => {
+                  const currentDates = selectedDatesRef.current;
+                  console.log('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
+                  
+                  if (dateIndex !== null && dateIndex !== undefined && dateIndex >= 0 && currentDates[dateIndex]) {
+                    const date = currentDates[dateIndex];
+                    console.log('[Onboarding] Opening edit modal for date:', date);
+                    console.log('[Onboarding] Setting editingDateIndex to:', dateIndex);
+                    setEditingDateIndex(dateIndex);
+                    setEditingDateForm({
+                      location: date.location || '',
+                      note: date.note || '',
+                    });
+                    console.log('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
+                  } else {
+                    console.warn('[Onboarding] Invalid dateIndex or date not found:', { 
+                      dateIndex, 
+                      selectedDatesLength: currentDates.length,
+                      selectedDates: currentDates.map((d, i) => ({ index: i, date: d.date }))
+                    });
+                  }
+                }, 300);
+              }}
             />
           </View>
 
@@ -948,13 +953,214 @@ const Onboarding = () => {
             />
           </View>
         </ScrollView>
+      </Modal>
 
-        {/* Time Picker Modal */}
+      {/* Date Edit Modal */}
+      <Modal
+        isOpen={editingDateIndex !== null}
+        onClose={() => {
+          console.log('[Onboarding] Closing Date Edit Modal');
+          setEditingDateIndex(null);
+          setEditingDateForm({ location: '', note: '' });
+        }}
+        title="Edit Event Date"
+      >
+        <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent}>
+          {editingDateIndex !== null && selectedDates[editingDateIndex] && (
+            <>
+              <View style={styles.modalFieldContainer}>
+                <Text style={styles.fieldLabel}>
+                  {selectedDates[editingDateIndex].date instanceof Date
+                    ? selectedDates[editingDateIndex].date.toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                      })
+                    : new Date(selectedDates[editingDateIndex].date).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                      })}
+                </Text>
+              </View>
+
+              <View style={styles.modalFieldContainer}>
+                <Text style={styles.fieldLabel}>Start Time</Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.timeButton,
+                    pressed && styles.timeButtonPressed,
+                  ]}
+                  onPress={() => {
+                    // Save current form state before closing
+                    if (editingDateIndex !== null) {
+                      const updatedDates = [...selectedDates];
+                      updatedDates[editingDateIndex] = {
+                        ...updatedDates[editingDateIndex],
+                        location: editingDateForm.location.trim() || undefined,
+                        note: editingDateForm.note.trim() || undefined,
+                      };
+                      setSelectedDates(updatedDates);
+                    }
+                    // Close edit modal first, then open time picker
+                    const currentDateIndex = editingDateIndex;
+                    setPendingEditDateIndex(currentDateIndex);
+                    setEditingDateIndex(null);
+                    setTimeout(() => {
+                      setShowTimePicker({ type: 'start', dateIndex: currentDateIndex });
+                    }, 300);
+                  }}
+                >
+                  <Text style={styles.timeButtonText}>
+                    {selectedDates[editingDateIndex].startTime instanceof Date
+                      ? selectedDates[editingDateIndex].startTime.toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        })
+                      : new Date(selectedDates[editingDateIndex].startTime).toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        })}
+                  </Text>
+                  <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
+                </Pressable>
+              </View>
+
+              <View style={styles.modalFieldContainer}>
+                <Text style={styles.fieldLabel}>End Time</Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.timeButton,
+                    pressed && styles.timeButtonPressed,
+                  ]}
+                  onPress={() => {
+                    // Save current form state before closing
+                    if (editingDateIndex !== null) {
+                      const updatedDates = [...selectedDates];
+                      updatedDates[editingDateIndex] = {
+                        ...updatedDates[editingDateIndex],
+                        location: editingDateForm.location.trim() || undefined,
+                        note: editingDateForm.note.trim() || undefined,
+                      };
+                      setSelectedDates(updatedDates);
+                    }
+                    // Close edit modal first, then open time picker
+                    const currentDateIndex = editingDateIndex;
+                    setPendingEditDateIndex(currentDateIndex);
+                    setEditingDateIndex(null);
+                    setTimeout(() => {
+                      setShowTimePicker({ type: 'end', dateIndex: currentDateIndex });
+                    }, 300);
+                  }}
+                >
+                  <Text style={styles.timeButtonText}>
+                    {selectedDates[editingDateIndex].endTime instanceof Date
+                      ? selectedDates[editingDateIndex].endTime.toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        })
+                      : new Date(selectedDates[editingDateIndex].endTime).toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true,
+                        })}
+                  </Text>
+                  <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
+                </Pressable>
+              </View>
+
+              <View style={styles.modalFieldContainer}>
+                <Text style={styles.fieldLabel}>Location</Text>
+                <Input
+                  placeholder={eventLocation || "Location for this date"}
+                  value={editingDateForm.location}
+                  onChangeText={(text) => {
+                    setEditingDateForm(prev => ({ ...prev, location: text }));
+                  }}
+                  style={styles.input}
+                />
+              </View>
+
+              <View style={styles.modalFieldContainer}>
+                <Text style={styles.fieldLabel}>Note</Text>
+                <Input
+                  placeholder="Note for this date"
+                  value={editingDateForm.note}
+                  onChangeText={(text) => {
+                    setEditingDateForm(prev => ({ ...prev, note: text }));
+                  }}
+                  multiline
+                  numberOfLines={3}
+                  maxLength={500}
+                  style={styles.input}
+                />
+                <Text style={styles.charCount}>
+                  {editingDateForm.note.length}/500 characters
+                </Text>
+              </View>
+
+              <View style={styles.modalActions}>
+                <Button
+                  label="Save"
+                  onPress={() => {
+                    if (editingDateIndex !== null) {
+                      const updatedDates = [...selectedDates];
+                      updatedDates[editingDateIndex] = {
+                        ...updatedDates[editingDateIndex],
+                        location: editingDateForm.location.trim() || undefined,
+                        note: editingDateForm.note.trim() || undefined,
+                      };
+                      setSelectedDates(updatedDates);
+                      setEditingDateIndex(null);
+                      setEditingDateForm({ location: '', note: '' });
+                    }
+                  }}
+                  style={styles.modalButton}
+                />
+                <Button
+                  label="Cancel"
+                  onPress={() => {
+                    setEditingDateIndex(null);
+                    setEditingDateForm({ location: '', note: '' });
+                  }}
+                  variant="outline"
+                  style={styles.modalButton}
+                />
+              </View>
+            </>
+          )}
+        </ScrollView>
+      </Modal>
+
+      {/* Time Picker Modal - Moved outside calendar modal so it can be used independently */}
         {showTimePicker.type && (
           Platform.OS === 'ios' ? (
             <Modal
               isOpen={true}
-              onClose={() => setShowTimePicker({ type: null, dateIndex: null })}
+              onClose={() => {
+                setShowTimePicker({ type: null, dateIndex: null });
+                // Reopen edit modal if we were editing a date
+                const currentPendingIndex = pendingEditDateIndex;
+                if (currentPendingIndex !== null) {
+                  setTimeout(() => {
+                    const currentDates = selectedDatesRef.current;
+                    const date = currentDates[currentPendingIndex];
+                    if (date) {
+                      setEditingDateIndex(currentPendingIndex);
+                      setEditingDateForm({
+                        location: date.location || '',
+                        note: date.note || '',
+                      });
+                      setPendingEditDateIndex(null);
+                    }
+                  }, 300);
+                }
+              }}
               title={
                 showTimePicker.type === 'usualStart' ? 'Usual Start Time' :
                 showTimePicker.type === 'usualEnd' ? 'Usual End Time' :
@@ -988,7 +1194,7 @@ const Onboarding = () => {
                           const month = dateObj.getMonth();
                           const day = dateObj.getDate();
                           const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
-                          return { ...d, startTime: newTime };
+                        return { ...d, startTime: newTime, location: d.location, note: d.note };
                         }));
                       } else if (showTimePicker.type === 'usualEnd') {
                         setUsualEndTime(date);
@@ -999,7 +1205,7 @@ const Onboarding = () => {
                           const month = dateObj.getMonth();
                           const day = dateObj.getDate();
                           const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
-                          return { ...d, endTime: newTime };
+                        return { ...d, endTime: newTime, location: d.location, note: d.note };
                         }));
                       } else if (showTimePicker.type === 'start' || showTimePicker.type === 'end') {
                         const updatedDates = [...selectedDates];
@@ -1034,6 +1240,22 @@ const Onboarding = () => {
                           setUsualEndTime(null);
                         }
                         setShowTimePicker({ type: null, dateIndex: null });
+                        // Reopen edit modal if we were editing a date
+                        const currentPendingIndex = pendingEditDateIndex;
+                        if (currentPendingIndex !== null) {
+                          setTimeout(() => {
+                            const currentDates = selectedDatesRef.current;
+                            const date = currentDates[currentPendingIndex];
+                            if (date) {
+                              setEditingDateIndex(currentPendingIndex);
+                              setEditingDateForm({
+                                location: date.location || '',
+                                note: date.note || '',
+                              });
+                              setPendingEditDateIndex(null);
+                            }
+                          }, 300);
+                        }
                       }}
                       variant="outline"
                       style={styles.modalButton}
@@ -1041,7 +1263,25 @@ const Onboarding = () => {
                   )}
                   <Button
                     label="Done"
-                    onPress={() => setShowTimePicker({ type: null, dateIndex: null })}
+                    onPress={() => {
+                      setShowTimePicker({ type: null, dateIndex: null });
+                      // Reopen edit modal if we were editing a date
+                      const currentPendingIndex = pendingEditDateIndex;
+                      if (currentPendingIndex !== null) {
+                        setTimeout(() => {
+                          const currentDates = selectedDatesRef.current;
+                          const date = currentDates[currentPendingIndex];
+                          if (date) {
+                            setEditingDateIndex(currentPendingIndex);
+                            setEditingDateForm({
+                              location: date.location || '',
+                              note: date.note || '',
+                            });
+                            setPendingEditDateIndex(null);
+                          }
+                        }, 300);
+                      }
+                    }}
                     style={styles.modalButton}
                   />
                 </View>
@@ -1073,7 +1313,7 @@ const Onboarding = () => {
                         const month = dateObj.getMonth();
                         const day = dateObj.getDate();
                         const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
-                        return { ...d, startTime: newTime };
+                        return { ...d, startTime: newTime, location: d.location, note: d.note };
                       }));
                     } else if (showTimePicker.type === 'usualEnd') {
                       setUsualEndTime(date);
@@ -1084,7 +1324,7 @@ const Onboarding = () => {
                         const month = dateObj.getMonth();
                         const day = dateObj.getDate();
                         const newTime = new Date(year, month, day, date.getHours(), date.getMinutes(), 0, 0);
-                        return { ...d, endTime: newTime };
+                        return { ...d, endTime: newTime, location: d.location, note: d.note };
                       }));
                     } else if (showTimePicker.type === 'start' || showTimePicker.type === 'end') {
                       const updatedDates = [...selectedDates];
@@ -1100,20 +1340,35 @@ const Onboarding = () => {
                         updatedDates[showTimePicker.dateIndex] = {
                           ...updatedDates[showTimePicker.dateIndex],
                           [showTimePicker.type === 'start' ? 'startTime' : 'endTime']: newTime,
+                          location: updatedDates[showTimePicker.dateIndex].location,
+                          note: updatedDates[showTimePicker.dateIndex].note,
                         };
                         setSelectedDates(updatedDates);
                       }
                     }
                     setShowTimePicker({ type: null, dateIndex: null });
+                    // Reopen edit modal if we were editing a date
+                    const currentPendingIndex = pendingEditDateIndex;
+                    if (currentPendingIndex !== null) {
+                      setTimeout(() => {
+                        const currentDates = selectedDatesRef.current;
+                        const date = currentDates[currentPendingIndex];
+                        if (date) {
+                          setEditingDateIndex(currentPendingIndex);
+                          setEditingDateForm({
+                            location: date.location || '',
+                            note: date.note || '',
+                          });
+                          setPendingEditDateIndex(null);
+                        }
+                      }, 300);
+                    }
                   }
                 }}
               />
             )
           )
         )}
-      </Modal>
-    </ScrollView>
-    </KeyboardAvoidingView>
     {selectedUserForProfile && (
       <UserProfileModal
         isOpen={!!selectedUserForProfile}
@@ -1173,7 +1428,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   bggLogoContainer: {
-    marginBottom: theme.spacing['2xl'] * 4,
+    marginBottom: theme.spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
@@ -1529,63 +1784,32 @@ const styles = StyleSheet.create({
     textShadowRadius: 1,
     flex: 1,
   },
-  gameCube: {
-    width: 36,
-    height: 36,
-    position: 'relative',
-  },
-  cubeFaceTop: {
-    position: 'absolute',
-    width: 28,
-    height: 28,
+  addCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: theme.colors.meepleRed,
-    borderWidth: 1,
-    borderColor: '#a02d22', // Darker red for border
     justifyContent: 'center',
     alignItems: 'center',
-    top: 0,
-    left: 4,
+    // Thick appearance with shadows
     shadowColor: '#000',
-    shadowOffset: { width: 3, height: 3 },
-    shadowOpacity: 0.4,
-    shadowRadius: 2,
-    elevation: 5,
-  },
-  cubeFaceFront: {
-    position: 'absolute',
-    width: 28,
-    height: 20,
-    backgroundColor: '#a02d22', // Darker red for front face
-    borderWidth: 1,
-    borderColor: '#8b2519',
-    top: 20,
-    left: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
-    shadowRadius: 3,
-    elevation: 4,
+    shadowRadius: 6,
+    elevation: 8,
+    // Border for thickness effect
+    borderWidth: 2,
+    borderColor: '#a02d22', // Darker red border
+    // Additional shadow layers for depth
+    borderBottomWidth: 4,
+    borderBottomColor: '#8b2519', // Even darker on bottom
   },
-  cubeFaceRight: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
-    backgroundColor: '#8b2519', // Darkest red for right face
-    borderWidth: 1,
-    borderColor: '#6b1c12',
-    top: 20,
-    right: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 3, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  cubePlus: {
+  circlePlus: {
     color: '#ffffff',
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: theme.typography.fontWeight.bold,
     textAlign: 'center',
+    lineHeight: 24,
   },
   organizeSubtitle: {
     fontSize: theme.typography.fontSize.base,

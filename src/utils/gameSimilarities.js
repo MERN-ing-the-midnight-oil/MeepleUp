@@ -48,8 +48,18 @@ export const findGameSimilarities = (proposedGame, userCollection, customWeights
   const proposedCategories = normalizeArray(bggData.categories || []);
   const proposedComplexity = bggData.averageWeight || bggData.complexity || null;
 
-  // Find matches in user's collection
+  // Get the proposed game's ID for comparison (to exclude it from matches)
+  const proposedGameId = proposedGame.bggId || proposedGame.id;
+  const proposedGameIdStr = proposedGameId ? String(proposedGameId) : null;
+
+  // Find matches in user's collection (excluding the proposed game itself)
   userCollection.forEach(game => {
+    // Skip if this is the same game (compare by bggId or id)
+    const gameId = game.bggId || game.id;
+    const gameIdStr = gameId ? String(gameId) : null;
+    if (proposedGameIdStr && gameIdStr && proposedGameIdStr === gameIdStr) {
+      return; // Skip comparing game to itself
+    }
     const isFavorite = game.isFavorite === true;
     const favoriteMultiplier = isFavorite ? WEIGHTS.favorite : 1;
 

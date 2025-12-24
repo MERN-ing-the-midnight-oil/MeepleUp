@@ -65,12 +65,21 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
               </>
             ) : (
               <>
-                <View style={styles.header}>
-                  {title && <Text style={styles.title}>{title}</Text>}
-                  <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                    <Text style={styles.closeText}>×</Text>
-                  </TouchableOpacity>
-                </View>
+                {title && (
+                  <View style={styles.header}>
+                    <Text style={styles.title}>{title}</Text>
+                    <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                      <Text style={styles.closeText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {!title && (
+                  <View style={styles.headerCloseOnly}>
+                    <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                      <Text style={styles.closeText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
                 <ScrollView
                   contentContainerStyle={styles.scrollContent}
                   keyboardShouldPersistTaps="handled"
@@ -144,6 +153,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: theme.spacing.lg,
+  },
+  headerCloseOnly: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
   },
   fullScreenHeader: {
     flexDirection: 'row',

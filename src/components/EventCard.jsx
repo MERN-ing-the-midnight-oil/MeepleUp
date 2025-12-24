@@ -25,7 +25,10 @@ const EventCard = memo(({
   navigation = null, // Navigation object for icon links
 }) => {
   const memberCount = (event.members || []).filter(
-    (member) => member.status === 'member',
+    (member) => {
+      const memberId = member.userId || member.id;
+      return memberId && (member.status === 'member' || !member.status || member.status === undefined);
+    }
   ).length;
   
   // Dynamic font sizing for title - start with larger default for readability
@@ -79,6 +82,7 @@ const EventCard = memo(({
     e.stopPropagation();
     setIsExpanded(!isExpanded);
   };
+
 
   // Handle card press animation
   const handlePressIn = () => {
@@ -301,49 +305,10 @@ const EventCard = memo(({
             </View>
           </View>
 
+
         {/* Expanded content */}
         {isExpanded && (
           <>
-        
-            {/* Member Avatars */}
-            {event.members && event.members.length > 0 && (
-              <View style={styles.membersContainer}>
-                <Text style={styles.membersLabel}>Members:</Text>
-                <View style={styles.memberAvatars}>
-                  {event.members
-                    .filter((member) => member.status === 'member')
-                    .map((member) => {
-                      const avatarUrl = memberAvatars[member.userId];
-                      const memberName = memberNames[member.userId] || member.userName || 'Unknown';
-                      const hasPressHandler = onMemberPress && member.userId;
-                      
-                      const AvatarComponent = hasPressHandler ? TouchableOpacity : View;
-                      
-                      return (
-                        <AvatarComponent
-                          key={member.userId}
-                          style={styles.memberAvatarContainer}
-                          onPress={hasPressHandler ? () => onMemberPress(member.userId, memberName, avatarUrl) : undefined}
-                        >
-                          {avatarUrl ? (
-                            <Image
-                              source={{ uri: avatarUrl }}
-                              style={styles.memberAvatar}
-                              resizeMode="cover"
-                            />
-                          ) : (
-                            <View style={styles.memberAvatarPlaceholder}>
-                              <Text style={styles.memberAvatarInitial}>
-                                {memberName.charAt(0).toUpperCase()}
-                              </Text>
-                            </View>
-                          )}
-                        </AvatarComponent>
-                      );
-                    })}
-                </View>
-              </View>
-            )}
 
             {/* RSVP Status and Counts */}
             {rsvpSettings.enabled && (
@@ -426,7 +391,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8, // Android shadow
-    aspectRatio: 2, // 2:1 width to height ratio
+    aspectRatio: 2, // 2:1 width to height ratio (will be overridden when dropdown is open)
   },
   cardBackground: {
     position: 'relative',
@@ -467,6 +432,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     flexDirection: 'row',
     gap: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
   },
   cornerBadgeText: {
     fontSize: 12,
@@ -570,58 +539,6 @@ const styles = StyleSheet.create({
   locationLabel: {
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
-  },
-  membersContainer: {
-    marginTop: theme.spacing.md,
-    paddingTop: theme.spacing.md,
-    borderTopWidth: 2,
-    borderTopColor: theme.colors.woodDark,
-  },
-  membersLabel: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.sm,
-  },
-  memberAvatars: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.spacing.sm,
-  },
-  memberAvatarContainer: {
-    marginRight: theme.spacing.xs,
-  },
-  memberAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 3,
-    borderColor: theme.colors.woodDark,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  memberAvatarPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: theme.colors.meepleRed,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: theme.colors.woodDark,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  memberAvatarInitial: {
-    fontSize: theme.typography.fontSize.base,
-    color: '#fff',
-    fontWeight: theme.typography.fontWeight.semibold,
   },
   rsvpInfo: {
     marginTop: theme.spacing.sm,

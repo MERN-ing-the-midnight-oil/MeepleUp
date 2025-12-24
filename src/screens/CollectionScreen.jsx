@@ -540,7 +540,7 @@ const CollectionScreen = () => {
         <Text style={styles.menuOptionIcon}>📝</Text>
         <View style={styles.menuOptionText}>
           <Text style={styles.menuOptionTitle}>Type or paste your game list</Text>
-          <Text style={styles.menuOptionDescription}>Let us format your list and look up your titles for you</Text>
+          <Text style={styles.menuOptionDescription}>List your games in pretty much any format. You can even write things like "I have all the Settlers expansions except for the one with the Fishermen".</Text>
         </View>
         <Text style={styles.menuOptionArrow}>→</Text>
       </View>

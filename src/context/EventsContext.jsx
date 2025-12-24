@@ -47,6 +47,7 @@ const normalizeMember = (member, organizerId, fallbackDate) => {
       role: member === organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
       joinedAt: fallbackDate || new Date().toISOString(),
       canShareJoinCode: false, // Default to false
+      proposalLimit: 5, // Default proposal limit
     };
   }
 
@@ -58,6 +59,7 @@ const normalizeMember = (member, organizerId, fallbackDate) => {
     role: member.role || (member.userId === organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER),
     joinedAt: member.joinedAt || fallbackDate || new Date().toISOString(),
     canShareJoinCode: member.canShareJoinCode !== undefined ? member.canShareJoinCode : isOrganizer, // Organizers can always share
+    proposalLimit: member.proposalLimit !== undefined ? member.proposalLimit : 5, // Default to 5 if not set
   };
 };
 
@@ -124,13 +126,19 @@ const normalizeEvent = (event) => {
   // For backward compatibility, also set joinCode to the first code
   const joinCode = joinCodes[0] || generateJoinCode();
 
+  // Normalize eventDates - ensure it's always an array if present, or undefined if not
+  let eventDates = undefined;
+  if (event.eventDates !== undefined && event.eventDates !== null) {
+    eventDates = Array.isArray(event.eventDates) ? event.eventDates : undefined;
+  }
+
   return {
     id: event.id || Date.now().toString(),
     name: event.name || 'New MeepleUp',
     organizerId,
     description: event.description || '',
     scheduledFor: event.scheduledFor || event.nextDate || '',
-    eventDates: event.eventDates || undefined,
+    eventDates,
     usualStartTime: event.usualStartTime || undefined,
     usualEndTime: event.usualEndTime || undefined,
     createdAt,
@@ -251,8 +259,11 @@ export const EventsProvider = ({ children }) => {
       try {
         const userId = user.uid || user.id;
         if (!userId) {
+          console.log('[EventsContext] No userId available, skipping sync');
           return;
         }
+
+        console.log(`[EventsContext] Syncing events for user: ${userId} (${user.email || 'no email'})`);
 
         // Query Firestore for gamingGroups where user is in memberIds array OR is the organizer
         // Try multiple queries and combine results
@@ -261,6 +272,7 @@ export const EventsProvider = ({ children }) => {
         
         // Query 1: Groups where user is in memberIds
         try {
+          console.log(`[EventsContext] Querying groups where user is in memberIds...`);
           const memberGroupsRef = db.collection('gamingGroups')
             .where('memberIds', 'array-contains', userId)
             .where('isActive', '==', true);
@@ -271,7 +283,7 @@ export const EventsProvider = ({ children }) => {
               seenGroupIds.add(doc.id);
             }
           });
-          console.log(`[EventsContext] Found ${memberGroupsSnapshot.docs.length} groups via memberIds query`);
+          console.log(`[EventsContext] Found ${memberGroupsSnapshot.docs.length} groups via memberIds query for user ${userId}`);
         } catch (memberQueryError) {
           // Check if it's a permission error or index error
           const isPermissionError = memberQueryError.code === 'permission-denied' || 
@@ -286,6 +298,7 @@ export const EventsProvider = ({ children }) => {
         
         // Query 2: Groups where user is the organizer
         try {
+          console.log(`[EventsContext] Querying groups where user is organizer...`);
           const organizerGroupsRef = db.collection('gamingGroups')
             .where('organizerId', '==', userId)
             .where('isActive', '==', true);
@@ -296,7 +309,7 @@ export const EventsProvider = ({ children }) => {
               seenGroupIds.add(doc.id);
             }
           });
-          console.log(`[EventsContext] Found ${organizerGroupsSnapshot.docs.length} groups via organizerId query`);
+          console.log(`[EventsContext] Found ${organizerGroupsSnapshot.docs.length} groups via organizerId query for user ${userId}`);
         } catch (organizerQueryError) {
           // Check if it's a permission error or index error
           const isPermissionError = organizerQueryError.code === 'permission-denied' || 
@@ -309,7 +322,7 @@ export const EventsProvider = ({ children }) => {
           }
         }
         
-        console.log(`[EventsContext] Total groups found: ${allGroupDocs.length}`);
+        console.log(`[EventsContext] Total groups found: ${allGroupDocs.length} for user ${userId}`);
         
         // Create a snapshot-like object from the combined results
         const groupsSnapshot = {
@@ -318,6 +331,9 @@ export const EventsProvider = ({ children }) => {
         };
         
         if (groupsSnapshot.empty) {
+          console.log(`[EventsContext] No groups found for user ${userId}. User may not be a member of any MeepleUps.`);
+          // Set empty array to clear any stale data
+          setEvents([]);
           return;
         }
 
@@ -336,15 +352,31 @@ export const EventsProvider = ({ children }) => {
               
               members = membersSnapshot.docs.map(memberDoc => {
                 const memberData = memberDoc.data();
+                const isOrganizer = memberData.role === MEMBER_ROLES.ORGANIZER || memberData.userId === firestoreData.organizerId;
+                
+                // Default RSVP status to "going" for organizers if not set
+                let rsvpStatus = memberData.rsvpStatus;
+                let rsvpStatuses = memberData.rsvpStatuses || {};
+                
+                if (isOrganizer && !rsvpStatus && Object.keys(rsvpStatuses).length === 0) {
+                  // Organizer has no RSVP set - default to "going"
+                  rsvpStatus = 'going';
+                  rsvpStatuses = { default: 'going' };
+                } else if (isOrganizer && !rsvpStatus && Object.keys(rsvpStatuses).length > 0) {
+                  // Organizer has date-specific RSVPs but no default - set default to "going"
+                  rsvpStatus = 'going';
+                }
+                
                 return {
                   userId: memberData.userId || memberDoc.id,
                   status: MEMBERSHIP_STATUS.MEMBER,
                   role: memberData.role || MEMBER_ROLES.MEMBER,
                   joinedAt: memberData.joinedAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                  rsvpStatus: memberData.rsvpStatus || null, // Backward compatibility
-                  rsvpStatuses: memberData.rsvpStatuses || {}, // Date-specific RSVPs
+                  rsvpStatus: rsvpStatus || null, // Backward compatibility
+                  rsvpStatuses: rsvpStatuses, // Date-specific RSVPs
                   rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || null,
                   canShareJoinCode: memberData.canShareJoinCode !== undefined ? memberData.canShareJoinCode : (memberData.role === MEMBER_ROLES.ORGANIZER), // Default: organizers can share
+                  proposalLimit: memberData.proposalLimit !== undefined ? memberData.proposalLimit : 5, // Default to 5 if not set
                 };
               });
             } catch (memberError) {
@@ -352,16 +384,20 @@ export const EventsProvider = ({ children }) => {
               // Fall back to using memberIds from the group document
               console.warn(`Error fetching members for group ${groupDoc.id}, using memberIds fallback:`, memberError);
               const memberIds = firestoreData.memberIds || [];
-              members = memberIds.map((memberId, index) => ({
-                userId: memberId,
-                status: MEMBERSHIP_STATUS.MEMBER,
-                role: memberId === firestoreData.organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
-                joinedAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-                rsvpStatus: null,
-                rsvpStatuses: {},
-                rsvpUpdatedAt: null,
-                canShareJoinCode: memberId === firestoreData.organizerId, // Only organizer by default
-              }));
+              members = memberIds.map((memberId, index) => {
+                const isOrganizer = memberId === firestoreData.organizerId;
+                return {
+                  userId: memberId,
+                  status: MEMBERSHIP_STATUS.MEMBER,
+                  role: isOrganizer ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
+                  joinedAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+                  rsvpStatus: isOrganizer ? 'going' : null, // Default organizers to "going"
+                  rsvpStatuses: isOrganizer ? { default: 'going' } : {}, // Default organizers to "going"
+                  rsvpUpdatedAt: null,
+                  canShareJoinCode: isOrganizer, // Only organizer by default
+                  proposalLimit: 5, // Default proposal limit
+                };
+              });
             }
 
             // Convert Firestore event format to local event format
@@ -371,14 +407,16 @@ export const EventsProvider = ({ children }) => {
               organizerId: firestoreData.organizerId || null,
               description: firestoreData.description || '',
               scheduledFor: firestoreData.scheduledFor || firestoreData.nextEventDate || '',
-              eventDates: firestoreData.eventDates ? firestoreData.eventDates.map(ed => ({
-                date: ed.date?.toDate?.()?.toISOString() || ed.date,
-                startTime: ed.startTime?.toDate?.()?.toISOString() || ed.startTime,
-                endTime: ed.endTime?.toDate?.()?.toISOString() || ed.endTime,
-                location: ed.location || firestoreData.location?.name || '',
-                exactLocation: ed.exactLocation || firestoreData.location?.address || '',
-                note: ed.note || '',
-              })) : undefined,
+              eventDates: (firestoreData.eventDates && Array.isArray(firestoreData.eventDates)) 
+                ? firestoreData.eventDates.map(ed => ({
+                    date: ed.date?.toDate?.()?.toISOString() || ed.date,
+                    startTime: ed.startTime?.toDate?.()?.toISOString() || ed.startTime,
+                    endTime: ed.endTime?.toDate?.()?.toISOString() || ed.endTime,
+                    location: ed.location || firestoreData.location?.name || '',
+                    exactLocation: ed.exactLocation || firestoreData.location?.address || '',
+                    note: ed.note || '',
+                  })) 
+                : undefined,
               usualStartTime: firestoreData.usualStartTime?.toDate?.()?.toISOString() || firestoreData.usualStartTime,
               usualEndTime: firestoreData.usualEndTime?.toDate?.()?.toISOString() || firestoreData.usualEndTime,
               createdAt: firestoreData.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
@@ -630,14 +668,32 @@ export const EventsProvider = ({ children }) => {
           // Save organizer as member in subcollection
           if (organizerId) {
             const membersRef = eventsRef.collection('members').doc(organizerId);
+            
+            // Set default RSVP status to "going" for organizers
+            // If there are event dates, set RSVP for each date; otherwise use 'default' key
+            const rsvpStatuses = {};
+            if (eventData.eventDates && Array.isArray(eventData.eventDates) && eventData.eventDates.length > 0) {
+              // Set RSVP status to "going" for each event date
+              eventData.eventDates.forEach((ed) => {
+                if (ed.date) {
+                  const date = ed.date instanceof Date ? ed.date : new Date(ed.date);
+                  const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+                  rsvpStatuses[dateKey] = 'going';
+                }
+              });
+            } else {
+              // For single-date or no-date events, use 'default' key
+              rsvpStatuses['default'] = 'going';
+            }
+            
             await membersRef.set({
               userId: organizerId,
               userName: user?.name || user?.email || '',
               userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
               role: 'organizer',
               joinedAt: firebase.firestore.Timestamp.now(),
-              rsvpStatus: null,
-              rsvpStatuses: {},
+              rsvpStatus: 'going', // Backward compatibility - set to "going" for organizers
+              rsvpStatuses: rsvpStatuses,
             });
           }
 
@@ -938,6 +994,7 @@ export const EventsProvider = ({ children }) => {
                     rsvpStatuses: memberData.rsvpStatuses || {},
                     rsvpUpdatedAt: memberData.rsvpUpdatedAt?.toDate?.()?.toISOString() || memberData.rsvpUpdatedAt || null,
                     canShareJoinCode: memberData.canShareJoinCode !== undefined ? memberData.canShareJoinCode : (memberData.role === MEMBER_ROLES.ORGANIZER || memberData.userId === firestoreEvent.organizerId),
+                    proposalLimit: memberData.proposalLimit !== undefined ? memberData.proposalLimit : 5, // Default to 5 if not set
                   };
                 });
               } catch (membersError) {
@@ -950,6 +1007,7 @@ export const EventsProvider = ({ children }) => {
                     role: memberId === firestoreEvent.organizerId ? MEMBER_ROLES.ORGANIZER : MEMBER_ROLES.MEMBER,
                     joinedAt: firestoreEvent.createdAt?.toDate?.()?.toISOString() || new Date().toISOString(),
                     canShareJoinCode: memberId === firestoreEvent.organizerId,
+                    proposalLimit: 5, // Default proposal limit
                   }));
                 }
               }
@@ -1509,6 +1567,82 @@ export const EventsProvider = ({ children }) => {
                     ? {
                         ...member,
                         canShareJoinCode: canShare,
+                      }
+                    : member,
+                ),
+                lastUpdatedAt: new Date().toISOString(),
+              }
+            : e,
+        ),
+      );
+    },
+    [events],
+  );
+
+  const updateMemberProposalLimit = useCallback(
+    async (eventId, requestingUserId, targetUserId, proposalLimit) => {
+      if (!eventId || !requestingUserId || !targetUserId) {
+        throw new Error('Event ID, requesting user ID, and target user ID are required.');
+      }
+
+      if (proposalLimit !== null && (typeof proposalLimit !== 'number' || proposalLimit < 0 || !Number.isInteger(proposalLimit))) {
+        throw new Error('Proposal limit must be a non-negative integer or null.');
+      }
+
+      const event = events.find((e) => e.id === eventId);
+      if (!event) {
+        throw new Error('MeepleUp not found.');
+      }
+
+      // Verify requesting user is organizer
+      if (event.organizerId !== requestingUserId) {
+        throw new Error('Only the organizer can change proposal limits.');
+      }
+
+      // Update in Firestore if available
+      if (db && eventId) {
+        try {
+          const membersRef = db.collection('gamingGroups')
+            .doc(eventId)
+            .collection('members')
+            .doc(targetUserId);
+          
+          const updateData = {
+            proposalLimit: proposalLimit === null ? firebase.firestore.FieldValue.delete() : proposalLimit,
+            updatedAt: firebase.firestore.Timestamp.now(),
+          };
+          
+          await membersRef.update(updateData).catch(async (error) => {
+            // If document doesn't exist, try to set it
+            const groupDoc = await db.collection('gamingGroups').doc(eventId).get();
+            if (groupDoc.exists) {
+              await membersRef.set({
+                userId: targetUserId,
+                proposalLimit: proposalLimit === null ? 5 : proposalLimit,
+                joinedAt: firebase.firestore.Timestamp.now(),
+                updatedAt: firebase.firestore.Timestamp.now(),
+              });
+            } else {
+              throw error;
+            }
+          });
+        } catch (error) {
+          console.error('Error updating member proposal limit in Firestore:', error);
+          // Continue with local update even if Firestore update fails
+        }
+      }
+
+      // Update local state
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === eventId
+            ? {
+                ...e,
+                members: e.members.map((member) =>
+                  member.userId === targetUserId
+                    ? {
+                        ...member,
+                        proposalLimit: proposalLimit === null ? 5 : proposalLimit,
                       }
                     : member,
                 ),
@@ -2170,6 +2304,7 @@ export const EventsProvider = ({ children }) => {
       overrideMemberRSVP,
       updateMemberRole,
       updateMemberJoinCodePermission,
+      updateMemberProposalLimit,
       loading,
       membershipStatus: MEMBERSHIP_STATUS,
       contactStatus: CONTACT_STATUS,
@@ -2201,6 +2336,7 @@ export const EventsProvider = ({ children }) => {
       overrideMemberRSVP,
       updateMemberRole,
       updateMemberJoinCodePermission,
+      updateMemberProposalLimit,
     ],
   );
 

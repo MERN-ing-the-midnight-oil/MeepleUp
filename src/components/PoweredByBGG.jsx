@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Linking, Platform, Image, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Platform, Image, useWindowDimensions } from 'react-native';
 import { bggLogoSmall, bggLogoColor, bggLogoLarge, bggLogoExtraLarge, bggLogoBlack } from './BGGLogoAssets';
 import { theme } from '../utils/theme';
 
@@ -44,13 +44,6 @@ const PoweredByBGG = ({
 }) => {
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === 'web';
-
-  const handlePress = () => {
-    const url = 'https://boardgamegeek.com';
-    Linking.openURL(url).catch((err) => {
-      console.error('Failed to open BGG URL:', err);
-    });
-  };
 
   // Get the appropriate logo source based on size and variant
   const getLogoSource = (logoSize, logoVariant) => {
@@ -145,13 +138,72 @@ const PoweredByBGG = ({
 
   const currentSizeStyle = sizeStyles[effectiveSizeForStyle] || sizeStyles.medium;
 
+  // If stackedCards is true, render the stacked cards version
+  if (stackedCards) {
+    // Calculate card dimensions based on logo size with padding
+    const LOGO_ASPECT_RATIO = 1472 / 432; // BGG logo aspect ratio
+    const PADDING_PERCENT = 0.03; // 3% padding around logo (small percentage)
+    
+    let cardWidth, cardHeight, logoWidth, padding;
+    
+    if (containerWidth) {
+      // Use containerWidth as the base, calculate padding as percentage
+      padding = containerWidth * PADDING_PERCENT;
+      logoWidth = containerWidth - (padding * 2);
+      cardWidth = containerWidth;
+      cardHeight = (logoWidth / LOGO_ASPECT_RATIO) + (padding * 2);
+    } else {
+      // Fallback: use logo height to calculate dimensions
+      const logoHeight = currentSizeStyle.logoHeight;
+      logoWidth = logoHeight * LOGO_ASPECT_RATIO;
+      padding = logoWidth * PADDING_PERCENT;
+      cardWidth = logoWidth + (padding * 2);
+      cardHeight = logoHeight + (padding * 2);
+    }
+    
+    const cardStyle = {
+      width: cardWidth,
+      height: cardHeight,
+      padding: padding,
+    };
+    
+    return (
+      <View style={[styles.stackedCardsContainer, style, { width: cardWidth, height: cardHeight }]}>
+        {/* Bottom card - slight negative rotation */}
+        <View style={[styles.stackedCard, styles.stackedCardBottom, cardStyle]} />
+        {/* Middle card - slight rotation */}
+        <View style={[styles.stackedCard, styles.stackedCardMiddle, cardStyle]} />
+        {/* Top card with logo - 4 degree rotation */}
+        <View
+          style={[styles.stackedCard, styles.stackedCardTop, cardStyle]}
+        >
+          {logoSource ? (
+            <View style={styles.logoContainer}>
+              <Image
+                source={logoSource}
+                style={[
+                  styles.logo,
+                  containerWidth 
+                    ? { width: logoWidth, height: undefined, aspectRatio: LOGO_ASPECT_RATIO }
+                    : { width: logoWidth, height: undefined, aspectRatio: LOGO_ASPECT_RATIO },
+                ]}
+                resizeMode="contain"
+              />
+            </View>
+          ) : (
+            <Text style={[styles.text, currentSizeStyle, textStyle]}>
+              Powered by{' '}
+              <Text style={styles.bggText}>BoardGameGeek</Text>
+            </Text>
+          )}
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <Pressable
-      onPress={handlePress}
+    <View
       style={[styles.container, style]}
-      accessibilityRole="link"
-      accessibilityLabel="Visit BoardGameGeek"
-      accessibilityHint="Opens BoardGameGeek website"
     >
       {logoSource ? (
         <View style={styles.logoContainer}>
@@ -172,7 +224,7 @@ const PoweredByBGG = ({
           <Text style={styles.bggText}>BoardGameGeek</Text>
         </Text>
       )}
-    </Pressable>
+    </View>
   );
 };
 
@@ -196,6 +248,61 @@ const styles = StyleSheet.create({
   bggText: {
     color: '#4a90e2',
     fontWeight: '600',
+  },
+  stackedCardsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  stackedCard: {
+    position: 'absolute',
+    backgroundColor: '#b89d7a', // Cardboard tan/brown color - same as membershipsToken
+    borderRadius: theme.borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Thicker borders on bottom and left for depth - same as membershipsToken
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderLeftWidth: 3,
+    borderColor: '#6b5435', // Darker brown border
+    borderStyle: 'solid',
+  },
+  stackedCardBottom: {
+    // Bottom card - slight negative rotation (-2 degrees)
+    transform: [{ rotate: '-2deg' }],
+    zIndex: 1,
+    top: 8,
+    left: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: -2, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  stackedCardMiddle: {
+    // Middle card - slight rotation (1 degree)
+    transform: [{ rotate: '1deg' }],
+    zIndex: 2,
+    top: 4,
+    left: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: -3, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  stackedCardTop: {
+    // Top card - 4 degree rotation as specified
+    transform: [{ rotate: '4deg' }],
+    zIndex: 3,
+    top: 0,
+    left: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: -4, height: 6 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 6,
   },
 });
 

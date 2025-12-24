@@ -41,6 +41,8 @@ import { pickAndUploadImage } from '../utils/imageUpload';
 import { checkPhotoUploadLimit, incrementPhotoUploadCount } from '../utils/photoUploadTracking';
 import { theme, commonStyles } from '../utils/theme';
 import GearIcon from '../components/GearIcon';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -149,6 +151,7 @@ const EventHub = () => {
     updateEvent,
     updateMemberRole,
     updateMemberJoinCodePermission,
+    updateMemberProposalLimit,
     memberRoles,
   } = useEvents();
   const { user } = useAuth();
@@ -235,7 +238,9 @@ const EventHub = () => {
   // Game night date selection for aggregated collections
   const [selectedGameNightDateIndex, setSelectedGameNightDateIndex] = useState(null);
   const [showNoConfirmedAttendeesModal, setShowNoConfirmedAttendeesModal] = useState(false);
-  const [selectedMemberForAction, setSelectedMemberForAction] = useState(null); // { userId, displayName, role, canShareJoinCode }
+  const [selectedMemberForAction, setSelectedMemberForAction] = useState(null); // { userId, displayName, role, canShareJoinCode, proposalLimit }
+  const [editingProposalLimit, setEditingProposalLimit] = useState(false);
+  const [proposalLimitInput, setProposalLimitInput] = useState('');
   // Collapsible sections state
   const [isMembersExpanded, setIsMembersExpanded] = useState(false);
   // Past events modal state
@@ -252,6 +257,8 @@ const EventHub = () => {
   // Check if user is organizer or co-organizer (has organizer role)
   const currentUserMember = event?.members?.find(m => m.userId === userId);
   const isOrganizerOrCoOrganizer = isOrganizer || currentUserMember?.role === memberRoles?.ORGANIZER;
+  // Get user's proposal limit from members
+  const userProposalLimit = currentUserMember?.proposalLimit !== undefined ? currentUserMember.proposalLimit : 5;
 
   // Memoize members array to prevent unnecessary re-renders
   // Create stable array reference - only change if member userIds actually change
@@ -778,7 +785,13 @@ const EventHub = () => {
   const getDateKey = (eventDate) => {
     if (!eventDate) return 'default';
     const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
-    return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+    // Format using local date components to avoid timezone shifts
+    // This ensures the date key matches the calendar day displayed to users
+    date.setHours(0, 0, 0, 0);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`; // YYYY-MM-DD format using local date
   };
 
   // Helper to get RSVP status for a specific date
@@ -1940,6 +1953,13 @@ const EventHub = () => {
                   📅 <Text style={styles.longPressInstructionBold}>Long-press</Text> a date to add it to your schedule (highlighted in green). Tap a selected date to edit time, notes, or delete.
                 </Text>
               </View>
+              {isMember && event.rsvpSettings?.enabled && (
+                <View style={[styles.longPressInstructionBox, { marginBottom: 12, backgroundColor: theme.colors.woodLight }]}>
+                  <Text style={styles.longPressInstructionText}>
+                    📋 RSVP icons: ✅ Going, 🤔 Maybe, ❌ Can't Make It. <Text style={styles.longPressInstructionBold}>Click on a scheduled date</Text> to change your RSVP status.
+                  </Text>
+                </View>
+              )}
               <View style={[styles.calendarContainer, { 
                 marginLeft: -24, 
                 marginRight: -24, 
@@ -1978,12 +1998,21 @@ const EventHub = () => {
                       setShowDateDetailModal(true);
                     }
                   }}
+                  memberRSVPs={memberRSVPs}
+                  currentUserId={userId}
                 />
               </View>
             </>
           ) : futureEvents.length > 0 ? (
             // For non-organizers: show read-only calendar
             <>
+              {isMember && event.rsvpSettings?.enabled && (
+                <View style={[styles.longPressInstructionBox, { marginBottom: 12, backgroundColor: theme.colors.woodLight }]}>
+                  <Text style={styles.longPressInstructionText}>
+                    📋 RSVP icons: ✅ Going, 🤔 Maybe, ❌ Can't Make It. <Text style={styles.longPressInstructionBold}>Click on a scheduled date</Text> to change your RSVP status.
+                  </Text>
+                </View>
+              )}
               <View style={[styles.calendarContainer, { 
                 marginLeft: -24, 
                 marginRight: -24, 
@@ -2031,10 +2060,12 @@ const EventHub = () => {
                       setShowDateDetailModal(true);
                     }
                   }}
+                  memberRSVPs={memberRSVPs}
+                  currentUserId={userId}
                 />
               </View>
             </>
-          ) : (event.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0) || event.scheduledFor ? (
+          ) : (event?.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0) || event?.scheduledFor ? (
             // No future events, but there are past events - show empty message
             <Text style={styles.scheduleValue}>No upcoming dates scheduled</Text>
           ) : (
@@ -2124,7 +2155,7 @@ const EventHub = () => {
           setSelectedDateDetail(null);
           setIsEditingDateDetail(false);
         }}
-        title={isEditingDateDetail ? 'Edit Event Details' : (selectedDateDetail ? formatDate(selectedDateDetail.date.toISOString()) : 'Event Details')}
+        title={isEditingDateDetail ? 'Edit Event Details' : ''}
         fullScreen={isEditingDateDetail}
       >
         {selectedDateDetail && (() => {
@@ -2145,30 +2176,33 @@ const EventHub = () => {
           return (
             <ScrollView style={styles.dateDetailModalContent}>
               <View style={styles.dateDetailContainer}>
-                <View style={styles.dateDetailHeader}>
-                  <Text style={styles.dateDetailDate}>
-                    {dateStr}{timeStr ? ` (${timeStr})` : ''}
-                  </Text>
-                  {isOrganizerOrCoOrganizer && !isEditingDateDetail && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        setIsEditingDateDetail(true);
-                        // Initialize editing form with current date details
-                        setEditingDateDetailForm({
-                          date: date instanceof Date ? date : new Date(date),
-                          startTime: startTime && !isNaN(startTime.getTime()) ? (startTime instanceof Date ? startTime : new Date(startTime)) : null,
-                          endTime: endTime && !isNaN(endTime.getTime()) ? (endTime instanceof Date ? endTime : new Date(endTime)) : null,
-                          location: location || '',
-                          address: address || '',
-                          note: note || '',
-                        });
-                      }}
-                      style={styles.editIconButton}
-                    >
-                      <Text style={styles.editIconText}>✏️</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                {/* Date and Time in Red Text */}
+                {!isEditingDateDetail && (
+                  <View style={styles.dateDetailHeader}>
+                    <Text style={styles.dateDetailDate}>
+                      {timeStr ? `${dateStr} (${timeStr})` : dateStr}
+                    </Text>
+                    {isOrganizerOrCoOrganizer && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setIsEditingDateDetail(true);
+                          // Initialize editing form with current date details
+                          setEditingDateDetailForm({
+                            date: date instanceof Date ? date : new Date(date),
+                            startTime: startTime && !isNaN(startTime.getTime()) ? (startTime instanceof Date ? startTime : new Date(startTime)) : null,
+                            endTime: endTime && !isNaN(endTime.getTime()) ? (endTime instanceof Date ? endTime : new Date(endTime)) : null,
+                            location: location || '',
+                            address: address || '',
+                            note: note || '',
+                          });
+                        }}
+                        style={styles.editIconButton}
+                      >
+                        <Text style={styles.editIconText}>✏️</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
                 
                 {/* Edit Mode: Show editable fields for date and time */}
                 {isEditingDateDetail && isOrganizerOrCoOrganizer && (
@@ -2544,6 +2578,32 @@ const EventHub = () => {
                   </View>
                 )}
                 
+                {/* Gameplan Button */}
+                {!isEditingDateDetail && selectedDateDetail.index !== undefined && (
+                  <View style={styles.dateGameplanButtonContainer}>
+                    <Button
+                      label="🎲 Gameplan"
+                      onPress={() => {
+                        const currentEventId = eventId || (route?.params?.eventId) || params?.eventId;
+                        const dateIndex = selectedDateDetail.index;
+                        // Close the modal first
+                        setShowDateDetailModal(false);
+                        if (Platform.OS === 'web' && navigate && currentEventId) {
+                          navigate(`/event/${currentEventId}/browse/${dateIndex}`);
+                        } else if (navigation?.navigate && currentEventId) {
+                          navigation.navigate('BrowseAndPropose', { 
+                            eventId: currentEventId, 
+                            dateIndex: dateIndex 
+                          });
+                        }
+                      }}
+                      variant="primary"
+                      style={styles.dateGameplanButton}
+                      textStyle={styles.dateGameplanButtonText}
+                    />
+                  </View>
+                )}
+                
                 {/* RSVP buttons */}
                 {showRSVPForDate && (
                   <View 
@@ -2629,7 +2689,7 @@ const EventHub = () => {
       )}
 
       {/* RSVP Summary - Only show if no event dates (backward compatibility) */}
-      {isMember && !event.eventDates && (() => {
+      {isMember && !event?.eventDates && (() => {
         const rsvpSettings = event.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
         if (!rsvpSettings.enabled) return null;
         
@@ -4346,6 +4406,54 @@ const EventHub = () => {
     return () => unsubscribe();
   }, [event?.id, db, isMember, userId]);
 
+  // Get available event dates for date selector (only future dates)
+  // Moved outside GamesTabComponent so it's accessible in the dependency array
+  const eventDates = useMemo(() => {
+    if (!event) return [];
+    
+    const now = new Date();
+    now.setHours(0, 0, 0, 0); // Compare dates only (ignore time)
+    
+    if (event?.eventDates && Array.isArray(event.eventDates)) {
+      return event.eventDates.map((ed, index) => {
+        const date = safeParseDate(ed.date);
+        return {
+          index,
+          date: date && !isNaN(date.getTime()) ? date : null,
+          dateString: ed.date,
+          startTime: safeParseDate(ed.startTime),
+          endTime: safeParseDate(ed.endTime),
+          location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
+        };
+      }).filter(ed => {
+        if (!ed.date) return false;
+        // Filter out past dates
+        const eventDate = new Date(ed.date);
+        eventDate.setHours(0, 0, 0, 0);
+        return eventDate >= now;
+      });
+    } else if (event?.scheduledFor) {
+      const date = safeParseDate(event.scheduledFor);
+      if (date && !isNaN(date.getTime())) {
+        const eventDate = new Date(date);
+        eventDate.setHours(0, 0, 0, 0);
+        // Only include if it's a future date
+        if (eventDate >= now) {
+          return [{
+            index: 0,
+            date,
+            dateString: event.scheduledFor,
+            startTime: date,
+            endTime: date,
+            location: event.location || event.generalLocation || '',
+          }];
+        }
+      }
+    }
+    
+    return [];
+  }, [event]);
+
   // Games Tab Component - Rebuilt from scratch
   // Memoize to prevent recreation on every render (which causes modal to remount)
   const GamesTab = React.useMemo(() => {
@@ -4813,53 +4921,7 @@ const EventHub = () => {
       });
     };
 
-    // Get available event dates for date selector (only future dates)
-    const eventDates = useMemo(() => {
-      if (!event) return [];
-      
-      const now = new Date();
-      now.setHours(0, 0, 0, 0); // Compare dates only (ignore time)
-      
-      if (event.eventDates && Array.isArray(event.eventDates)) {
-        return event.eventDates.map((ed, index) => {
-          const date = safeParseDate(ed.date);
-          return {
-            index,
-            date: date && !isNaN(date.getTime()) ? date : null,
-            dateString: ed.date,
-            startTime: safeParseDate(ed.startTime),
-            endTime: safeParseDate(ed.endTime),
-            location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
-          };
-        }).filter(ed => {
-          if (!ed.date) return false;
-          // Filter out past dates
-          const eventDate = new Date(ed.date);
-          eventDate.setHours(0, 0, 0, 0);
-          return eventDate >= now;
-        });
-      } else if (event.scheduledFor) {
-        const date = safeParseDate(event.scheduledFor);
-        if (date && !isNaN(date.getTime())) {
-          const eventDate = new Date(date);
-          eventDate.setHours(0, 0, 0, 0);
-          // Only include if it's a future date
-          if (eventDate >= now) {
-            return [{
-              index: 0,
-              date,
-              dateString: event.scheduledFor,
-              startTime: date,
-              endTime: date,
-              location: event.location || event.generalLocation || '',
-            }];
-          }
-        }
-      }
-      
-      return [];
-    }, [event]);
-
+    // eventDates is now defined outside GamesTabComponent, accessible via closure
     // Do not auto-select a date; wait for user selection
 
     // Show modal when no other confirmed attendees (excluding logged-in user)
@@ -4998,136 +5060,280 @@ const EventHub = () => {
       <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
         {/* Game Night Dates Section (navigation to Browse & Propose) */}
         {isMember && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Propose Games</Text>
-            <Text style={styles.sectionCopy}>
-              Choose a date to browse the super collection and propose games.
-            </Text>
-            
-            {eventDates.length > 0 ? (
-              <View style={styles.dateListContainer}>
-                  {eventDates.map((ed, filteredIndex) => {
-                  const currentEventId = eventId || event?.id;
-                  const originalIndex = ed.index; // Use the original index from the eventDates array
-                  const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
-                  
-                  // Get all members' RSVP statuses for this date
-                  const membersWithRSVP = members.map(member => {
-                    if (!member || !member.userId) return null;
-                    const memberRsvps = memberRSVPs[member.userId] || {};
-                    let rsvpStatus = null;
-                    if (typeof memberRsvps === 'string') {
-                      // Backward compatibility: old format with single status
-                      rsvpStatus = ed.date ? null : memberRsvps;
-                    } else {
-                      rsvpStatus = memberRsvps[dateKey] || null;
-                    }
-                    return {
-                      userId: member.userId,
-                      userName: memberNames[member.userId] || member.userId,
-                      avatarUrl: memberAvatars[member.userId] || null,
-                      rsvpStatus: rsvpStatus || 'no response',
-                    };
-                  }).filter(Boolean);
-
-                    return (
-                      <TouchableOpacity
-                        key={originalIndex}
-                      style={styles.dateListItem}
-                                      onPress={() => {
-                        console.log('[EventHub] Date selector clicked:', { 
-                          originalIndex,
-                          filteredIndex,
-                          currentEventId, 
-                          platform: Platform.OS,
-                          hasNavigate: !!navigate,
-                          hasNavigation: !!navigation?.navigate
-                        });
-                        if (Platform.OS === 'web' && navigate && currentEventId) {
-                          console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
-                          navigate(`/event/${currentEventId}/browse/${originalIndex}`);
-                        } else if (navigation?.navigate && currentEventId) {
-                          console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: originalIndex });
-                          navigation.navigate('BrowseAndPropose', { 
-                            eventId: currentEventId, 
-                            dateIndex: originalIndex 
-                          });
+          <>
+            {/* For non-organizers: Just show title, no section container */}
+            {!isOrganizer && (
+              <>
+                <Text style={styles.proposeGamesTitle}>Propose Games</Text>
+                {eventDates.length > 0 ? (
+                  <View style={styles.dateCardContainer}>
+                    {eventDates.map((ed, filteredIndex) => {
+                      const currentEventId = eventId || event?.id;
+                      const originalIndex = ed.index;
+                      const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
+                      
+                      // Get all members' RSVP statuses for this date
+                      const membersWithRSVP = members.map(member => {
+                        if (!member || !member.userId) return null;
+                        const memberRsvps = memberRSVPs[member.userId] || {};
+                        let rsvpStatus = null;
+                        if (typeof memberRsvps === 'string') {
+                          rsvpStatus = ed.date ? null : memberRsvps;
+                        } else {
+                          rsvpStatus = memberRsvps[dateKey] || null;
                         }
-                      }}
-                    >
-                      <View style={styles.dateListTextBlock}>
-                        <Text style={styles.dateListTitle}>
-                          {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
-                          </Text>
-                        <Text style={styles.dateListSubtext}>
-                          {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
-                            </Text>
-                        {ed.location ? (
-                          <Text style={styles.dateListLocation} numberOfLines={1}>
-                            {ed.location}
-                                      </Text>
-                        ) : null}
-                                    </View>
-                      <View style={styles.dateListRSVPsContainer}>
-                        {membersWithRSVP.map((member) => {
-                          const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
-                          const rsvpStatus = member.rsvpStatus;
-                          const rsvpStyle =
-                            rsvpStatus === 'going' ? styles.rsvpBadgeGoing :
-                            rsvpStatus === 'maybe' ? styles.rsvpBadgeMaybe :
-                            rsvpStatus === 'not going' ? styles.rsvpBadgeNotGoing :
-                            styles.rsvpBadgeUnknown;
-                          const rsvpTextColor =
-                            rsvpStatus === 'going' ? '#2e9b5e' :
-                            rsvpStatus === 'maybe' ? '#a06c00' :
-                            rsvpStatus === 'not going' ? '#b33936' :
-                            '#555';
-                          
-                          return (
-                            <TouchableOpacity
-                              key={member.userId}
-                              style={styles.dateListRSVPItem}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                setSelectedUserForProfile({
-                                  userId: member.userId,
-                                  userName: member.userName,
-                                  avatarUrl: member.avatarUrl
-                                });
-                              }}
-                            >
-                              {hasValidAvatar ? (
-                                <Image
-                                  source={{ uri: member.avatarUrl }}
-                                  style={styles.dateListAvatarImage}
-                                  resizeMode="cover"
-                                />
-                              ) : (
-                                <View style={styles.dateListAvatarPlaceholder}>
-                                  <Text style={styles.dateListAvatarInitial}>
-                                    {member.userName.charAt(0).toUpperCase()}
-                                  </Text>
-                                </View>
-                              )}
-                              <View style={[styles.dateListRSVPBadge, rsvpStyle]}>
-                                <Text style={[styles.dateListRSVPBadgeText, { color: rsvpTextColor }]}>
-                                  {rsvpStatus === 'no response' ? '?' : rsvpStatus === 'going' ? '✓' : rsvpStatus === 'maybe' ? '?' : '✗'}
+                        return {
+                          userId: member.userId,
+                          userName: memberNames[member.userId] || member.userId,
+                          avatarUrl: memberAvatars[member.userId] || null,
+                          rsvpStatus: rsvpStatus || 'no response',
+                        };
+                      }).filter(Boolean);
+
+                      return (
+                        <TouchableOpacity
+                          key={originalIndex}
+                          style={styles.dateCard}
+                          onPress={() => {
+                            console.log('[EventHub] Date selector clicked:', { 
+                              originalIndex,
+                              filteredIndex,
+                              currentEventId, 
+                              platform: Platform.OS,
+                              hasNavigate: !!navigate,
+                              hasNavigation: !!navigation?.navigate
+                            });
+                            if (Platform.OS === 'web' && navigate && currentEventId) {
+                              console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
+                              navigate(`/event/${currentEventId}/browse/${originalIndex}`);
+                            } else if (navigation?.navigate && currentEventId) {
+                              console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: originalIndex });
+                              navigation.navigate('BrowseAndPropose', { 
+                                eventId: currentEventId, 
+                                dateIndex: originalIndex 
+                              });
+                            }
+                          }}
+                        >
+                          <LinearGradient
+                            colors={['#fff8f0', '#f5e6d3', '#e8d4b8', '#f5e6d3', '#fff8f0']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            locations={[0, 0.3, 0.5, 0.7, 1]}
+                            style={styles.dateCardBackground}
+                          >
+                            <View style={styles.dateCardContent}>
+                              <View style={styles.dateCardTextBlock}>
+                                <Text style={styles.dateCardTitle}>
+                                  {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
                                 </Text>
+                                <Text style={styles.dateCardSubtext}>
+                                  {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
+                                </Text>
+                                {ed.location ? (
+                                  <Text style={styles.dateCardLocation} numberOfLines={1}>
+                                    {ed.location}
+                                  </Text>
+                                ) : null}
                               </View>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    </TouchableOpacity>
-                            );
-                          })}
+                              <View style={styles.dateCardRSVPsContainer}>
+                                {membersWithRSVP.map((member) => {
+                                  const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
+                                  const rsvpStatus = member.rsvpStatus;
+                                  const rsvpStyle =
+                                    rsvpStatus === 'going' ? styles.rsvpBadgeGoing :
+                                    rsvpStatus === 'maybe' ? styles.rsvpBadgeMaybe :
+                                    rsvpStatus === 'not going' ? styles.rsvpBadgeNotGoing :
+                                    styles.rsvpBadgeUnknown;
+                                  const rsvpTextColor =
+                                    rsvpStatus === 'going' ? '#2e9b5e' :
+                                    rsvpStatus === 'maybe' ? '#a06c00' :
+                                    rsvpStatus === 'not going' ? '#b33936' :
+                                    '#555';
+                                  
+                                  return (
+                                    <TouchableOpacity
+                                      key={member.userId}
+                                      style={styles.dateListRSVPItem}
+                                      onPress={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedUserForProfile({
+                                          userId: member.userId,
+                                          userName: member.userName,
+                                          avatarUrl: member.avatarUrl
+                                        });
+                                      }}
+                                    >
+                                      {hasValidAvatar ? (
+                                        <Image
+                                          source={{ uri: member.avatarUrl }}
+                                          style={styles.dateListAvatarImage}
+                                          resizeMode="cover"
+                                        />
+                                      ) : (
+                                        <View style={styles.dateListAvatarPlaceholder}>
+                                          <Text style={styles.dateListAvatarInitial}>
+                                            {member.userName.charAt(0).toUpperCase()}
+                                          </Text>
+                                        </View>
+                                      )}
+                                      <View style={[styles.dateListRSVPBadge, rsvpStyle]}>
+                                        <Text style={[styles.dateListRSVPBadgeText, { color: rsvpTextColor }]}>
+                                          {rsvpStatus === 'no response' ? '?' : rsvpStatus === 'going' ? '✓' : rsvpStatus === 'maybe' ? '?' : '✗'}
+                                        </Text>
+                                      </View>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
                             </View>
-            ) : (
-              <Text style={styles.sectionCopy}>
-                No game night dates scheduled yet. Ask the organizer to add dates!
-              </Text>
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <Text style={styles.sectionCopy}>
+                    No game night dates scheduled yet. Ask the organizer to add dates!
+                  </Text>
+                )}
+              </>
             )}
-          </View>
+
+            {/* For organizers: Keep the original section container */}
+            {isOrganizer && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Propose Games</Text>
+                <Text style={styles.sectionCopy}>
+                  Choose a date to browse the super collection and propose games.
+                </Text>
+                
+                {eventDates.length > 0 ? (
+                  <View style={styles.dateListContainer}>
+                      {eventDates.map((ed, filteredIndex) => {
+                      const currentEventId = eventId || event?.id;
+                      const originalIndex = ed.index; // Use the original index from the eventDates array
+                      const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
+                      
+                      // Get all members' RSVP statuses for this date
+                      const membersWithRSVP = members.map(member => {
+                        if (!member || !member.userId) return null;
+                        const memberRsvps = memberRSVPs[member.userId] || {};
+                        let rsvpStatus = null;
+                        if (typeof memberRsvps === 'string') {
+                          // Backward compatibility: old format with single status
+                          rsvpStatus = ed.date ? null : memberRsvps;
+                        } else {
+                          rsvpStatus = memberRsvps[dateKey] || null;
+                        }
+                        return {
+                          userId: member.userId,
+                          userName: memberNames[member.userId] || member.userId,
+                          avatarUrl: memberAvatars[member.userId] || null,
+                          rsvpStatus: rsvpStatus || 'no response',
+                        };
+                      }).filter(Boolean);
+
+                        return (
+                          <TouchableOpacity
+                            key={originalIndex}
+                          style={styles.dateListItem}
+                                        onPress={() => {
+                            console.log('[EventHub] Date selector clicked:', { 
+                              originalIndex,
+                              filteredIndex,
+                              currentEventId, 
+                              platform: Platform.OS,
+                              hasNavigate: !!navigate,
+                              hasNavigation: !!navigation?.navigate
+                            });
+                            if (Platform.OS === 'web' && navigate && currentEventId) {
+                              console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
+                              navigate(`/event/${currentEventId}/browse/${originalIndex}`);
+                            } else if (navigation?.navigate && currentEventId) {
+                              console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: originalIndex });
+                              navigation.navigate('BrowseAndPropose', { 
+                                eventId: currentEventId, 
+                                dateIndex: originalIndex 
+                              });
+                            }
+                          }}
+                        >
+                          <View style={styles.dateListTextBlock}>
+                            <Text style={styles.dateListTitle}>
+                              {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
+                              </Text>
+                            <Text style={styles.dateListSubtext}>
+                              {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
+                                </Text>
+                            {ed.location ? (
+                              <Text style={styles.dateListLocation} numberOfLines={1}>
+                                {ed.location}
+                                      </Text>
+                            ) : null}
+                                    </View>
+                          <View style={styles.dateListRSVPsContainer}>
+                            {membersWithRSVP.map((member) => {
+                              const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
+                              const rsvpStatus = member.rsvpStatus;
+                              const rsvpStyle =
+                                rsvpStatus === 'going' ? styles.rsvpBadgeGoing :
+                                rsvpStatus === 'maybe' ? styles.rsvpBadgeMaybe :
+                                rsvpStatus === 'not going' ? styles.rsvpBadgeNotGoing :
+                                styles.rsvpBadgeUnknown;
+                              const rsvpTextColor =
+                                rsvpStatus === 'going' ? '#2e9b5e' :
+                                rsvpStatus === 'maybe' ? '#a06c00' :
+                                rsvpStatus === 'not going' ? '#b33936' :
+                                '#555';
+                              
+                              return (
+                                <TouchableOpacity
+                                  key={member.userId}
+                                  style={styles.dateListRSVPItem}
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedUserForProfile({
+                                      userId: member.userId,
+                                      userName: member.userName,
+                                      avatarUrl: member.avatarUrl
+                                    });
+                                  }}
+                                >
+                                  {hasValidAvatar ? (
+                                    <Image
+                                      source={{ uri: member.avatarUrl }}
+                                      style={styles.dateListAvatarImage}
+                                      resizeMode="cover"
+                                    />
+                                  ) : (
+                                    <View style={styles.dateListAvatarPlaceholder}>
+                                      <Text style={styles.dateListAvatarInitial}>
+                                        {member.userName.charAt(0).toUpperCase()}
+                                      </Text>
+                                    </View>
+                                  )}
+                                  <View style={[styles.dateListRSVPBadge, rsvpStyle]}>
+                                    <Text style={[styles.dateListRSVPBadgeText, { color: rsvpTextColor }]}>
+                                      {rsvpStatus === 'no response' ? '?' : rsvpStatus === 'going' ? '✓' : rsvpStatus === 'maybe' ? '?' : '✗'}
+                                    </Text>
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </TouchableOpacity>
+                              );
+                            })}
+                              </View>
+                ) : (
+                  <Text style={styles.sectionCopy}>
+                    No game night dates scheduled yet. Ask the organizer to add dates!
+                  </Text>
+                )}
+              </View>
+            )}
+          </>
         )}
 
 
@@ -5225,7 +5431,7 @@ const EventHub = () => {
     );
     };
     return GamesTabComponent;
-  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, gameInterests, event?.id, event, members, user, memberNames, memberAvatars, memberRSVPs, selectedGameNightDateIndex, proposedGames, userProposals, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails]);
+  }, [userId, collections, planningGamesSearchQuery, selectedGamesForBringing, showPlanningGamesModal, isMember, isOrganizer, gameInterests, event?.id, event, members, user, memberNames, memberAvatars, memberRSVPs, selectedGameNightDateIndex, proposedGames, userProposals, handleSearchChange, handleSavePlanningGames, handleOpenGameDetails, eventDates, eventId, navigate, navigation, setSelectedUserForProfile]);
 
 
   return (
@@ -5285,6 +5491,7 @@ const EventHub = () => {
           }}
           preloadedBggData={selectedGameBggData}
           eventMembers={isMember ? members : null}
+          userProposalLimit={userProposalLimit}
           memberNames={memberNames}
           eventId={event?.id}
         />
@@ -5413,7 +5620,7 @@ const EventHub = () => {
                               const gameId = game.bggId || game.id;
                               const isProposedByUser = userProposals.has(gameId);
                               const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
-                              const canPropose = userProposals.size < 5 || isProposedByUser;
+                              const canPropose = userProposals.size < userProposalLimit || isProposedByUser;
                               
                               return (
                                 <View key={game.bggId || game.id || `game-${index}`} style={styles.gameCardWithPropose}>
@@ -5460,8 +5667,8 @@ const EventHub = () => {
                                           return;
                                         }
                                         
-                                        if (userProposals.size >= 5) {
-                                          Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
+                                        if (userProposals.size >= userProposalLimit) {
+                                          Alert.alert('Limit Reached', `You can only propose up to ${userProposalLimit} game${userProposalLimit !== 1 ? 's' : ''}. Remove a proposal first to propose another game.`);
                                           return;
                                         }
                                         
@@ -5624,15 +5831,30 @@ const EventHub = () => {
       )}
 
       {/* Member Action Modal */}
-      {selectedMemberForAction && (
+      {selectedMemberForAction && (() => {
+        // Ensure proposalLimit is set (default to 5 if missing)
+        const memberData = event?.members?.find(m => m.userId === selectedMemberForAction.userId);
+        const proposalLimit = selectedMemberForAction.proposalLimit !== undefined 
+          ? selectedMemberForAction.proposalLimit 
+          : (memberData?.proposalLimit !== undefined ? memberData.proposalLimit : 5);
+        const memberWithLimit = {
+          ...selectedMemberForAction,
+          proposalLimit,
+        };
+        
+        return (
         <Modal
           isOpen={!!selectedMemberForAction}
-          onClose={() => setSelectedMemberForAction(null)}
+          onClose={() => {
+            setSelectedMemberForAction(null);
+            setEditingProposalLimit(false);
+            setProposalLimitInput('');
+          }}
           title={`Manage ${selectedMemberForAction.displayName}`}
         >
           <View style={styles.memberActionModalContent}>
             {/* Make/Remove Co-Organizer */}
-            {selectedMemberForAction.userId !== event?.organizerId && (
+            {memberWithLimit.userId !== event?.organizerId && (
               <View style={styles.memberActionSection}>
                 <Text style={styles.memberActionLabel}>Role</Text>
                 {selectedMemberForAction.role !== memberRoles?.ORGANIZER ? (
@@ -5671,36 +5893,36 @@ const EventHub = () => {
             )}
 
             {/* Join Code Sharing Permission */}
-            {selectedMemberForAction.role !== memberRoles?.ORGANIZER && (
+            {memberWithLimit.role !== memberRoles?.ORGANIZER && (
               <View style={styles.memberActionSection}>
                 <Text style={styles.memberActionLabel}>Join Code Sharing</Text>
                 <View style={styles.toggleRow}>
                   <Text style={styles.toggleLabel}>
-                    {selectedMemberForAction.canShareJoinCode
+                    {memberWithLimit.canShareJoinCode
                       ? 'Can share join codes'
                       : 'Cannot share join codes'}
                   </Text>
                   <TouchableOpacity
                     style={[
                       styles.toggleSwitch,
-                      selectedMemberForAction.canShareJoinCode && styles.toggleSwitchActive,
+                      memberWithLimit.canShareJoinCode && styles.toggleSwitchActive,
                     ]}
                     onPress={async () => {
                       try {
-                        const newValue = !selectedMemberForAction.canShareJoinCode;
+                        const newValue = !memberWithLimit.canShareJoinCode;
                         await updateMemberJoinCodePermission(
                           event.id,
                           userId,
-                          selectedMemberForAction.userId,
+                          memberWithLimit.userId,
                           newValue
                         );
                         setSelectedMemberForAction({
-                          ...selectedMemberForAction,
+                          ...memberWithLimit,
                           canShareJoinCode: newValue,
                         });
                         Alert.alert(
                           'Success',
-                          `${selectedMemberForAction.displayName} ${newValue ? 'can' : 'cannot'} now share join codes.`
+                          `${memberWithLimit.displayName} ${newValue ? 'can' : 'cannot'} now share join codes.`
                         );
                       } catch (error) {
                         Alert.alert('Error', error.message || 'Failed to update permission.');
@@ -5719,15 +5941,101 @@ const EventHub = () => {
               </View>
             )}
 
+            {/* Proposal Limit Control */}
+            {memberWithLimit.role !== memberRoles?.ORGANIZER && (
+              <View style={styles.memberActionSection}>
+                <Text style={styles.memberActionLabel}>Proposal Limit</Text>
+                <Text style={styles.memberActionHint}>
+                  Maximum number of games this member can propose at once
+                </Text>
+                {editingProposalLimit ? (
+                  <View style={styles.proposalLimitEditContainer}>
+                    <Input
+                      value={proposalLimitInput}
+                      onChangeText={setProposalLimitInput}
+                      placeholder="Enter limit (default: 5)"
+                      keyboardType="numeric"
+                      style={styles.proposalLimitInput}
+                    />
+                    <View style={styles.proposalLimitButtons}>
+                      <Button
+                        label="Save"
+                        onPress={async () => {
+                          try {
+                            const limit = proposalLimitInput.trim() === '' 
+                              ? null 
+                              : parseInt(proposalLimitInput.trim(), 10);
+                            
+                            if (limit !== null && (isNaN(limit) || limit < 0)) {
+                              Alert.alert('Error', 'Please enter a valid non-negative number.');
+                              return;
+                            }
+
+                            await updateMemberProposalLimit(
+                              event.id,
+                              userId,
+                              memberWithLimit.userId,
+                              limit
+                            );
+                            
+                            const actualLimit = limit === null ? 5 : limit;
+                            setSelectedMemberForAction({
+                              ...memberWithLimit,
+                              proposalLimit: actualLimit,
+                            });
+                            setEditingProposalLimit(false);
+                            setProposalLimitInput('');
+                            Alert.alert(
+                              'Success',
+                              `Proposal limit for ${memberWithLimit.displayName} is now ${actualLimit}.`
+                            );
+                          } catch (error) {
+                            Alert.alert('Error', error.message || 'Failed to update proposal limit.');
+                            console.error(error);
+                          }
+                        }}
+                        variant="primary"
+                        style={styles.proposalLimitButton}
+                      />
+                      <Button
+                        label="Cancel"
+                        onPress={() => {
+                          setEditingProposalLimit(false);
+                          setProposalLimitInput('');
+                        }}
+                        variant="outline"
+                        style={styles.proposalLimitButton}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.proposalLimitDisplayContainer}>
+                    <Text style={styles.proposalLimitDisplay}>
+                      Current limit: {proposalLimit}
+                    </Text>
+                    <Button
+                      label="Change Limit"
+                      onPress={() => {
+                        setProposalLimitInput(String(proposalLimit));
+                        setEditingProposalLimit(true);
+                      }}
+                      variant="outline"
+                      style={styles.proposalLimitEditButton}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* Remove Member */}
-            {selectedMemberForAction.userId !== event?.organizerId && (
+            {memberWithLimit.userId !== event?.organizerId && (
               <View style={styles.memberActionSection}>
                 <Button
-                  label={`🗑️ Remove ${selectedMemberForAction.displayName}`}
+                  label={`🗑️ Remove ${memberWithLimit.displayName}`}
                   onPress={() => {
                     Alert.alert(
                       'Remove Member?',
-                      `Are you sure you want to remove ${selectedMemberForAction.displayName} from this MeepleUp?`,
+                      `Are you sure you want to remove ${memberWithLimit.displayName} from this MeepleUp?`,
                       [
                         { text: 'Cancel', style: 'cancel' },
                         {
@@ -5735,8 +6043,8 @@ const EventHub = () => {
                           style: 'destructive',
                           onPress: async () => {
                             try {
-                              await leaveEvent(event.id, selectedMemberForAction.userId);
-                              Alert.alert('Member Removed', `${selectedMemberForAction.displayName} has been removed from the MeepleUp.`);
+                              await leaveEvent(event.id, memberWithLimit.userId);
+                              Alert.alert('Member Removed', `${memberWithLimit.displayName} has been removed from the MeepleUp.`);
                               setSelectedMemberForAction(null);
                             } catch (error) {
                               Alert.alert('Error', 'Failed to remove member. Please try again.');
@@ -5763,7 +6071,8 @@ const EventHub = () => {
             </View>
           </View>
         </Modal>
-      )}
+        );
+      })()}
 
       {/* Edit Schedule Modal */}
       {/* RSVP Management Modal */}
@@ -7022,16 +7331,20 @@ const styles = StyleSheet.create({
   },
   dateGameplanButtonContainer: {
     marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    marginBottom: 12,
+    alignItems: 'flex-start',
   },
   dateGameplanButton: {
-    padding: 10,
-    minHeight: 40,
+    minWidth: 120,
+    height: 50,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minHeight: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   dateGameplanButtonText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: theme.typography.fontWeight.semibold,
   },
   rsvpLimitInfo: {
@@ -8447,6 +8760,78 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
     backgroundColor: '#f8f7f5',
   },
+  proposeGamesTitle: {
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.meepleRed,
+    marginBottom: theme.spacing.lg,
+    marginTop: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xl,
+  },
+  dateCardContainer: {
+    flexDirection: 'column',
+    gap: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xl,
+    marginBottom: theme.spacing.xl,
+  },
+  dateCard: {
+    marginBottom: theme.spacing.lg,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 6,
+    borderColor: theme.colors.woodDark,
+    borderStyle: 'solid',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    aspectRatio: 2,
+  },
+  dateCardBackground: {
+    position: 'relative',
+    minHeight: 120,
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  dateCardContent: {
+    padding: theme.spacing.xl,
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dateCardTextBlock: {
+    flex: 1,
+    marginRight: theme.spacing.md,
+  },
+  dateCardTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.meepleRed,
+    marginBottom: theme.spacing.xs,
+  },
+  dateCardSubtext: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
+  },
+  dateCardLocation: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+  },
+  dateCardRSVPsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    maxWidth: 200,
+  },
   dateListTextBlock: {
     flex: 1,
     marginRight: 12,
@@ -9028,6 +9413,39 @@ const styles = StyleSheet.create({
     color: '#4a90e2',
     marginTop: 4,
     fontWeight: '500',
+  },
+  memberActionHint: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  proposalLimitEditContainer: {
+    marginTop: 8,
+  },
+  proposalLimitInput: {
+    marginBottom: 12,
+  },
+  proposalLimitButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  proposalLimitButton: {
+    flex: 1,
+  },
+  proposalLimitDisplayContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  proposalLimitDisplay: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  proposalLimitEditButton: {
+    minWidth: 120,
   },
 });
 

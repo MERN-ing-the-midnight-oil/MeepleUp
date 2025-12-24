@@ -19,7 +19,7 @@ import firebase from '../config/firebase';
  * @param {Function} props.onDelete - Delete handler
  * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
  */
-const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false }) => {
+const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false, onFavorite = null, onProposeGame = null, userProposals = new Set(), eventId = null }) => {
   const { user } = useAuth();
   const { collections, updateGameInCollection, addGameToCollection } = useCollections();
   const userId = user?.uid || user?.id;
@@ -321,6 +321,12 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     const newFavoriteStatus = !isFavorite;
     setIsFavorite(newFavoriteStatus);
     
+    // If onFavorite prop is provided, use it instead of default behavior
+    if (onFavorite) {
+      onFavorite(game, newFavoriteStatus);
+      return;
+    }
+    
     const gameId = game.bggId || game.id;
     if (!gameId) return;
     
@@ -464,12 +470,6 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
                 </Text>
               </View>
             )}
-            {/* Crown icon for favorites */}
-            {game.isFavorite && (
-              <View style={styles.crownContainer}>
-                <Text style={styles.crownIcon}>👑</Text>
-              </View>
-            )}
           </View>
 
           {/* Card Content */}
@@ -507,6 +507,9 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
           isOpen={isModalOpen}
           onClose={closeModal}
           preloadedBggData={preloadedBggData}
+          onProposeGame={onProposeGame}
+          userProposals={userProposals}
+          eventId={eventId}
         />
       </Animated.View>
     );
@@ -588,18 +591,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.woodLight,
     position: 'relative',
     overflow: 'hidden',
-  },
-  crownContainer: {
-    position: 'absolute',
-    top: theme.spacing.xs,
-    right: theme.spacing.xs,
-    backgroundColor: 'rgba(241, 196, 15, 0.9)', // meeple-yellow with opacity
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.xs,
-    zIndex: 5,
-  },
-  crownIcon: {
-    fontSize: theme.typography.fontSize.base,
   },
   thumbnail: {
     width: '100%',

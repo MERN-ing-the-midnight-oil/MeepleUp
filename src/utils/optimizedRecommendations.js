@@ -172,75 +172,25 @@ export const preCalculateAllMatches = (games, userCollection) => {
     preCalculated.set(String(gameId), matches);
   });
 
-  // Debug logging - always log to help diagnose
-  const sampleUserGame = normalizedUserCollection[0];
-  const sampleProposedGame = games[0];
-  const sampleUserGameRaw = userCollection[0];
-  const sampleProposedGameRaw = games[0];
-  
-  console.log('[optimizedRecommendations] Pre-calculated matches:', {
-      totalGames: games.length,
-      totalUserGames: normalizedUserCollection.length,
-      gamesWithMatches: Array.from(preCalculated.values()).filter(m => 
-        m.publisher.length > 0 || 
-        m.mechanics.length > 0 || 
-        m.category.length > 0 || 
-        m.complexity.length > 0
-      ).length,
-      sampleGameMatches: Array.from(preCalculated.entries()).slice(0, 3).map(([id, matches]) => ({
-        gameId: id,
-        publisher: matches.publisher.length,
-        mechanics: matches.mechanics.length,
-        category: matches.category.length,
-        complexity: matches.complexity.length
-      })),
-      sampleUserGameData: sampleUserGame ? {
-        title: sampleUserGame.title,
-        publisher: sampleUserGame.publisher,
-        mechanicsCount: sampleUserGame.mechanics.length,
-        mechanics: sampleUserGame.mechanics.slice(0, 3),
-        categoriesCount: sampleUserGame.categories.length,
-        categories: sampleUserGame.categories.slice(0, 3),
-        complexity: sampleUserGame.complexity
-      } : null,
-      sampleUserGameRaw: sampleUserGameRaw ? {
-        title: sampleUserGameRaw.title,
-        hasBggData: !!sampleUserGameRaw._bggData,
-        publisher: sampleUserGameRaw.publisher,
-        publishers: sampleUserGameRaw.publishers,
-        mechanics: sampleUserGameRaw.mechanics,
-        categories: sampleUserGameRaw.categories,
-        averageWeight: sampleUserGameRaw.averageWeight,
-        complexity: sampleUserGameRaw.complexity,
-        _bggData: sampleUserGameRaw._bggData ? {
-          publisher: sampleUserGameRaw._bggData.publisher,
-          mechanics: sampleUserGameRaw._bggData.mechanics,
-          categories: sampleUserGameRaw._bggData.categories,
-        } : null
-      } : null,
-      sampleProposedGameData: sampleProposedGame ? {
-        title: sampleProposedGame.title || sampleProposedGame.name,
-        hasBggData: !!sampleProposedGame._bggData,
-        publisher: sampleProposedGame._bggData?.publisher || sampleProposedGame.publisher,
-        mechanicsCount: (sampleProposedGame._bggData?.mechanics || sampleProposedGame.mechanics || []).length,
-        mechanics: (sampleProposedGame._bggData?.mechanics || sampleProposedGame.mechanics || []).slice(0, 3),
-        categoriesCount: (sampleProposedGame._bggData?.categories || sampleProposedGame.categories || []).length,
-        categories: (sampleProposedGame._bggData?.categories || sampleProposedGame.categories || []).slice(0, 3)
-      } : null,
-      sampleProposedGameRaw: sampleProposedGameRaw ? {
-        title: sampleProposedGameRaw.title || sampleProposedGameRaw.name,
-        hasBggData: !!sampleProposedGameRaw._bggData,
-        publisher: sampleProposedGameRaw.publisher,
-        publishers: sampleProposedGameRaw.publishers,
-        mechanics: sampleProposedGameRaw.mechanics,
-        categories: sampleProposedGameRaw.categories,
-        _bggData: sampleProposedGameRaw._bggData ? {
-          publisher: sampleProposedGameRaw._bggData.publisher,
-          mechanics: sampleProposedGameRaw._bggData.mechanics,
-          categories: sampleProposedGameRaw._bggData.categories,
-        } : null
-      } : null
-    });
+  // Debug logging - only in development mode and only for significant batches
+  // Skip logging for single-game calculations to reduce noise
+  if (__DEV__ && games.length > 1) {
+    const gamesWithMatches = Array.from(preCalculated.values()).filter(m => 
+      m.publisher.length > 0 || 
+      m.mechanics.length > 0 || 
+      m.category.length > 0 || 
+      m.complexity.length > 0
+    ).length;
+    
+    // Only log if there are meaningful matches to report
+    if (gamesWithMatches > 0 || games.length > 10) {
+      console.log('[optimizedRecommendations] Pre-calculated matches:', {
+        totalGames: games.length,
+        totalUserGames: normalizedUserCollection.length,
+        gamesWithMatches,
+      });
+    }
+  }
 
   return preCalculated;
 };

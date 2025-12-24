@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { Platform, View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Image, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
@@ -14,8 +14,9 @@ import { formatDate, formatTime } from '../utils/helpers';
 import { theme, commonStyles } from '../utils/theme';
 import { getGameDetails } from '../utils/api';
 import BeepleRecommendations from '../components/BeepleRecommendations';
+import BeepleGameOptimizer from '../components/BeepleGameOptimizer';
 import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
-import { calculateMatchScore } from '../utils/matchScore';
+import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 import { createNotification } from '../utils/notifications';
 import { getOrCreateConversation, sendMessage } from '../services/messaging';
 import { BEEPLE_USER_ID } from '../utils/constants';
@@ -115,6 +116,37 @@ const BrowseAndProposeScreen = () => {
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [gamesWithBggData, setGamesWithBggData] = useState({}); // { gameId: bggData }
   const [matchScores, setMatchScores] = useState({}); // { gameId: score }
+  const matchScoresRef = useRef({}); // Ref to track current scores without dependency
+  const [userProposalLimit, setUserProposalLimit] = useState(5); // Default to 5
+  const [sortBy, setSortBy] = useState('title'); // 'title', 'matchScore', 'bggRating', 'owner'
+  
+  // Helper function to check if a game is favorited by the current user
+  const isGameFavorited = useCallback((game) => {
+    if (!userId || !game) return false;
+    
+    const gameId = game.bggId || game.id;
+    if (!gameId) return game.isFavorite || false;
+    
+    // Convert to string for consistent comparison
+    const gameIdStr = String(gameId);
+    const gameBggIdStr = game.bggId ? String(game.bggId) : null;
+    
+    const userGames = collections[userId] || [];
+    const userGame = userGames.find(g => {
+      // Try to match by bggId first (most reliable)
+      if (gameBggIdStr && g.bggId) {
+        return String(g.bggId) === gameBggIdStr;
+      }
+      // Fall back to matching by any ID
+      const gId = g.bggId || g.id;
+      if (gId) {
+        return String(gId) === gameIdStr;
+      }
+      return false;
+    });
+    
+    return userGame?.isFavorite ?? game?.isFavorite ?? false;
+  }, [userId, collections]);
   
   // Get event dates
   const eventDates = useMemo(() => {
@@ -461,15 +493,21 @@ const BrowseAndProposeScreen = () => {
     }
 
     const loadMatchScores = async () => {
-      const scores = {};
+      // Use ref to get current scores without dependency
+      const scores = { ...matchScoresRef.current }; // Start with existing scores to avoid recalculating
       const allGamesToScore = [];
+      const gamesNeedingCalculation = [];
       
       // Add enriched games
       if (Array.isArray(enrichedGames) && enrichedGames.length > 0) {
         enrichedGames.forEach(game => {
           const gameId = game.bggId || game.id;
           if (gameId) {
-            allGamesToScore.push({ gameId, game });
+            const gameIdStr = String(gameId);
+            // Only process if we don't already have a score
+            if (!scores[gameIdStr]) {
+              allGamesToScore.push({ gameId: gameIdStr, game });
+            }
           }
         });
       }
@@ -478,23 +516,26 @@ const BrowseAndProposeScreen = () => {
       if (Array.isArray(proposedGames) && proposedGames.length > 0) {
         proposedGames.forEach(proposal => {
           const gameId = proposal.gameId;
-          if (gameId && !allGamesToScore.find(g => g.gameId === gameId)) {
-            // Create a minimal game object for proposed games
-            allGamesToScore.push({
-              gameId,
-              game: {
-                bggId: gameId,
-                id: gameId,
-                title: proposal.gameName,
-                image: proposal.gameImage,
-              }
-            });
+          if (gameId) {
+            const gameIdStr = String(gameId);
+            if (!scores[gameIdStr] && !allGamesToScore.find(g => g.gameId === gameIdStr)) {
+              // Create a minimal game object for proposed games
+              allGamesToScore.push({
+                gameId: gameIdStr,
+                game: {
+                  bggId: gameId,
+                  id: gameId,
+                  title: proposal.gameName,
+                  image: proposal.gameImage,
+                }
+              });
+            }
           }
         });
       }
       
       if (allGamesToScore.length === 0) {
-        return;
+        return; // All scores already calculated or no games
       }
       
       const userCollection = collections[userId] || [];
@@ -503,72 +544,112 @@ const BrowseAndProposeScreen = () => {
       }
       
       const customWeights = user?.personalMatchWeights || null;
+      const weights = customWeights || {
+        publisher: 3,
+        mechanics: 3,
+        category: 2,
+        complexity: 1.5,
+        favorite: 2,
+      };
       
-      for (const { gameId, game } of allGamesToScore) {
+      // First, batch check for stored scores
+      const storedScorePromises = allGamesToScore.map(async ({ gameId, game }) => {
         try {
-          // Ensure gameId is always a string for use as object key
-          const gameIdStr = String(gameId);
-          
-          // Try to get stored score first
-          const storedScore = await getMatchScore(eventId, gameIdStr, userId);
+          const storedScore = await getMatchScore(eventId, gameId, userId);
           if (storedScore !== null) {
-            // Ensure storedScore is a number, not an object
             const scoreNum = typeof storedScore === 'number' ? storedScore : Number(storedScore);
             if (!isNaN(scoreNum)) {
-              scores[gameIdStr] = scoreNum;
-            } else {
-              console.warn('[BrowseAndPropose] Invalid storedScore, not a number:', {
-                gameId: gameIdStr,
-                storedScore,
-                storedScoreType: typeof storedScore
-              });
-            }
-          } else {
-            // Calculate on-demand if not stored
-            // For proposed games, we might need to fetch game data
-            let gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[gameIdStr] };
-            
-            // If still no BGG data, try to fetch it
-            if (!gameWithBggData._bggData && gameIdStr) {
-              try {
-                const bggData = await getGameDetails(gameIdStr);
-                if (bggData) {
-                  gameWithBggData = { ...gameWithBggData, _bggData: bggData };
-                }
-              } catch (err) {
-                // Continue without BGG data
-              }
-            }
-            
-            const score = calculateMatchScore(gameWithBggData, userCollection, customWeights);
-            if (score !== null) {
-              // Ensure score is a number
-              const scoreNum = typeof score === 'number' ? score : Number(score);
-              if (!isNaN(scoreNum)) {
-                scores[gameIdStr] = scoreNum;
-                // Store it for future use (non-blocking)
-                calculateMatchScoresForGame(eventId, gameIdStr, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
-                  console.warn('[BrowseAndPropose] Error storing match score:', err);
-                });
-              } else {
-                console.warn('[BrowseAndPropose] Invalid calculated score, not a number:', {
-                  gameId: gameIdStr,
-                  score,
-                  scoreType: typeof score
-                });
-              }
+              return { gameId, score: scoreNum, hasScore: true };
             }
           }
+          return { gameId, game, hasScore: false };
         } catch (error) {
-          console.warn(`[BrowseAndPropose] Error loading match score for game ${gameId}:`, error);
+          console.warn(`[BrowseAndPropose] Error getting stored score for game ${gameId}:`, error);
+          return { gameId, game, hasScore: false };
+        }
+      });
+      
+      const storedScoreResults = await Promise.all(storedScorePromises);
+      
+      // Add stored scores to results and collect games that need calculation
+      storedScoreResults.forEach(result => {
+        if (result.hasScore) {
+          scores[result.gameId] = result.score;
+        } else {
+          gamesNeedingCalculation.push(result);
+        }
+      });
+      
+      // Batch process games that need calculation
+      if (gamesNeedingCalculation.length > 0) {
+        // Prepare all games with BGG data first
+        const gamesWithBggDataPromises = gamesNeedingCalculation.map(async ({ gameId, game }) => {
+          let gameWithBggData = game._bggData ? game : { ...game, _bggData: gamesWithBggData[gameId] };
+          
+          // If still no BGG data, try to fetch it
+          if (!gameWithBggData._bggData && gameId) {
+            try {
+              const bggData = await getGameDetails(gameId);
+              if (bggData) {
+                gameWithBggData = { ...gameWithBggData, _bggData: bggData };
+              }
+            } catch (err) {
+              // Continue without BGG data
+            }
+          }
+          
+          return { gameId, game: gameWithBggData };
+        });
+        
+        const gamesReady = await Promise.all(gamesWithBggDataPromises);
+        
+        // Batch calculate all matches at once (much more efficient)
+        const gamesToCalculate = gamesReady.filter(g => g.game);
+        if (gamesToCalculate.length > 0) {
+          const preCalculatedMatches = preCalculateAllMatches(
+            gamesToCalculate.map(g => g.game),
+            userCollection
+          );
+          
+          // Calculate scores for all games
+          gamesToCalculate.forEach(({ gameId, game }) => {
+            const matches = preCalculatedMatches.get(gameId);
+            if (matches) {
+              const score = calculateGameScore(matches, weights, game);
+              if (score !== null && score > 0) {
+                const scoreNum = typeof score === 'number' ? score : Number(score);
+                if (!isNaN(scoreNum)) {
+                  scores[gameId] = scoreNum;
+                  // Store it for future use (non-blocking)
+                  calculateMatchScoresForGame(eventId, gameId, game, collections, { [userId]: customWeights }).catch(err => {
+                    if (__DEV__) {
+                      console.warn('[BrowseAndPropose] Error storing match score:', err);
+                    }
+                  });
+                }
+              }
+            }
+          });
         }
       }
       
-      setMatchScores(scores);
+      // Only update state if we have new scores
+      const hasNewScores = Object.keys(scores).some(key => matchScoresRef.current[key] !== scores[key]) || 
+                         Object.keys(scores).length > Object.keys(matchScoresRef.current).length;
+      
+      if (hasNewScores) {
+        matchScoresRef.current = scores; // Update ref
+        setMatchScores(scores);
+      }
     };
 
     loadMatchScores();
   }, [eventId, userId, enrichedGames, proposedGames, collections, user?.personalMatchWeights, gamesWithBggData]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    matchScoresRef.current = matchScores;
+  }, [matchScores]);
 
   // Helper to get rating label
   const getRatingLabel = (rating) => {
@@ -582,15 +663,62 @@ const BrowseAndProposeScreen = () => {
     return ratingLabels[rating] || '';
   };
   
-  // Paginated games (using enriched games with BGG data)
-  const paginatedGames = useMemo(() => {
+  // Sorted games (using enriched games with BGG data)
+  const sortedGames = useMemo(() => {
     if (!Array.isArray(enrichedGames) || enrichedGames.length === 0) return [];
+    
+    const sorted = [...enrichedGames].sort((a, b) => {
+      const gameAId = String(a.bggId || a.id);
+      const gameBId = String(b.bggId || b.id);
+      
+      switch (sortBy) {
+        case 'matchScore':
+          const scoreA = matchScores[gameAId] || 0;
+          const scoreB = matchScores[gameBId] || 0;
+          return scoreB - scoreA; // Descending (highest first)
+        
+        case 'bggRating':
+          const ratingA = a.bggRating || a._bggData?.bggRating || 0;
+          const ratingB = b.bggRating || b._bggData?.bggRating || 0;
+          return ratingB - ratingA; // Descending (highest first)
+        
+        case 'owner':
+          const ownersA = a._owners || [];
+          const ownersB = b._owners || [];
+          // Games with no owners go to the end
+          if (ownersA.length === 0 && ownersB.length === 0) return 0;
+          if (ownersA.length === 0) return 1;
+          if (ownersB.length === 0) return -1;
+          // Sort by first owner name alphabetically
+          const ownerA = ownersA[0].toLowerCase();
+          const ownerB = ownersB[0].toLowerCase();
+          return ownerA.localeCompare(ownerB); // Ascending (A-Z)
+        
+        case 'title':
+        default:
+          const titleA = (a.title || a.name || '').toLowerCase();
+          const titleB = (b.title || b.name || '').toLowerCase();
+          return titleA.localeCompare(titleB); // Ascending (A-Z)
+      }
+    });
+    
+    return sorted;
+  }, [enrichedGames, sortBy, matchScores]);
+  
+  // Paginated games (using sorted games)
+  const paginatedGames = useMemo(() => {
+    if (!Array.isArray(sortedGames) || sortedGames.length === 0) return [];
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
-    return enrichedGames.slice(startIndex, endIndex);
-  }, [enrichedGames, currentPage]);
+    return sortedGames.slice(startIndex, endIndex);
+  }, [sortedGames, currentPage]);
   
-  const totalPages = Array.isArray(enrichedGames) ? Math.ceil(enrichedGames.length / ITEMS_PER_PAGE) : 0;
+  const totalPages = Array.isArray(sortedGames) ? Math.ceil(sortedGames.length / ITEMS_PER_PAGE) : 0;
+  
+  // Reset to page 1 when sort changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [sortBy]);
   
   // Load event data
   useEffect(() => {
@@ -842,6 +970,13 @@ const BrowseAndProposeScreen = () => {
         
         setMemberNames(names);
         setMemberAvatars(avatars);
+        
+        // Get user's proposal limit from members
+        if (userId) {
+          const userMember = membersList.find(m => m.userId === userId);
+          const proposalLimit = userMember?.proposalLimit !== undefined ? userMember.proposalLimit : 5;
+          setUserProposalLimit(proposalLimit);
+        }
           }, (error) => {
             console.error('[BrowseAndProposeScreen] Error loading members:', {
               error,
@@ -886,28 +1021,19 @@ const BrowseAndProposeScreen = () => {
         const proposalsMap = new Map();
         const userProposalsSet = new Set();
         
+        // First pass: collect all proposal documents (base proposals)
         snapshot.forEach((doc) => {
           const data = doc.data();
           const gameId = data.gameId;
           
           if (!gameId) return;
           
-          // Check if this is a rating document (has userId field) or a proposal document
-          if (data.userId && data.userId !== data.nominatedBy) {
-            // This is a rating document
-            if (!proposalsMap.has(gameId)) {
-              proposalsMap.set(gameId, {
-                gameId,
-                gameName: data.gameName || 'Unknown Game',
-                gameImage: data.gameImage || null,
-                proposedBy: data.nominatedBy || data.userId,
-                ratings: {},
-              });
-            }
-            const proposal = proposalsMap.get(gameId);
-            proposal.ratings[data.userId] = data.rating;
-          } else {
-            // This is a proposal document
+          // Check if this is a proposal document (not a rating document)
+          // Rating documents have userId that differs from nominatedBy, or have userId but no nominatedBy
+          const isRatingDoc = data.userId && data.userId !== data.nominatedBy;
+          
+          if (!isRatingDoc) {
+            // This is a proposal document (base proposal)
             if (!proposalsMap.has(gameId)) {
               proposalsMap.set(gameId, {
                 gameId,
@@ -925,12 +1051,34 @@ const BrowseAndProposeScreen = () => {
           }
         });
         
-        // Also load ratings separately
+        // Second pass: collect all rating documents and attach them to proposals
         snapshot.forEach((doc) => {
           const data = doc.data();
-          if (data.userId && data.userId !== data.nominatedBy && proposalsMap.has(data.gameId)) {
-            const proposal = proposalsMap.get(data.gameId);
-            proposal.ratings[data.userId] = data.rating;
+          const gameId = data.gameId;
+          
+          if (!gameId) return;
+          
+          // Check if this is a rating document
+          const isRatingDoc = data.userId && data.userId !== data.nominatedBy;
+          
+          if (isRatingDoc) {
+            // This is a rating document - ensure proposal exists
+            if (!proposalsMap.has(gameId)) {
+              // Create proposal entry from rating document if proposal doesn't exist
+              proposalsMap.set(gameId, {
+                gameId,
+                gameName: data.gameName || 'Unknown Game',
+                gameImage: data.gameImage || null,
+                proposedBy: data.nominatedBy || userId,
+                ratings: {},
+              });
+            }
+            
+            // Add rating to the proposal
+            const proposal = proposalsMap.get(gameId);
+            if (data.rating !== null && data.rating !== undefined) {
+              proposal.ratings[data.userId] = data.rating;
+            }
           }
         });
         
@@ -945,6 +1093,71 @@ const BrowseAndProposeScreen = () => {
     setSelectedGame(game);
     setShowGameDetails(true);
   }, []);
+  
+  // Helper to convert a proposal to a game object for the details modal
+  const handleOpenProposedGameDetails = useCallback(async (proposal) => {
+    const gameId = proposal.gameId;
+    if (!gameId) return;
+    
+    // First, check if this game is already in enrichedGames (from Everyone's Games)
+    const existingGame = enrichedGames.find(g => {
+      const gId = g.bggId || g.id;
+      return gId && String(gId) === String(gameId);
+    });
+    
+    if (existingGame) {
+      // Use the existing game data - it already has BGG data loaded
+      setSelectedGame(existingGame);
+      setShowGameDetails(true);
+      return;
+    }
+    
+    // Create a game object from the proposal
+    let gameObject = {
+      id: gameId,
+      bggId: gameId,
+      title: proposal.gameName || 'Unknown Game',
+      image: proposal.gameImage || null,
+      thumbnail: proposal.gameImage || null,
+    };
+    
+    // Check if we already have BGG data loaded for this game
+    const existingBggData = gamesWithBggData[gameId];
+    if (existingBggData) {
+      gameObject._bggData = existingBggData;
+      gameObject = {
+        ...gameObject,
+        ...existingBggData,
+        // Ensure we keep the proposal's image if it exists
+        image: proposal.gameImage || existingBggData.image || existingBggData.thumbnail || null,
+        thumbnail: proposal.gameImage || existingBggData.thumbnail || existingBggData.image || null,
+      };
+    } else {
+      // Try to fetch full game details if we have the gameId
+      try {
+        const gameDetails = await getGameDetails(gameId);
+        if (gameDetails) {
+          // Store BGG data separately for consistency with regular games
+          gameObject._bggData = gameDetails;
+          
+          // Merge the fetched details with the proposal data
+          gameObject = {
+            ...gameObject,
+            ...gameDetails,
+            // Ensure we keep the proposal's image if it exists
+            image: proposal.gameImage || gameDetails.image || gameDetails.thumbnail || null,
+            thumbnail: proposal.gameImage || gameDetails.thumbnail || gameDetails.image || null,
+          };
+        }
+      } catch (error) {
+        console.warn('[BrowseAndPropose] Error fetching game details for proposal:', error);
+        // Continue with the basic game object
+      }
+    }
+    
+    setSelectedGame(gameObject);
+    setShowGameDetails(true);
+  }, [enrichedGames, gamesWithBggData]);
   
   // Helper function to find game owner user IDs
   const findGameOwnerUserIds = (game, memberNames, members) => {
@@ -1057,8 +1270,8 @@ const BrowseAndProposeScreen = () => {
     
     const gameId = game.bggId || game.id;
     
-    if (userProposals.size >= 5) {
-      Alert.alert('Limit Reached', 'You can only propose up to 5 games. Remove a proposal first to propose another game.');
+    if (userProposals.size >= userProposalLimit) {
+      Alert.alert('Limit Reached', `You can only propose up to ${userProposalLimit} game${userProposalLimit !== 1 ? 's' : ''}. Remove a proposal first to propose another game.`);
       return;
     }
     
@@ -1203,7 +1416,9 @@ const BrowseAndProposeScreen = () => {
   };
   
   const handleOpenRatingModal = (proposal) => {
-    setRatingModalGame(proposal);
+    // Find the latest proposal data from proposedGames to ensure we have the most up-to-date ratings
+    const latestProposal = proposedGames.find(p => p.gameId === proposal.gameId) || proposal;
+    setRatingModalGame(latestProposal);
     setShowRatingModal(true);
   };
 
@@ -1211,6 +1426,22 @@ const BrowseAndProposeScreen = () => {
     setShowRatingModal(false);
     setRatingModalGame(null);
   };
+  
+  // Keep ratingModalGame in sync with proposedGames when it's open
+  useEffect(() => {
+    if (showRatingModal && ratingModalGame) {
+      const latestProposal = proposedGames.find(p => p.gameId === ratingModalGame.gameId);
+      if (latestProposal) {
+        // Only update if ratings have changed to avoid unnecessary re-renders
+        const currentRating = ratingModalGame.ratings?.[userId] ?? null;
+        const latestRating = latestProposal.ratings?.[userId] ?? null;
+        if (currentRating !== latestRating || 
+            JSON.stringify(ratingModalGame.ratings) !== JSON.stringify(latestProposal.ratings)) {
+          setRatingModalGame(latestProposal);
+        }
+      }
+    }
+  }, [proposedGames, showRatingModal, ratingModalGame, userId]);
 
 
   const handleRateGame = async (gameId, newRating) => {
@@ -1306,45 +1537,22 @@ const BrowseAndProposeScreen = () => {
       </View>
       
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Event Details Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Gaming Group Details</Text>
-          <View style={styles.eventDetailsCard}>
-            <Text style={styles.eventName}>{event.name}</Text>
-            <View style={styles.eventDetailRow}>
-              <Text style={styles.eventDetailLabel}>Date:</Text>
-              <Text style={styles.eventDetailValue}>
-                {selectedDate.date ? formatDate(selectedDate.date.toISOString()) : 'TBD'}
-              </Text>
-            </View>
-            {selectedDate.startTime && (
-              <View style={styles.eventDetailRow}>
-                <Text style={styles.eventDetailLabel}>Time:</Text>
-                <Text style={styles.eventDetailValue}>
-                  {formatTime(selectedDate.startTime.toISOString())}
-                  {selectedDate.endTime && ` - ${formatTime(selectedDate.endTime.toISOString())}`}
-                </Text>
-              </View>
-            )}
-            {selectedDate.location && (
-              <View style={styles.eventDetailRow}>
-                <Text style={styles.eventDetailLabel}>Location:</Text>
-                <Text style={styles.eventDetailValue}>{selectedDate.location}</Text>
-              </View>
-            )}
-            <View style={styles.eventDetailRow}>
-              <Text style={styles.eventDetailLabel}>Confirmed Attendees:</Text>
-              <Text style={styles.eventDetailValue}>
-                {(() => {
-                  const count = Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0;
-                  console.log('[BrowseAndProposeScreen] Rendering confirmed attendees count:', count, 'confirmedAttendees:', confirmedAttendees);
-                  return count;
-                })()}
-              </Text>
-            </View>
+        {/* Beeple Game Optimizer */}
+        {proposedGames.length > 0 && confirmedAttendees.length > 0 && (
+          <View style={styles.section}>
+            <BeepleGameOptimizer
+              proposedGames={proposedGames}
+              confirmedAttendees={confirmedAttendees}
+              memberRSVPs={memberRSVPs}
+              memberNames={memberNames}
+              memberAvatars={memberAvatars}
+              eventId={eventId}
+              eventName={event?.name}
+              selectedDate={selectedDate}
+            />
           </View>
-        </View>
-        
+        )}
+
         {/* Proposed Games Section */}
         {proposedGames.length > 0 && (
           <View style={styles.section}>
@@ -1402,7 +1610,11 @@ const BrowseAndProposeScreen = () => {
               
               return (
                 <View key={gameId} style={styles.proposedGameItem}>
-                  <View style={styles.proposedGameHeader}>
+                  <Pressable
+                    onPress={() => handleOpenProposedGameDetails(proposal)}
+                    style={styles.proposedGameHeader}
+                    android_ripple={{ color: 'rgba(0, 0, 0, 0.1)' }}
+                  >
                     {proposal.gameImage ? (
                       <Image 
                         source={{ uri: proposal.gameImage }} 
@@ -1424,11 +1636,11 @@ const BrowseAndProposeScreen = () => {
                         <Text style={styles.proposedGameTitle}>
                           {typeof proposal.gameName === 'string' ? proposal.gameName : String(proposal.gameName || 'Unknown Game')}
                         </Text>
-                        {userId && proposalMatchScore !== undefined && proposalMatchScore !== null && (
+                        {userId && proposalMatchScore !== undefined && proposalMatchScore !== null && !isGameFavorited({ bggId: gameId, id: gameId }) && (
                           <View style={styles.proposedGameMatchScore}>
                             <Text style={styles.matchScoreIconSmall}>💘</Text>
                             <Text style={styles.matchScoreTextSmall}>
-                              {typeof proposalMatchScore === 'object' ? JSON.stringify(proposalMatchScore) : String(proposalMatchScore)}
+                              {typeof proposalMatchScore === 'object' ? JSON.stringify(proposalMatchScore) : String(Math.round(Number(proposalMatchScore) || 0))}
                             </Text>
                           </View>
                         )}
@@ -1437,7 +1649,8 @@ const BrowseAndProposeScreen = () => {
                         <Text style={styles.proposedByLabel}>Proposed by </Text>
                         <TouchableOpacity
                           style={styles.proposedByUser}
-                          onPress={() => {
+                          onPress={(e) => {
+                            e.stopPropagation(); // Prevent triggering the parent Pressable
                             if (proposerId) {
                               setSelectedUserForProfile({
                                 userId: proposerId,
@@ -1463,7 +1676,7 @@ const BrowseAndProposeScreen = () => {
                         </TouchableOpacity>
                       </View>
                     </View>
-                  </View>
+                  </Pressable>
                   
                   {/* Collapsed Rating Display */}
                   <View style={styles.ratingDisplayContainer}>
@@ -1495,9 +1708,8 @@ const BrowseAndProposeScreen = () => {
         
         {/* Super Collection Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Propose a Game</Text>
-          <Text style={styles.sectionCopy}>
-            {Array.isArray(enrichedGames) ? enrichedGames.length : 0} {Array.isArray(enrichedGames) && enrichedGames.length === 1 ? 'game' : 'games'} from {Array.isArray(confirmedAttendees) ? confirmedAttendees.length : 0} {Array.isArray(confirmedAttendees) && confirmedAttendees.length === 1 ? 'attendee' : 'attendees'}
+          <Text style={styles.sectionTitle}>
+            Propose a game for {selectedDate?.date ? formatDate(selectedDate.date.toISOString()) : 'this event'}.
           </Text>
           
           {/* Beeple Recommendations */}
@@ -1507,6 +1719,7 @@ const BrowseAndProposeScreen = () => {
               userCollection={collections[userId] || []}
               onProposeGame={handleProposeGame}
               userProposals={userProposals}
+              eventId={eventId}
             />
           )}
           
@@ -1514,12 +1727,56 @@ const BrowseAndProposeScreen = () => {
             <Text style={styles.emptyText}>No games found from confirmed attendees for this date.</Text>
           ) : (
             <>
+              {/* Everyone's Games Header */}
+              <Text style={styles.everyonesGamesTitle}>Everyone's Games</Text>
+              
+              {/* Sorting Tools */}
+              <View style={styles.sortingContainer}>
+                <Text style={styles.sortingLabel}>Sort by:</Text>
+                <View style={styles.sortingButtons}>
+                  <TouchableOpacity
+                    style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
+                    onPress={() => setSortBy('title')}
+                  >
+                    <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
+                      Title
+                    </Text>
+                  </TouchableOpacity>
+                  {userId && Object.keys(matchScores).length > 0 && (
+                    <TouchableOpacity
+                      style={[styles.sortButton, sortBy === 'matchScore' && styles.sortButtonActive]}
+                      onPress={() => setSortBy('matchScore')}
+                    >
+                      <Text style={[styles.sortButtonText, sortBy === 'matchScore' && styles.sortButtonTextActive]}>
+                        Match Score
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={[styles.sortButton, sortBy === 'bggRating' && styles.sortButtonActive]}
+                    onPress={() => setSortBy('bggRating')}
+                  >
+                    <Text style={[styles.sortButtonText, sortBy === 'bggRating' && styles.sortButtonTextActive]}>
+                      BGG Rating
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.sortButton, sortBy === 'owner' && styles.sortButtonActive]}
+                    onPress={() => setSortBy('owner')}
+                  >
+                    <Text style={[styles.sortButtonText, sortBy === 'owner' && styles.sortButtonTextActive]}>
+                      Owner
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
               <View style={styles.gamesGrid}>
                 {Array.isArray(paginatedGames) ? paginatedGames.map((game, idx) => {
                   const gameId = game.bggId || game.id;
                   const isProposedByUser = userProposals.has(gameId);
                   const isProposedByAnyone = proposedGames.some(n => n.gameId === gameId);
-                  const canPropose = userProposals.size < 5 || isProposedByUser;
+                  const canPropose = userProposals.size < userProposalLimit || isProposedByUser;
                   const owners = game._owners || [];
                   
                   const matchScore = matchScores[gameId];
@@ -1550,29 +1807,14 @@ const BrowseAndProposeScreen = () => {
                           />
                         </Pressable>
                       </View>
-                      {userId && matchScore !== undefined && matchScore !== null && (
+                      {userId && matchScore !== undefined && matchScore !== null && !isGameFavorited(game) && (
                         <View style={styles.matchScoreBadge}>
                           <Text style={styles.matchScoreIcon}>💘</Text>
                           <Text style={styles.matchScoreText}>
-                            {typeof matchScore === 'object' ? JSON.stringify(matchScore) : String(matchScore)}
+                            {typeof matchScore === 'object' ? JSON.stringify(matchScore) : String(Math.round(Number(matchScore) || 0))}
                           </Text>
                         </View>
                       )}
-                      <View style={styles.gameActionsContainer}>
-                        {!isProposedByUser && canPropose && (
-                          <TouchableOpacity
-                            style={styles.proposeGameButton}
-                            onPress={() => handleProposeGame(game)}
-                          >
-                            <Text style={styles.proposeGameButtonText}>Propose</Text>
-                          </TouchableOpacity>
-                        )}
-                        {isProposedByUser && (
-                          <View style={styles.proposedBadge}>
-                            <Text style={styles.proposedBadgeText}>Proposed</Text>
-                          </View>
-                        )}
-                      </View>
                     </View>
                   );
                 }) : null}
@@ -1620,8 +1862,12 @@ const BrowseAndProposeScreen = () => {
             setShowGameDetails(false);
             setSelectedGame(null);
           }}
+          preloadedBggData={selectedGame._bggData}
           owners={selectedGame._owners || []}
           eventId={eventId}
+          onProposeGame={handleProposeGame}
+          userProposals={userProposals}
+          userProposalLimit={userProposalLimit}
         />
       )}
 
@@ -1838,12 +2084,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.woodLight,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: theme.borderRadius.sm,
   },
   matchScoreIconSmall: {
-    fontSize: 12,
+    fontSize: 16,
     marginRight: 4,
   },
   matchScoreTextSmall: {
@@ -2089,15 +2335,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.colors.woodLight,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
     borderTopWidth: 1,
     borderTopColor: 'rgba(201, 183, 156, 0.5)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(201, 183, 156, 0.5)',
   },
   matchScoreIcon: {
-    fontSize: 14,
+    fontSize: 18,
     marginRight: 4,
   },
   matchScoreText: {
@@ -2162,6 +2408,52 @@ const styles = StyleSheet.create({
   paginationText: {
     fontSize: 14,
     color: '#666',
+  },
+  everyonesGamesTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+    marginTop: theme.spacing.md,
+  },
+  sortingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+  },
+  sortingLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
+    marginRight: theme.spacing.xs,
+  },
+  sortingButtons: {
+    flexDirection: 'row',
+    gap: theme.spacing.xs,
+    flexWrap: 'wrap',
+  },
+  sortButton: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.bgColor,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+  },
+  sortButtonActive: {
+    backgroundColor: theme.colors.meepleRed,
+    borderColor: theme.colors.meepleRed,
+  },
+  sortButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textPrimary,
+    fontWeight: theme.typography.fontWeight.medium,
+  },
+  sortButtonTextActive: {
+    color: '#fff',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
 });
 

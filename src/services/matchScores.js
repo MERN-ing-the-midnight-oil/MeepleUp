@@ -5,7 +5,7 @@
 
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
-import { calculateMatchScore } from '../utils/matchScore';
+import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 import { getGameDetails } from '../utils/api';
 
 /**
@@ -96,10 +96,27 @@ export const calculateMatchScoresForGame = async (eventId, gameId, game = null, 
         }
       }
 
-      // Calculate match score
-      const score = calculateMatchScore(gameData, userCollection, customWeights);
+      // Calculate match score using same system as BeepleRecommendations
+      const weights = customWeights || {
+        publisher: 3,
+        mechanics: 3,
+        category: 2,
+        complexity: 1.5,
+        favorite: 2,
+      };
+      const preCalculatedMatches = preCalculateAllMatches([gameData], userCollection);
+      const gameIdStr = String(gameId);
+      const matches = preCalculatedMatches.get(gameIdStr);
+      let score = null;
+      if (matches) {
+        score = calculateGameScore(matches, weights, gameData);
+        // Round to nearest integer
+        if (score !== null && !isNaN(score)) {
+          score = Math.round(score);
+        }
+      }
       
-      if (score !== null) {
+      if (score !== null && score > 0) {
         scores[userId] = score;
         updates[userId] = score;
       }
@@ -222,9 +239,26 @@ export const calculateMatchScoresForUser = async (eventId, userId, userCollectio
           }
         }
 
-        const score = calculateMatchScore(gameData, userCollection, customWeights);
+        // Calculate match score using same system as BeepleRecommendations
+        const weights = customWeights || {
+          publisher: 3,
+          mechanics: 3,
+          category: 2,
+          complexity: 1.5,
+          favorite: 2,
+        };
+        const preCalculatedMatches = preCalculateAllMatches([gameData], userCollection);
+        const matches = preCalculatedMatches.get(gameIdStr);
+        let score = null;
+        if (matches) {
+          score = calculateGameScore(matches, weights, gameData);
+          // Round to nearest integer
+          if (score !== null && !isNaN(score)) {
+            score = Math.round(score);
+          }
+        }
         
-        if (score !== null) {
+        if (score !== null && score > 0) {
           // gameIdStr is already defined above
           const matchScoreRef = db.collection('gamingGroups').doc(eventId)
             .collection('matchScores').doc(gameIdStr);
@@ -277,7 +311,8 @@ export const getMatchScore = async (eventId, gameId, userId) => {
       // Ensure we return a number or null, never an object
       if (score !== null && score !== undefined) {
         const numScore = typeof score === 'number' ? score : Number(score);
-        return isNaN(numScore) ? null : numScore;
+        // Round to nearest integer before returning
+        return isNaN(numScore) ? null : Math.round(numScore);
       }
       return null;
     }

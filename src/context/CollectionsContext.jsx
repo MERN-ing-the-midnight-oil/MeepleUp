@@ -27,7 +27,13 @@ export const CollectionsProvider = ({ children }) => {
       try {
         const storedCollections = await storage.getItem('meepleup_collections');
         if (storedCollections) {
-          setCollections(JSON.parse(storedCollections));
+          const parsed = JSON.parse(storedCollections);
+          const userIds = Object.keys(parsed);
+          const totalGames = userIds.reduce((sum, uid) => sum + (parsed[uid]?.length || 0), 0);
+          console.log(`[Collections] Loaded from storage: ${userIds.length} users, ${totalGames} total games`);
+          setCollections(parsed);
+        } else {
+          console.log('[Collections] No stored collections found in local storage');
         }
       } catch (error) {
         console.error('Error loading collections:', error);
@@ -69,7 +75,10 @@ export const CollectionsProvider = ({ children }) => {
     
     const sync = async () => {
       try {
+        console.log(`[Collections] Fetching games for user: ${userId}`);
         const snapshot = await db.collection('userGames').doc(userId).collection('games').get();
+        
+        console.log(`[Collections] Query result: ${snapshot.size} games found for user ${userId}`);
         
         if (!snapshot.empty) {
           const games = snapshot.docs.map(doc => {
@@ -101,6 +110,8 @@ export const CollectionsProvider = ({ children }) => {
               averageWeight: data.averageWeight || data.complexity || null,
             };
           }).filter(g => g.title !== 'Unknown Game');
+          
+          console.log(`[Collections] After filtering 'Unknown Game': ${games.length} games remaining`);
           
           // Enrich games with BGG data from main games collection if missing
           // Only enrich games that have bggId but are missing BGG metadata
@@ -151,16 +162,26 @@ export const CollectionsProvider = ({ children }) => {
           }
           
           // If no enrichment needed, just set games as-is
-          
-          if (enrichedGames.length > 0) {
-            setCollections(prev => ({
-              ...prev,
-              [userId]: enrichedGames,
-            }));
-          }
+          setCollections(prev => ({
+            ...prev,
+            [userId]: games,
+          }));
+          console.log(`[Collections] Set ${games.length} games for user ${userId}`);
+        } else {
+          console.log(`[Collections] No games found in Firestore for user ${userId}. Setting empty array.`);
+          // Set empty array so we know the sync completed
+          setCollections(prev => ({
+            ...prev,
+            [userId]: [],
+          }));
         }
       } catch (error) {
-        console.error('Error syncing user games:', error);
+        console.error(`[Collections] Error syncing user games for ${userId}:`, error);
+        console.error('Error details:', {
+          message: error.message,
+          code: error.code,
+          stack: error.stack,
+        });
         // Reset flag on error so we can retry
         currentUserSyncedRef.current = null;
       }

@@ -3,6 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
+import 'firebase/compat/functions';
 import { Platform } from 'react-native';
 
 // Firebase Configuration
@@ -77,5 +78,14 @@ if (Platform.OS === 'web' && auth.setPersistence) {
 
 export const db = firebase.firestore();
 export const storage = firebase.storage();
+
+// Initialize Firebase Functions (if available)
+let functionsInstance = null;
+try {
+  functionsInstance = firebase.functions();
+} catch (error) {
+  console.warn('Firebase Functions not available:', error);
+}
+export const functions = functionsInstance;
 
 export default firebase;

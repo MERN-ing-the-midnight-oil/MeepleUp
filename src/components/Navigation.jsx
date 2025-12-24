@@ -1,11 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import GearIcon from './GearIcon';
+import { useResponsive, getResponsiveValue } from '../utils/responsive';
+import { theme } from '../utils/theme';
 
 // React Native Navigation Component
 const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
   const { isAuthenticated, isEmailVerified } = useAuth();
+  const { width } = useWindowDimensions();
+  const { isMobile, isTablet, isDesktop } = useResponsive();
 
   if (!isAuthenticated || !isEmailVerified) {
     return null;
@@ -29,19 +33,32 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
     { name: 'Profile', route: 'Profile', showGear: true },
   ];
 
+  // Responsive values
+  const paddingTop = getResponsiveValue({ xs: 40, md: 44, lg: 48 }, width);
+  const paddingHorizontal = getResponsiveValue({ xs: 20, md: 24, lg: 32 }, width);
+  const paddingBottom = getResponsiveValue({ xs: 12, md: 14, lg: 16 }, width);
+  const navLinkPaddingVertical = getResponsiveValue({ xs: 8, md: 10, lg: 12 }, width);
+  const navLinkPaddingHorizontal = getResponsiveValue({ xs: 12, md: 16, lg: 20 }, width);
+  const navLinkMarginRight = getResponsiveValue({ xs: 4, md: 6, lg: 8 }, width);
+  const inactiveFontSize = getResponsiveValue({ xs: 14, md: 15, lg: 16 }, width);
+  const activeFontSize = getResponsiveValue({ xs: 18, md: 20, lg: 22 }, width);
+  const borderBottomWidth = getResponsiveValue({ xs: 4, md: 4, lg: 5 }, width);
+  const gearIconSize = getResponsiveValue({ xs: 14, md: 16, lg: 18 }, width);
+  const activeGearIconSize = getResponsiveValue({ xs: 18, md: 20, lg: 22 }, width);
+
   const styles = StyleSheet.create({
     container: {
       backgroundColor: '#fff',
       borderBottomWidth: 1,
       borderBottomColor: '#e0e0e0',
-      paddingTop: 40,
+      paddingTop,
     },
     navContent: {
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingBottom: 12,
+      paddingHorizontal,
+      paddingBottom,
     },
     navLinks: {
       flexDirection: 'row',
@@ -50,22 +67,23 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
       flexWrap: 'wrap',
     },
     navLink: {
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      marginRight: 4,
+      paddingVertical: navLinkPaddingVertical,
+      paddingHorizontal: navLinkPaddingHorizontal,
+      marginRight: navLinkMarginRight,
+      minHeight: 44, // Better touch target on mobile
     },
     navLinkActive: {
-      borderBottomWidth: 4,
+      borderBottomWidth,
       borderBottomColor: '#dc2626',
     },
     navLinkText: {
-      fontSize: 14,
+      fontSize: inactiveFontSize,
       color: '#666',
     },
     navLinkTextActive: {
       color: '#dc2626',
       fontWeight: 'bold',
-      fontSize: 18,
+      fontSize: activeFontSize,
     },
     navLinkContent: {
       flexDirection: 'row',
@@ -106,7 +124,7 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
                       {' / '}
                     </Text>
                     <GearIcon
-                      size={isActive(item.route) ? 18 : 14}
+                      size={isActive(item.route) ? activeGearIconSize : gearIconSize}
                       color={isActive(item.route) ? '#dc2626' : '#666'}
                     />
                   </>

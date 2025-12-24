@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert, Image, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
 import Button from '../components/common/Button';
@@ -8,8 +8,11 @@ import NotificationSettings from '../components/NotificationSettings';
 import PersonalMatchSettings from '../components/PersonalMatchSettings';
 import { pickAndUploadImage, deleteImageFromFirebase } from '../utils/imageUpload';
 import { theme, commonStyles } from '../utils/theme';
+import { useResponsive, getResponsiveValue } from '../utils/responsive';
 
 const ProfileScreen = () => {
+  const { width } = useWindowDimensions();
+  const { isMobile, isTablet, isDesktop } = useResponsive();
   const {
     user,
     updateUser,
@@ -52,6 +55,11 @@ const ProfileScreen = () => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPersonalMatchModal, setShowPersonalMatchModal] = useState(false);
+
+  // Responsive values for profile picture
+  const profilePictureSize = getResponsiveValue({ xs: 120, md: 140, lg: 160 }, width);
+  const profilePictureRadius = profilePictureSize / 2;
+  const placeholderFontSize = getResponsiveValue({ xs: 48, md: 56, lg: 64 }, width);
 
   useEffect(() => {
     if (user) {
@@ -332,16 +340,48 @@ const ProfileScreen = () => {
         <View style={styles.profilePictureSection}>
           <View style={styles.profilePictureContainer}>
             {user?.photoURL ? (
-              <Image source={{ uri: user.photoURL }} style={styles.profilePicture} />
+              <Image 
+                source={{ uri: user.photoURL }} 
+                style={[
+                  styles.profilePicture,
+                  {
+                    width: profilePictureSize,
+                    height: profilePictureSize,
+                    borderRadius: profilePictureRadius,
+                  }
+                ]} 
+              />
             ) : (
-              <View style={[styles.profilePicture, styles.profilePicturePlaceholder]}>
-                <Text style={styles.profilePicturePlaceholderText}>
+              <View 
+                style={[
+                  styles.profilePicture, 
+                  styles.profilePicturePlaceholder,
+                  {
+                    width: profilePictureSize,
+                    height: profilePictureSize,
+                    borderRadius: profilePictureRadius,
+                  }
+                ]}
+              >
+                <Text 
+                  style={[
+                    styles.profilePicturePlaceholderText,
+                    { fontSize: placeholderFontSize }
+                  ]}
+                >
                   {user?.name?.charAt(0)?.toUpperCase() || '?'}
                 </Text>
               </View>
             )}
             {uploadingPhoto && (
-              <View style={styles.profilePictureOverlay}>
+              <View 
+                style={[
+                  styles.profilePictureOverlay,
+                  {
+                    borderRadius: profilePictureRadius,
+                  }
+                ]}
+              >
                 <ActivityIndicator size="large" color="#fff" />
               </View>
             )}
@@ -808,9 +848,6 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   profilePicture: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
     backgroundColor: theme.colors.woodMedium,
   },
   profilePicturePlaceholder: {
@@ -819,7 +856,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.meepleRed,
   },
   profilePicturePlaceholderText: {
-    fontSize: 48,
     fontWeight: theme.typography.fontWeight.bold,
     color: '#fff',
   },
@@ -830,7 +866,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 60,
     justifyContent: 'center',
     alignItems: 'center',
   },

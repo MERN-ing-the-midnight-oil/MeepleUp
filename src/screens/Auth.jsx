@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, Dimensions, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, StyleSheet, Alert, Pressable, Keyboard, TouchableWithoutFeedback, Image, Dimensions, TouchableOpacity, Animated, Platform } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
@@ -8,12 +8,14 @@ import Button from '../components/common/Button';
 import KeyboardAwareScrollView from '../components/common/KeyboardAwareScrollView';
 import { bggLogoColor } from '../components/BGGLogoAssets';
 
+const signInWithGoogleBadge = require('../../assets/images/sign-in-with-google.png');
+
 const Auth = ({ route: routeProp }) => {
   const navigation = useNavigation();
   const routeHook = useRoute();
   // Use provided route prop (for web) or hook result (for React Native)
   const route = routeProp || routeHook;
-  const { login, signup, signInWithGoogle, resetPassword } = useAuth();
+  const { login, signup, signInWithGoogle, signInWithApple, resetPassword } = useAuth();
   const mode = route.params?.mode || 'login'; // 'login' or 'register'
   const { width: screenWidth } = Dimensions.get('window');
   const isMobile = screenWidth < 600;
@@ -110,6 +112,21 @@ const Auth = ({ route: routeProp }) => {
     } catch (err) {
       setError(err.message || 'Failed to sign in with Google. Please try again.');
       console.error('Google sign-in error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      await signInWithApple();
+      // Navigation will happen automatically via auth state change
+    } catch (err) {
+      setError(err.message || 'Failed to sign in with Apple. Please try again.');
+      console.error('Apple sign-in error:', err);
     } finally {
       setLoading(false);
     }
@@ -244,7 +261,9 @@ const Auth = ({ route: routeProp }) => {
               onSubmitEditing={mode === 'register' ? undefined : handleSubmit}
               ref={mode === 'register' ? passwordInputRef : lastInputRef}
               autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-              textContentType={mode === 'register' ? 'newPassword' : 'password'}
+              {...(!__DEV__ && { textContentType: mode === 'register' ? 'newPassword' : 'password' })}
+              accessibilityLabel="Password"
+              {...(Platform.OS === 'ios' && mode === 'register' && !__DEV__ && { passwordRules: 'minlength: 6;' })}
               onFocus={() => scrollToInput(passwordInputRef)}
             />
             <TouchableOpacity
@@ -310,7 +329,9 @@ const Auth = ({ route: routeProp }) => {
                 onSubmitEditing={handleSubmit}
                 ref={confirmPasswordInputRef}
                 autoComplete="new-password"
-                textContentType="newPassword"
+                {...(!__DEV__ && { textContentType: 'newPassword' })}
+                accessibilityLabel="Confirm Password"
+                {...(Platform.OS === 'ios' && !__DEV__ && { passwordRules: 'minlength: 6;' })}
                 onFocus={() => scrollToInput(confirmPasswordInputRef)}
               />
               <TouchableOpacity
@@ -328,7 +349,7 @@ const Auth = ({ route: routeProp }) => {
           )}
 
           <Button
-            label={loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Sign In'}
+            label={loading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Sign In with Email'}
             onPress={handleSubmit}
             disabled={loading}
             style={styles.submitButton}
@@ -340,13 +361,29 @@ const Auth = ({ route: routeProp }) => {
             <View style={styles.divider} />
           </View>
 
-          <Button
-            label="Sign in with Google"
-            onPress={handleGoogleSignIn}
-            disabled={loading}
-            variant="outline"
-            style={styles.googleButton}
-          />
+          <View style={styles.badgeContainer}>
+            <Pressable
+              onPress={handleGoogleSignIn}
+              disabled={loading}
+              style={[styles.badgeButton, { opacity: loading ? 0.5 : 1 }]}
+            >
+              <Image
+                source={signInWithGoogleBadge}
+                style={styles.badge}
+                resizeMode="contain"
+              />
+            </Pressable>
+            <Pressable
+              onPress={handleAppleSignIn}
+              disabled={loading}
+              style={[styles.appleButton, { opacity: loading ? 0.5 : 1 }]}
+            >
+              <View style={styles.appleButtonContent}>
+                <Text style={styles.appleLogo}></Text>
+                <Text style={styles.appleButtonText}>Sign in with Apple</Text>
+              </View>
+            </Pressable>
+          </View>
 
 
           <View style={styles.switchContainer}>
@@ -441,9 +478,53 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '500',
   },
-  googleButton: {
+  oauthButton: {
     width: '100%',
     marginBottom: 8,
+  },
+  badgeContainer: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  badgeButton: {
+    opacity: 1,
+    marginHorizontal: 6,
+    marginBottom: 0,
+  },
+  badge: {
+    height: 50,
+    width: 219, // Aspect ratio: 350/80 = 4.375, so 50 * 4.375 ≈ 219
+  },
+  appleButton: {
+    backgroundColor: '#000000',
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 6,
+  },
+  appleButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appleLogo: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '400',
+    marginRight: 8,
+  },
+  appleButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   switchContainer: {
     flexDirection: 'row',

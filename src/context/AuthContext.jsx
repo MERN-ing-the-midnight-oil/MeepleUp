@@ -414,87 +414,109 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signInWithGoogle = async () => {
+    console.log('🔵 [Google OAuth] Starting Google sign-in flow...');
+    console.log('🔵 [Google OAuth] Platform:', Platform.OS);
+    
     try {
       let credential;
 
       if (Platform.OS === 'web') {
+        console.log('🔵 [Google OAuth] Using web popup method');
         // Web: Use Firebase's Google Auth Provider with popup
         const provider = new firebase.auth.GoogleAuthProvider();
         // Request additional scopes if needed
         provider.addScope('profile');
         provider.addScope('email');
         
+        console.log('🔵 [Google OAuth] Opening Google sign-in popup...');
         credential = await auth.signInWithPopup(provider);
+        console.log('🔵 [Google OAuth] Popup completed, credential received');
       } else {
-        // Native: Use expo-auth-session for OAuth flow
-        const { makeRedirectUri, ResponseType, startAsync } = await import('expo-auth-session');
+        console.log('🔵 [Google OAuth] Using @react-native-google-signin/google-signin (native SDK)');
+        // Native: Use Google's official React Native SDK
+        // This handles all OAuth complexity internally and works with Firebase
         
-        // Google OAuth configuration
-        const redirectUri = makeRedirectUri({
-          useProxy: true,
-        });
-
-        const request = {
-          clientId: '177622732549-7b4p8i1c5gopt58uamjlbrmlo56vtppf.apps.googleusercontent.com',
-          scopes: ['openid', 'profile', 'email'],
-          responseType: ResponseType.Code,
-          redirectUri,
-        };
-
-        const discovery = {
-          authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-          tokenEndpoint: 'https://oauth2.googleapis.com/token',
-          revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
-        };
-
-        const result = await startAsync(request, discovery);
-
-        if (result.type !== 'success') {
-          throw new Error('Google sign-in was cancelled or failed');
-        }
-
-        // Exchange authorization code for tokens
-        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            client_id: request.clientId,
-            code: result.params.code,
-            grant_type: 'authorization_code',
-            redirect_uri: redirectUri,
-          }),
-        });
-
-        if (!tokenResponse.ok) {
-          throw new Error('Failed to exchange authorization code for tokens');
-        }
-
-        const tokens = await tokenResponse.json();
+        const { GoogleSignin } = await import('@react-native-google-signin/google-signin');
         
-        if (!tokens.id_token) {
-          throw new Error('No ID token received from Google');
+        // Configure GoogleSignin with web client ID (required for Firebase)
+        // iOS client ID is automatically read from GoogleService-Info.plist
+        const webClientId = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID || 
+                           '177622732549-fcs381b9m3obb0jafdlcsvakg998kt8b.apps.googleusercontent.com';
+        
+        // iOS client ID (optional - also read from GoogleService-Info.plist automatically)
+        const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_IOS_CLIENT_ID || 
+                            '177622732549-7b4p8i1c5gopt58uamjlbrmlo56vtppf.apps.googleusercontent.com';
+        
+        console.log('🔵 [Google OAuth] Configuring GoogleSignin:');
+        console.log('🔵 [Google OAuth]   Web Client ID:', webClientId);
+        console.log('🔵 [Google OAuth]   iOS Client ID:', iosClientId, '(also in GoogleService-Info.plist)');
+        
+        GoogleSignin.configure({
+          webClientId: webClientId, // Required for Firebase
+          iosClientId: iosClientId, // Optional - also auto-read from GoogleService-Info.plist
+          offlineAccess: true, // Get refresh token
+        });
+        
+        console.log('🔵 [Google OAuth] GoogleSignin configured');
+        
+        // Check if Google Play Services is available (Android only)
+        if (Platform.OS === 'android') {
+          console.log('🔵 [Google OAuth] Checking Google Play Services...');
+          await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+          console.log('🔵 [Google OAuth] Google Play Services available');
         }
-
-        // Sign in with Firebase using the Google credential
-        const googleCredential = firebase.auth.GoogleAuthProvider.credential(tokens.id_token);
+        
+        console.log('🔵 [Google OAuth] Starting native Google sign-in...');
+        
+        // Sign in with Google - this opens native Google sign-in UI
+        const signInResult = await GoogleSignin.signIn();
+        
+        console.log('🔵 [Google OAuth] Sign-in result received:', {
+          hasIdToken: !!signInResult.data?.idToken,
+          hasUser: !!signInResult.data?.user,
+        });
+        
+        // Get the ID token from the sign-in result
+        const idToken = signInResult.data?.idToken;
+        
+        if (!idToken) {
+          console.error('🔵 [Google OAuth] No ID token in sign-in result');
+          throw new Error('No ID token received from Google sign-in');
+        }
+        
+        console.log('🔵 [Google OAuth] ID token received, signing in with Firebase...');
+        
+        // Sign in with Firebase using the Google ID token
+        const googleCredential = firebase.auth.GoogleAuthProvider.credential(idToken);
         credential = await auth.signInWithCredential(googleCredential);
+        
+        console.log('🔵 [Google OAuth] ✅ Firebase sign-in successful');
       }
 
       if (!credential || !credential.user) {
+        console.error('🔵 [Google OAuth] No credential or user received');
         throw new Error('Failed to sign in with Google');
       }
 
       // Check if this is a new user or existing user
       const isNewUser = credential.additionalUserInfo?.isNewUser || false;
+      console.log('🔵 [Google OAuth] User info:', {
+        uid: credential.user.uid,
+        email: credential.user.email,
+        displayName: credential.user.displayName,
+        photoURL: credential.user.photoURL,
+        isNewUser: isNewUser,
+        providerId: credential.additionalUserInfo?.providerId,
+      });
 
       // Try to load profile from Firestore
       let profile = null;
       if (db) {
         try {
+          console.log('🔵 [Google OAuth] Loading user profile from Firestore...');
           const userDoc = await db.collection('users').doc(credential.user.uid).get();
           if (userDoc.exists) {
+            console.log('🔵 [Google OAuth] Existing user profile found in Firestore');
             const userData = userDoc.data();
             profile = {
               name: userData.name || credential.user.displayName || '',
@@ -511,15 +533,19 @@ export const AuthProvider = ({ children }) => {
             };
             // Save to local storage as backup
             await storage.setItem(PROFILE_STORAGE_KEY(credential.user.uid), JSON.stringify(profile));
+            console.log('🔵 [Google OAuth] Profile loaded and saved to local storage');
+          } else {
+            console.log('🔵 [Google OAuth] No existing profile in Firestore');
           }
         } catch (firestoreError) {
-          console.error('Error loading from Firestore on Google sign-in:', firestoreError);
+          console.error('🔵 [Google OAuth] Error loading from Firestore:', firestoreError);
         }
       }
 
       // If new user, create profile in Firestore
       if (isNewUser && db) {
         try {
+          console.log('🔵 [Google OAuth] 🆕 NEW USER - Creating profile in Firestore...');
           const userRef = db.collection('users').doc(credential.user.uid);
           const defaultProfile = {
             id: credential.user.uid,
@@ -539,6 +565,7 @@ export const AuthProvider = ({ children }) => {
             },
           };
           await userRef.set(defaultProfile);
+          console.log('🔵 [Google OAuth] ✅ New user profile created in Firestore');
           
           // Also save to local storage
           await saveProfile(credential.user.uid, {
@@ -549,21 +576,242 @@ export const AuthProvider = ({ children }) => {
             zipcode: '',
             notificationPreferences: defaultProfile.notificationPreferences,
           });
+          console.log('🔵 [Google OAuth] Profile saved to local storage');
         } catch (error) {
-          console.error('Error creating Firestore user on Google sign-in:', error);
+          console.error('🔵 [Google OAuth] ❌ Error creating Firestore user:', error);
         }
+      } else if (!isNewUser) {
+        console.log('🔵 [Google OAuth] ✅ EXISTING USER - Logging in');
       }
 
       // Fall back to local storage if Firestore doesn't have it
       if (!profile) {
+        console.log('🔵 [Google OAuth] Loading profile from local storage fallback...');
         const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
         profile = stored ? JSON.parse(stored) : {};
+        if (stored) {
+          console.log('🔵 [Google OAuth] Profile loaded from local storage');
+        } else {
+          console.log('🔵 [Google OAuth] No profile found in local storage either');
+        }
       }
 
-      setUser(mapUser(credential.user, profile));
+      const mappedUser = mapUser(credential.user, profile);
+      setUser(mappedUser);
+      console.log('🔵 [Google OAuth] ✅ Sign-in complete! User state updated:', {
+        uid: mappedUser.uid,
+        email: mappedUser.email,
+        name: mappedUser.name,
+        isNewUser: isNewUser,
+      });
       return credential.user;
     } catch (error) {
-      console.error('Google sign-in error:', error);
+      console.error('🔵 [Google OAuth] ❌ Sign-in error:', error);
+      console.error('🔵 [Google OAuth] Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+      });
+      throw error;
+    }
+  };
+
+  const signInWithApple = async () => {
+    console.log('🍎 [Apple OAuth] Starting Apple sign-in flow...');
+    console.log('🍎 [Apple OAuth] Platform:', Platform.OS);
+    
+    try {
+      let credential;
+
+      if (Platform.OS === 'web') {
+        console.log('🍎 [Apple OAuth] Using web popup method');
+        // Web: Use Firebase's Apple Auth Provider with popup
+        const provider = new firebase.auth.OAuthProvider('apple.com');
+        provider.addScope('email');
+        provider.addScope('name');
+        
+        console.log('🍎 [Apple OAuth] Opening Apple sign-in popup...');
+        credential = await auth.signInWithPopup(provider);
+        console.log('🍎 [Apple OAuth] Popup completed, credential received');
+      } else {
+        console.log('🍎 [Apple OAuth] Using native Apple Authentication');
+        // Native: Use expo-apple-authentication
+        const AppleAuthenticationModule = await import('expo-apple-authentication');
+        const AppleAuthentication = AppleAuthenticationModule.default || AppleAuthenticationModule;
+        
+        // Check if Apple Authentication is available
+        console.log('🍎 [Apple OAuth] Checking if Apple Authentication is available...');
+        const isAvailable = await AppleAuthentication.isAvailableAsync();
+        console.log('🍎 [Apple OAuth] Apple Authentication available:', isAvailable);
+        
+        if (!isAvailable) {
+          console.error('🍎 [Apple OAuth] ❌ Apple Sign-In not available on this device');
+          throw new Error('Apple Sign-In is not available on this device');
+        }
+
+        // Request authentication
+        console.log('🍎 [Apple OAuth] Requesting Apple authentication...');
+        const appleCredential = await AppleAuthentication.signInAsync({
+          requestedScopes: [
+            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+            AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          ],
+        });
+        console.log('🍎 [Apple OAuth] Apple authentication response received:', {
+          hasIdentityToken: !!appleCredential.identityToken,
+          hasAuthorizationCode: !!appleCredential.authorizationCode,
+          hasFullName: !!appleCredential.fullName,
+          hasEmail: !!appleCredential.email,
+        });
+
+        if (!appleCredential.identityToken) {
+          console.error('🍎 [Apple OAuth] ❌ No identity token received');
+          throw new Error('Apple Sign-In failed: No identity token received');
+        }
+
+        // Create Firebase credential from Apple identity token
+        console.log('🍎 [Apple OAuth] Creating Firebase credential from Apple token...');
+        const appleAuthCredential = firebase.auth.AppleAuthProvider.credential(
+          appleCredential.identityToken,
+          appleCredential.authorizationCode
+        );
+
+        console.log('🍎 [Apple OAuth] Signing in with Firebase credential...');
+        credential = await auth.signInWithCredential(appleAuthCredential);
+        console.log('🍎 [Apple OAuth] Firebase sign-in successful');
+
+        // Update user profile with name if provided (only on first sign-in)
+        if (credential.additionalUserInfo?.isNewUser && appleCredential.fullName) {
+          const displayName = appleCredential.fullName.givenName && appleCredential.fullName.familyName
+            ? `${appleCredential.fullName.givenName} ${appleCredential.fullName.familyName}`
+            : appleCredential.fullName.givenName || appleCredential.fullName.familyName || '';
+          
+          if (displayName) {
+            console.log('🍎 [Apple OAuth] Updating user display name:', displayName);
+            await credential.user.updateProfile({ displayName });
+          }
+        }
+      }
+
+      if (!credential || !credential.user) {
+        console.error('🍎 [Apple OAuth] ❌ No credential or user received');
+        throw new Error('Failed to sign in with Apple');
+      }
+
+      // Check if this is a new user or existing user
+      const isNewUser = credential.additionalUserInfo?.isNewUser || false;
+      console.log('🍎 [Apple OAuth] User info:', {
+        uid: credential.user.uid,
+        email: credential.user.email,
+        displayName: credential.user.displayName,
+        photoURL: credential.user.photoURL,
+        isNewUser: isNewUser,
+        providerId: credential.additionalUserInfo?.providerId,
+      });
+
+      // Try to load profile from Firestore
+      let profile = null;
+      if (db) {
+        try {
+          console.log('🍎 [Apple OAuth] Loading user profile from Firestore...');
+          const userDoc = await db.collection('users').doc(credential.user.uid).get();
+          if (userDoc.exists) {
+            console.log('🍎 [Apple OAuth] Existing user profile found in Firestore');
+            const userData = userDoc.data();
+            profile = {
+              name: userData.name || credential.user.displayName || '',
+              bio: userData.bio || '',
+              bggUsername: userData.bggUsername || '',
+              location: userData.location || '',
+              zipcode: userData.zipcode || userData.location || '',
+              notificationPreferences: userData.notificationPreferences || {
+                meepleupChanges: true,
+                meepleupChangesEmail: false,
+                gameMarking: true,
+                gameMarkingEmail: false,
+              },
+            };
+            // Save to local storage as backup
+            await storage.setItem(PROFILE_STORAGE_KEY(credential.user.uid), JSON.stringify(profile));
+            console.log('🍎 [Apple OAuth] Profile loaded and saved to local storage');
+          } else {
+            console.log('🍎 [Apple OAuth] No existing profile in Firestore');
+          }
+        } catch (firestoreError) {
+          console.error('🍎 [Apple OAuth] Error loading from Firestore:', firestoreError);
+        }
+      }
+
+      // If new user, create profile in Firestore
+      if (isNewUser && db) {
+        try {
+          console.log('🍎 [Apple OAuth] 🆕 NEW USER - Creating profile in Firestore...');
+          const userRef = db.collection('users').doc(credential.user.uid);
+          const defaultProfile = {
+            id: credential.user.uid,
+            email: credential.user.email,
+            name: credential.user.displayName || '',
+            bio: '',
+            bggUsername: '',
+            zipcode: '',
+            avatarUrl: credential.user.photoURL || '',
+            createdAt: firebase.firestore.Timestamp.now(),
+            updatedAt: firebase.firestore.Timestamp.now(),
+            notificationPreferences: {
+              meepleupChanges: true,
+              eventReminders: true,
+              eventReminderHours: 24,
+              gameMarking: true,
+            },
+          };
+          await userRef.set(defaultProfile);
+          console.log('🍎 [Apple OAuth] ✅ New user profile created in Firestore');
+          
+          // Also save to local storage
+          await saveProfile(credential.user.uid, {
+            name: credential.user.displayName || '',
+            bio: '',
+            bggUsername: '',
+            location: '',
+            zipcode: '',
+            notificationPreferences: defaultProfile.notificationPreferences,
+          });
+          console.log('🍎 [Apple OAuth] Profile saved to local storage');
+        } catch (error) {
+          console.error('🍎 [Apple OAuth] ❌ Error creating Firestore user:', error);
+        }
+      } else if (!isNewUser) {
+        console.log('🍎 [Apple OAuth] ✅ EXISTING USER - Logging in');
+      }
+
+      // Fall back to local storage if Firestore doesn't have it
+      if (!profile) {
+        console.log('🍎 [Apple OAuth] Loading profile from local storage fallback...');
+        const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
+        profile = stored ? JSON.parse(stored) : {};
+        if (stored) {
+          console.log('🍎 [Apple OAuth] Profile loaded from local storage');
+        } else {
+          console.log('🍎 [Apple OAuth] No profile found in local storage either');
+        }
+      }
+
+      const mappedUser = mapUser(credential.user, profile);
+      setUser(mappedUser);
+      console.log('🍎 [Apple OAuth] ✅ Sign-in complete! User state updated:', {
+        uid: mappedUser.uid,
+        email: mappedUser.email,
+        name: mappedUser.name,
+        isNewUser: isNewUser,
+      });
+      return credential.user;
+    } catch (error) {
+      console.error('🍎 [Apple OAuth] ❌ Sign-in error:', error);
+      console.error('🍎 [Apple OAuth] Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+      });
       throw error;
     }
   };
@@ -1000,6 +1248,7 @@ export const AuthProvider = ({ children }) => {
     signup,
     login,
     signInWithGoogle,
+    signInWithApple,
     logout,
     resendVerificationEmail,
     resetPassword,

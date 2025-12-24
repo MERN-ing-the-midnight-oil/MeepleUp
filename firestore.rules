@@ -309,23 +309,52 @@ service cloud.firestore {
         function conversationDoc() {
           return get(/databases/$(database)/documents/gamingGroups/$(groupId)/privateConversations/$(conversationId));
         }
-        function canAccessConversation() {
-          return isGroupMember(groupId) &&
-            request.auth.uid in (conversationDoc().data.participants || request.resource.data.participants || []);
+        // Helper to check if a participant is Beeple (system bot)
+        function isBeeple(participantId) {
+          return participantId == 'beeple';
         }
-        allow read: if isAuthenticated() && canAccessConversation();
-        allow create: if isAuthenticated() && canAccessConversation();
-        allow update, delete: if isAuthenticated() && canAccessConversation();
+        // Check if user can access an existing conversation (for read/update/delete)
+        function canAccessExistingConversation() {
+          let participants = conversationDoc().data.participants || [];
+          // Allow if user is a group member AND (user is in participants OR conversation includes Beeple)
+          return isGroupMember(groupId) && (
+            request.auth.uid in participants ||
+            isBeeple(participants[0]) || isBeeple(participants[1])
+          );
+        }
+        // Check if user can create a conversation (for create operations)
+        function canCreateConversation() {
+          let participants = request.resource.data.participants || [];
+          // Allow if user is a group member AND one participant is Beeple
+          // This allows members to create conversations with Beeple
+          return isGroupMember(groupId) && (
+            isBeeple(participants[0]) || isBeeple(participants[1])
+          );
+        }
+        allow read: if isAuthenticated() && canAccessExistingConversation();
+        // Allow creating conversations if user is a group member AND one participant is Beeple
+        allow create: if isAuthenticated() && canCreateConversation();
+        allow update, delete: if isAuthenticated() && canAccessExistingConversation();
 
         // Messages inside a conversation
         match /messages/{messageId} {
           function canAccessMessages() {
-            return isGroupMember(groupId) &&
-              request.auth.uid in (conversationDoc().data.participants || []);
+            let participants = conversationDoc().data.participants || [];
+            // Allow if user is a group member AND (user is in participants OR conversation includes Beeple)
+            return isGroupMember(groupId) && (
+              request.auth.uid in participants ||
+              'beeple' in participants
+            );
           }
+          // Allow reading if user can access the conversation
           allow read: if isAuthenticated() && canAccessMessages();
-          allow create: if isAuthenticated() && canAccessMessages() &&
-            request.resource.data.senderId == request.auth.uid;
+          // Allow creating messages if:
+          // - User can access messages AND
+          // - (sender is authenticated user OR sender is Beeple - allowing members to send as Beeple)
+          allow create: if isAuthenticated() && canAccessMessages() && (
+            request.resource.data.senderId == request.auth.uid ||
+            request.resource.data.senderId == 'beeple'
+          );
           // Allow sender to edit their message, or participants to mark read only
           allow update: if isAuthenticated() && canAccessMessages() &&
             (

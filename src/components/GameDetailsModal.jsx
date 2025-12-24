@@ -14,9 +14,9 @@ import { findGameSimilarities } from '../utils/gameSimilarities';
 import PersonalMatchSettings from '../components/PersonalMatchSettings';
 import BeepleAvatar from '../components/BeepleAvatar';
 import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
-import { calculateMatchScore } from '../utils/matchScore';
+import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 
-const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [] }) => {
+const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = new Set(), userProposalLimit = 5 }) => {
   const { user } = useAuth();
   const { updateGameInCollection, addGameToCollection, collections } = useCollections();
   const [bggData, setBggData] = useState(preloadedBggData);
@@ -105,8 +105,11 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   useEffect(() => {
     if (preloadedBggData) {
       setBggData(preloadedBggData);
+    } else if (game?._bggData) {
+      // Fallback to game._bggData if preloadedBggData is not provided
+      setBggData(game._bggData);
     }
-  }, [preloadedBggData, game?.id, game?.bggId]);
+  }, [preloadedBggData, game?._bggData, game?.id, game?.bggId]);
 
   // Load match score when game or eventId changes
   useEffect(() => {
@@ -137,7 +140,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
           }
           setMatchScore(storedScore);
         } else {
-          // Calculate on-demand if not stored
+          // Calculate on-demand if not stored - use same scoring system as BeepleRecommendations
           const userCollection = collections[userId] || [];
           if (userCollection.length > 0) {
             const gameWithBggData = {
@@ -145,7 +148,21 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               _bggData: bggData || preloadedBggData,
             };
             const customWeights = user?.personalMatchWeights || null;
-            const score = calculateMatchScore(gameWithBggData, userCollection, customWeights);
+            const weights = customWeights || {
+              publisher: 3,
+              mechanics: 3,
+              category: 2,
+              complexity: 1.5,
+              favorite: 2,
+            };
+            
+            // Use the same scoring system as BeepleRecommendations
+            const preCalculatedMatches = preCalculateAllMatches([gameWithBggData], userCollection);
+            const matches = preCalculatedMatches.get(String(gameId));
+            let score = null;
+            if (matches) {
+              score = calculateGameScore(matches, weights, gameWithBggData);
+            }
             
             // Debug logging to catch type issues
             if (score !== null && typeof score !== 'number' && typeof score !== 'string') {
@@ -159,7 +176,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
             
             setMatchScore(score);
             // Store it for future use (non-blocking)
-            if (score !== null && collections) {
+            if (score !== null && score > 0 && collections) {
               calculateMatchScoresForGame(eventId, gameId, gameWithBggData, collections, { [userId]: customWeights }).catch(err => {
                 console.warn('[GameDetailsModal] Error storing match score:', err);
               });
@@ -424,15 +441,91 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                 </Text>
               </View>
             )}
+            {/* Favorite Button - Upper Left Overlay */}
+            {userId && game && userOwnsGame && (
+              <TouchableOpacity
+                style={[
+                  styles.favoriteButtonOverlay,
+                  isFavorite && styles.favoriteButtonOverlayActive
+                ]}
+                onPress={handleFavoriteToggle}
+                activeOpacity={0.7}
+              >
+                <Animated.View
+                  style={{
+                    opacity: isFavorite ? shimmerOpacity : 1,
+                    transform: isFavorite ? [{ scale: shimmerScale }] : [],
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {isFavorite ? (
+                    <FontAwesome5 
+                      name="heart" 
+                      size={16} 
+                      solid={true}
+                      color="#FFD700"
+                    />
+                  ) : (
+                    <DottedHeart size={16} color="#FFFFFF" />
+                  )}
+                  <Text style={[
+                    styles.favoriteButtonOverlayText,
+                    isFavorite && styles.favoriteButtonOverlayTextActive
+                  ]}>
+                    Favorite
+                  </Text>
+                </Animated.View>
+              </TouchableOpacity>
+            )}
           </View>
+
+          {/* Propose Game Button - Just Below Image */}
+          {onProposeGame && userId && (
+            <View style={styles.proposeButtonContainer}>
+              {(() => {
+                const gameId = String(game.bggId || game.id);
+                const isProposed = userProposals.has(gameId);
+                const canPropose = userProposals.size < userProposalLimit || isProposed;
+                
+                if (!isProposed && canPropose) {
+                  return (
+                    <TouchableOpacity
+                      style={styles.proposeButton}
+                      onPress={() => {
+                        onProposeGame(game);
+                        onClose();
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.proposeButtonText}>Propose this game for the next meeting</Text>
+                    </TouchableOpacity>
+                  );
+                } else if (isProposed) {
+                  return (
+                    <View style={styles.proposedBadge}>
+                      <Text style={styles.proposedBadgeText}>Proposed</Text>
+                    </View>
+                  );
+                }
+                return (
+                  <View style={styles.proposeLimitReached}>
+                    <Text style={styles.proposeLimitReachedText}>
+                      You've reached the limit of {userProposalLimit} proposed game{userProposalLimit !== 1 ? 's' : ''}. Remove a proposal to propose another game.
+                    </Text>
+                  </View>
+                );
+              })()}
+            </View>
+          )}
 
           {/* Game Details */}
           <View style={styles.modalDetails}>
             {/* Match Score */}
-            {matchScore !== null && matchScore !== undefined && userId && (
+            {matchScore !== null && matchScore !== undefined && userId && !isFavorite && (
               <View style={styles.matchScoreContainer}>
                 <Text style={styles.matchScoreLabel}>💘 Match Score</Text>
-                <Text style={styles.matchScoreValue}>{String(matchScore)}</Text>
+                <Text style={styles.matchScoreValue}>{Math.round(matchScore)}</Text>
                 <Text style={styles.matchScoreDescription}>
                   Based on your collection and preferences
                 </Text>
@@ -513,12 +606,56 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
+            {/* Mechanics */}
+            {bggData?.mechanics && Array.isArray(bggData.mechanics) && bggData.mechanics.length > 0 && (
+              <View style={styles.modalBadgesContainer}>
+                <Text style={[styles.modalMetaLabel, { marginBottom: 8 }]}>Mechanics:</Text>
+                <View style={styles.modalBadges}>
+                  {bggData.mechanics.map((mechanic, index) => (
+                    <View key={index} style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>{mechanic}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Publisher */}
+            {(bggData?.publisher || bggData?.publishers) && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Publisher:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {bggData.publisher || (Array.isArray(bggData.publishers) && bggData.publishers.length > 0 ? bggData.publishers.join(', ') : '')}
+                </Text>
+              </View>
+            )}
+
+            {/* Designer */}
+            {bggData?.designers && Array.isArray(bggData.designers) && bggData.designers.length > 0 && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Designer:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {bggData.designers.join(', ')}
+                </Text>
+              </View>
+            )}
+
+            {/* Complexity/Weight */}
+            {bggData?.averageWeight && typeof bggData.averageWeight === 'number' && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Complexity:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {bggData.averageWeight.toFixed(1)} / 5.0
+                </Text>
+              </View>
+            )}
+
             {/* Description */}
-            {bggData?.description && typeof bggData.description === 'string' && (
+            {(bggData?.description || game?.description) && typeof (bggData?.description || game?.description) === 'string' && (
               <View style={styles.modalDescription}>
                 <Text style={[styles.modalMetaLabel, { marginBottom: 8 }]}>Description:</Text>
                 <Text style={styles.modalDescriptionText}>
-                  {bggData.description.replace(/<[^>]*>/g, '')}
+                  {(bggData?.description || game?.description || '').replace(/<[^>]*>/g, '')}
                 </Text>
               </View>
             )}
@@ -594,52 +731,6 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
-            {/* Favorite Section - Only show if user owns the game */}
-            {userId && game && userOwnsGame && (
-              <View style={styles.modalTeachingSection}>
-                <Text style={[styles.modalMetaLabel, { marginBottom: 12 }]}>
-                  Mark as Favorite
-                </Text>
-                <Text style={styles.modalTeachingHint}>
-                  Mark this game as a favorite to help others discover games you love.
-                </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.favoriteButton,
-                    isFavorite && styles.favoriteButtonActive
-                  ]}
-                  onPress={handleFavoriteToggle}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.favoriteButtonContent}>
-                    <Animated.View
-                      style={{
-                        opacity: isFavorite ? shimmerOpacity : 1,
-                        transform: isFavorite ? [{ scale: shimmerScale }] : [],
-                      }}
-                    >
-                      {isFavorite ? (
-                        <FontAwesome5 
-                          name="heart" 
-                          size={16} 
-                          solid={true}
-                          color="#FFD700"
-                          style={styles.favoriteButtonIcon}
-                        />
-                      ) : (
-                        <DottedHeart size={16} color="#555555" />
-                      )}
-                    </Animated.View>
-                    <Text style={[
-                      styles.favoriteButtonText,
-                      isFavorite && styles.favoriteButtonTextActive
-                    ]}>
-                      {isFavorite ? 'Favorite' : 'Mark as Favorite'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -722,6 +813,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 300,
     backgroundColor: '#f5f5f5',
+    position: 'relative',
   },
   modalThumbnail: {
     width: '100%',
@@ -782,6 +874,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  modalBadgeItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#e8f4fd',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4a90e2',
+  },
+  modalBadgeText: {
+    fontSize: 12,
+    color: '#4a90e2',
+    fontWeight: '500',
   },
   modalDescription: {
     marginTop: 8,
@@ -903,36 +1008,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
   },
-  favoriteButton: {
-    padding: 16,
-    borderRadius: 12,
+  favoriteButtonOverlay: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    minWidth: 80,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
     borderWidth: 2,
-    borderColor: '#e0e0e0',
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  favoriteButtonActive: {
-    borderColor: '#FFD700',
-    backgroundColor: '#FFF9E6',
-  },
-  favoriteButtonContent: {
+    borderColor: 'rgba(255, 255, 255, 0.3)',
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    gap: 6,
   },
-  favoriteButtonIcon: {
-    marginRight: 4,
+  favoriteButtonOverlayActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderColor: '#FFD700',
   },
-  favoriteButtonText: {
-    fontSize: 16,
+  favoriteButtonOverlayText: {
+    fontSize: 12,
     fontWeight: '600',
-    color: '#555555', // Darker grey when not liked
+    color: '#FFFFFF',
+    marginLeft: 4,
   },
-  favoriteButtonTextActive: {
-    color: '#FFD700', // Gold color when liked
+  favoriteButtonOverlayTextActive: {
+    color: '#333333',
   },
   modalOwnerSection: {
     marginTop: 16,
@@ -1025,7 +1129,7 @@ const styles = StyleSheet.create({
   matchScoreContainer: {
     backgroundColor: '#FFF9E6',
     borderRadius: 8,
-    padding: 16,
+    padding: 8,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#FFD700',
@@ -1045,6 +1149,55 @@ const styles = StyleSheet.create({
   },
   matchScoreDescription: {
     fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  proposeButtonContainer: {
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  proposeButton: {
+    backgroundColor: '#4a90e2',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  proposeButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  proposedBadge: {
+    backgroundColor: '#28a745',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  proposedBadgeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  proposeLimitReached: {
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  proposeLimitReachedText: {
+    fontSize: 14,
     color: '#666',
     textAlign: 'center',
   },

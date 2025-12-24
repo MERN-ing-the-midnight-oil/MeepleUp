@@ -26,6 +26,8 @@ const CalendarDatePicker = ({
   readOnly = false,
   showEditIcon = false,
   onEditIconPress,
+  memberRSVPs = {}, // { [userId]: { [dateKey]: status } }
+  currentUserId = null, // Current user's ID to show their RSVP status
 }) => {
   // Use local dates consistently - no UTC
   const today = new Date();
@@ -35,16 +37,73 @@ const CalendarDatePicker = ({
   const startYear = today.getFullYear();
   
   const [currentMonthIndex, setCurrentMonthIndex] = useState(0);
-  const [isInitialized, setIsInitialized] = useState(false);
   const scrollViewRef = useRef(null);
   
-  // Storage key for persisting the last viewed month
+  // Storage keys for persisting the last viewed month (only used during active use)
   const STORAGE_KEY = 'calendar_last_month_index';
+  const STORAGE_TIMESTAMP_KEY = 'calendar_last_month_timestamp';
+  const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes - consider it same session
+  const userInteractedRef = useRef(false);
+  const isInitialMountRef = useRef(true);
 
   // Helper function to convert date to key - use LOCAL time components
   const dateToKey = (date) => {
     const d = new Date(date);
     return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  };
+
+  // Helper function to format date as YYYY-MM-DD matching EventHub's getDateKey format
+  // This uses UTC to match how dates are stored in memberRSVPs
+  const formatDateKey = (date) => {
+    const d = new Date(date);
+    // Convert to UTC to match EventHub's getDateKey which uses toISOString()
+    // This ensures we match the date keys stored in memberRSVPs
+    return d.toISOString().split('T')[0];
+  };
+
+  // Helper function to get RSVP status for a date (for current user)
+  const getRSVPStatusForDate = (date) => {
+    if (!currentUserId || !memberRSVPs[currentUserId]) return null;
+    const userRSVPs = memberRSVPs[currentUserId];
+    // Handle both old string format and new object format
+    if (typeof userRSVPs === 'string') {
+      // Old format: single status - this is not date-specific, so don't show on calendar
+      // Only show date-specific RSVPs on the calendar
+      return null;
+    }
+    // New format: object with date keys (YYYY-MM-DD format)
+    // The calendar date is in local time. We need to match how EventHub's getDateKey works.
+    // EventHub's getDateKey uses: date.toISOString().split('T')[0]
+    // However, this can cause timezone issues. To fix this, we format using local date components
+    // which matches what the calendar displays. We also check the UTC format for backward compatibility.
+    const localDate = new Date(date);
+    localDate.setHours(0, 0, 0, 0);
+    
+    // Format using local date components (YYYY-MM-DD) - this is what the calendar shows
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, '0');
+    const day = String(localDate.getDate()).padStart(2, '0');
+    const localDateKey = `${year}-${month}-${day}`;
+    
+    // Also try UTC format for backward compatibility with existing data
+    const utcDateKey = localDate.toISOString().split('T')[0];
+    
+    // Check both formats - prefer local format first, then UTC format
+    return userRSVPs[localDateKey] || userRSVPs[utcDateKey] || null;
+  };
+
+  // Helper function to get RSVP icon
+  const getRSVPIcon = (status) => {
+    switch (status) {
+      case 'going':
+        return '✅';
+      case 'maybe':
+        return '🤔';
+      case 'not-going':
+        return '❌';
+      default:
+        return null;
+    }
   };
 
   // Create a map of date keys to date objects with times
@@ -169,16 +228,28 @@ const CalendarDatePicker = ({
   const availableWidth = screenWidth;
   const dayWidth = Math.floor(availableWidth / 7); // Each day gets exactly 1/7 of width
 
-  // Load saved month index on mount
+  const isRestoringRef = useRef(false);
+
+  // On mount, restore saved month only if it was saved recently (user was actively using calendar)
   useEffect(() => {
-    const loadSavedMonth = async () => {
+    const restoreSavedMonth = async () => {
+      if (!isInitialMountRef.current) return; // Only run on initial mount
+      
       try {
         const savedIndex = await storage.getItem(STORAGE_KEY);
-        if (savedIndex !== null) {
+        const savedTimestamp = await storage.getItem(STORAGE_TIMESTAMP_KEY);
+        
+        if (savedIndex !== null && savedTimestamp !== null) {
           const index = parseInt(savedIndex, 10);
-          // Validate that the index is within bounds (we always generate 12 months)
-          const maxMonths = 12;
-          if (index >= 0 && index < maxMonths) {
+          const timestamp = parseInt(savedTimestamp, 10);
+          const now = Date.now();
+          const timeSinceSave = now - timestamp;
+          
+          // Only restore if saved within session timeout (user was actively using calendar)
+          if (timeSinceSave < SESSION_TIMEOUT_MS && index >= 0 && index < months.length) {
+            isRestoringRef.current = true;
+            // Mark as interacted so we can save future changes
+            userInteractedRef.current = true;
             setCurrentMonthIndex(index);
             // Scroll to the saved position after a brief delay to ensure layout is complete
             setTimeout(() => {
@@ -186,25 +257,34 @@ const CalendarDatePicker = ({
                 x: index * screenWidth,
                 animated: false,
               });
+              // Clear restore flag and mark initial mount as complete after scroll
+              setTimeout(() => {
+                isRestoringRef.current = false;
+                isInitialMountRef.current = false;
+              }, 200);
             }, 100);
+            return; // Exit early, don't set isInitialMountRef to false below
           }
         }
+        
+        // No valid restore (or no saved data), mark initial mount as complete
+        isInitialMountRef.current = false;
       } catch (error) {
-        console.error('Error loading saved month index:', error);
-      } finally {
-        setIsInitialized(true);
+        console.error('Error restoring saved month index:', error);
+        isInitialMountRef.current = false;
       }
     };
     
-    loadSavedMonth();
+    restoreSavedMonth();
   }, []); // Only run on mount
 
-  // Save month index whenever it changes (but not on initial load)
+  // Save month index when user actively navigates (not on initial load or restore)
   useEffect(() => {
-    if (isInitialized) {
+    if (userInteractedRef.current && !isInitialMountRef.current && !isRestoringRef.current) {
       const saveMonthIndex = async () => {
         try {
           await storage.setItem(STORAGE_KEY, currentMonthIndex.toString());
+          await storage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString());
         } catch (error) {
           console.error('Error saving month index:', error);
         }
@@ -212,12 +292,13 @@ const CalendarDatePicker = ({
       
       saveMonthIndex();
     }
-  }, [currentMonthIndex, isInitialized]);
+  }, [currentMonthIndex]);
 
   const handleScroll = (event) => {
     const offsetX = event.nativeEvent.contentOffset.x;
     const newIndex = Math.round(offsetX / screenWidth);
-    if (newIndex >= 0 && newIndex < months.length) {
+    if (newIndex >= 0 && newIndex < months.length && newIndex !== currentMonthIndex) {
+      userInteractedRef.current = true;
       setCurrentMonthIndex(newIndex);
     }
   };
@@ -225,6 +306,7 @@ const CalendarDatePicker = ({
   const goToPreviousMonth = () => {
     if (currentMonthIndex > 0) {
       const newIndex = currentMonthIndex - 1;
+      userInteractedRef.current = true;
       setCurrentMonthIndex(newIndex);
       scrollViewRef.current?.scrollTo({
         x: newIndex * screenWidth,
@@ -236,6 +318,7 @@ const CalendarDatePicker = ({
   const goToNextMonth = () => {
     if (currentMonthIndex < months.length - 1) {
       const newIndex = currentMonthIndex + 1;
+      userInteractedRef.current = true;
       setCurrentMonthIndex(newIndex);
       scrollViewRef.current?.scrollTo({
         x: newIndex * screenWidth,
@@ -349,6 +432,8 @@ const CalendarDatePicker = ({
                 const isToday = dateToKey(date) === todayKey;
                 const dateInfo = isSelected ? getDateInfo(date) : null;
                 const holiday = getHolidayForDate(date);
+                const rsvpStatus = getRSVPStatusForDate(date);
+                const rsvpIcon = getRSVPIcon(rsvpStatus);
 
                 return (
                   <TouchableOpacity
@@ -361,33 +446,43 @@ const CalendarDatePicker = ({
                       isDisabled && styles.disabledCellWrapper,
                     ]}
                     onPress={() => {
-                      if (!isDisabled && readOnly && isSelected && dateInfo && onDatePress) {
+                      // If date is selected and onDatePress callback exists, call it
+                      // This allows editing the date's time, location, and note
+                      console.log('[CalendarDatePicker] Date pressed:', {
+                        isDisabled,
+                        isSelected,
+                        hasDateInfo: !!dateInfo,
+                        hasOnDatePress: !!onDatePress,
+                        dateKey: dateToKey(date)
+                      });
+                      
+                      if (!isDisabled && isSelected && dateInfo && onDatePress) {
                         const dateKey = dateToKey(date);
                         const index = selectedDates.findIndex(d => {
                           const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
                           return dKey === dateKey;
                         });
+                        console.log('[CalendarDatePicker] Found index:', index, 'for dateKey:', dateKey);
                         if (index !== -1) {
+                          console.log('[CalendarDatePicker] Calling onDatePress with index:', index);
                           onDatePress(index, {
                             date: dateInfo.date,
                             startTime: dateInfo.startTime,
                             endTime: dateInfo.endTime,
                           });
+                        } else {
+                          console.warn('[CalendarDatePicker] Could not find index for dateKey:', dateKey);
                         }
-                      } else if (!isDisabled && !readOnly && isSelected && dateInfo && onDatePress) {
-                        const dateKey = dateToKey(date);
-                        const index = selectedDates.findIndex(d => {
-                          const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
-                          return dKey === dateKey;
+                      } else {
+                        console.log('[CalendarDatePicker] Conditions not met:', {
+                          isDisabled,
+                          isSelected,
+                          hasDateInfo: !!dateInfo,
+                          hasOnDatePress: !!onDatePress
                         });
-                        if (index !== -1) {
-                          onDatePress(index, {
-                            date: dateInfo.date,
-                            startTime: dateInfo.startTime,
-                            endTime: dateInfo.endTime,
-                          });
-                        }
                       }
+                      // If date is not selected and not readOnly, toggle it (for long press)
+                      // Regular tap on unselected date does nothing - use long press to select
                     }}
                     onLongPress={() => {
                       if (!isDisabled && !readOnly) {
@@ -423,6 +518,11 @@ const CalendarDatePicker = ({
                             size={16}
                           />
                         </View>
+                      )}
+                      {rsvpIcon && (
+                        <Text style={styles.rsvpIcon}>
+                          {rsvpIcon}
+                        </Text>
                       )}
                       {isSelected && showEditIcon && onEditIconPress && (
                         <TouchableOpacity
@@ -586,6 +686,11 @@ const styles = StyleSheet.create({
   },
   editIconText: {
     fontSize: 12,
+  },
+  rsvpIcon: {
+    fontSize: 14,
+    marginTop: 2,
+    textAlign: 'center',
   },
 });
 
