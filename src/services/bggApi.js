@@ -9,33 +9,51 @@ const BGG_API_BASE = 'https://boardgamegeek.com/xmlapi2';
 
 // Rate limiting: Track API calls to avoid being flagged as heavy user
 let lastApiCallTime = 0;
-const MIN_API_CALL_INTERVAL_BULK = 1500; // 1.5 seconds for bulk operations (imports, batch calls)
+const MIN_API_CALL_INTERVAL_BULK = 2000; // 2 seconds for bulk operations (increased from 1.5s)
+const MIN_API_CALL_INTERVAL_NORMAL = 500; // 0.5 seconds for normal operations
 
 /**
  * Rate limiter for BGG API calls
  * Only applies rate limiting to bulk operations - user-driven actions rely on natural user delays
- * @param {boolean} isBulkOperation - If true, uses 1.5s delay, otherwise no delay (user-driven)
+ * @param {boolean} isBulkOperation - If true, uses 2s delay, otherwise 0.5s delay
  * @returns {Promise<void>} Resolves when it's safe to make an API call
  */
 async function rateLimitAPI(isBulkOperation = false) {
-  // No rate limiting for user-driven actions - natural user interaction provides spacing
-  if (!isBulkOperation) {
-    return;
-  }
-  
-  // Only rate limit bulk operations
   const now = Date.now();
   const timeSinceLastCall = now - lastApiCallTime;
+  const minInterval = isBulkOperation ? MIN_API_CALL_INTERVAL_BULK : MIN_API_CALL_INTERVAL_NORMAL;
   
-  if (timeSinceLastCall < MIN_API_CALL_INTERVAL_BULK) {
-    const waitTime = MIN_API_CALL_INTERVAL_BULK - timeSinceLastCall;
-    if (__DEV__) {
+  if (timeSinceLastCall < minInterval) {
+    const waitTime = minInterval - timeSinceLastCall;
+    if (__DEV__ && isBulkOperation) {
       console.log(`[BGG API] Rate limiting bulk operation: waiting ${waitTime}ms`);
     }
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
   
   lastApiCallTime = Date.now();
+}
+
+/**
+ * Handle 429 rate limit errors with exponential backoff
+ * @param {Response} response - The HTTP response
+ * @param {Function} retryFn - Function to retry the request
+ * @param {number} retryCount - Current retry attempt (starts at 0)
+ * @param {number} maxRetries - Maximum number of retries (default: 3)
+ * @returns {Promise<Response>} The response after retries
+ */
+async function handle429WithRetry(response, retryFn, retryCount = 0, maxRetries = 3) {
+  if (response.status === 429 && retryCount < maxRetries) {
+    // Exponential backoff: 5s, 10s, 20s
+    const backoffMs = 5000 * Math.pow(2, retryCount);
+    if (__DEV__) {
+      console.log(`[BGG API] Rate limited (429), waiting ${backoffMs}ms before retry ${retryCount + 1}/${maxRetries}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, backoffMs));
+    const retryResponse = await retryFn();
+    return handle429WithRetry(retryResponse, retryFn, retryCount + 1, maxRetries);
+  }
+  return response;
 }
 
 /**
@@ -247,28 +265,43 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
         console.log(`[BGG API] Batch fetching ${batch.length} games`);
       }
       
-      let response = await fetch(url, {
-        headers: Object.keys(headers).length > 0 ? headers : undefined,
-      });
+      // Helper function to retry the fetch
+      const fetchWithRetry = async () => {
+        return await fetch(url, {
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
+        });
+      };
       
-      // Handle auth fallbacks
+      let response = await fetchWithRetry();
+      
+      // Handle 429 rate limit errors with exponential backoff
+      response = await handle429WithRetry(response, fetchWithRetry);
+      
+      // Handle auth fallbacks (after 429 retries)
       if (response.status === 401 && token) {
         const urlWithToken = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1&token=${token}`;
+        const fetchWithTokenRetry = async () => await fetch(urlWithToken);
         response = await fetch(urlWithToken);
+        response = await handle429WithRetry(response, fetchWithTokenRetry);
         
         if (response.status === 401 || response.status === 403) {
           const urlNoAuth = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1`;
+          const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
           response = await fetch(urlNoAuth);
+          response = await handle429WithRetry(response, fetchNoAuthRetry);
         }
       } else if (response.status === 401 && !token) {
         const urlNoAuth = `${BGG_API_BASE}/thing?id=${batchIds}&stats=1`;
+        const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
         response = await fetch(urlNoAuth);
+        response = await handle429WithRetry(response, fetchNoAuthRetry);
       }
       
       if (!response.ok) {
         if (__DEV__) {
-          console.warn(`[BGG API] Batch fetch failed with status ${response.status}`);
+          console.warn(`[BGG API] Batch fetch failed with status ${response.status} after retries`);
         }
+        // If still failing after retries, skip this batch and continue
         continue;
       }
       
@@ -299,9 +332,9 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
         }
       }
       
-      // Wait 1.5 seconds between batches (bulk operation)
+      // Wait 3 seconds between batches (increased from 1.5s to be more conservative)
       if (i + BATCH_SIZE < gameIds.length) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
     } catch (error) {
       if (__DEV__) {
@@ -361,13 +394,21 @@ export async function fetchBGGGameDetails(gameId) {
       console.log('[BGG API] Fetching:', url);
     }
     
-    let response = await fetch(url, {
-      headers: Object.keys(headers).length > 0 ? headers : undefined,
-    });
+    // Helper function to retry the fetch
+    const fetchWithRetry = async () => {
+      return await fetch(url, {
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+      });
+    };
+    
+    let response = await fetchWithRetry();
     
     if (__DEV__) {
       console.log('[BGG API] Initial response status:', response.status);
     }
+    
+    // Handle 429 rate limit errors with exponential backoff
+    response = await handle429WithRetry(response, fetchWithRetry);
     
     // If header auth fails with 401, try token as query parameter
     if (response.status === 401 && token) {
@@ -375,7 +416,9 @@ export async function fetchBGGGameDetails(gameId) {
         console.log('[BGG API] Header auth failed (401), trying token as query parameter');
       }
       const urlWithToken = `${BGG_API_BASE}/thing?id=${gameId}&stats=1&token=${token}`;
+      const fetchWithTokenRetry = async () => await fetch(urlWithToken);
       response = await fetch(urlWithToken);
+      response = await handle429WithRetry(response, fetchWithTokenRetry);
       
       if (__DEV__) {
         console.log('[BGG API] Query param response status:', response.status);
@@ -387,7 +430,9 @@ export async function fetchBGGGameDetails(gameId) {
           console.log('[BGG API] Token query param also failed, trying without auth');
         }
         const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
+        const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
         response = await fetch(urlNoAuth);
+        response = await handle429WithRetry(response, fetchNoAuthRetry);
         
         if (__DEV__) {
           console.log('[BGG API] No auth response status:', response.status);
@@ -399,7 +444,9 @@ export async function fetchBGGGameDetails(gameId) {
         console.log('[BGG API] No token configured, trying without auth');
       }
       const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
+      const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
       response = await fetch(urlNoAuth);
+      response = await handle429WithRetry(response, fetchNoAuthRetry);
       
       if (__DEV__) {
         console.log('[BGG API] No auth response status:', response.status);
@@ -407,9 +454,9 @@ export async function fetchBGGGameDetails(gameId) {
     }
     
     if (!response.ok) {
-      // If we still have errors after all fallbacks, log and return null
+      // If we still have errors after all fallbacks and retries, log and return null
       if (__DEV__) {
-        console.warn(`[BGG API] All authentication methods failed. Final status: ${response.status}`);
+        console.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
       }
       // Don't throw - return null so the app can continue
       return null;

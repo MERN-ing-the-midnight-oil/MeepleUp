@@ -77,7 +77,7 @@ const JoinForm = ({
       </View>
       
       <Button
-        label={loading ? 'Joining...' : 'Join MeepleUp'}
+        label={loading ? 'Joining...' : 'Join'}
         onPress={onJoin}
         disabled={loading || !joinCodeWord1?.trim() || !joinCodeWord2?.trim() || !joinCodeWord3?.trim()}
         style={styles.joinButton}
@@ -134,9 +134,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: theme.spacing.sm,
     marginBottom: theme.spacing.lg,
+    width: '100%', // Ensure container takes full width
+    flexWrap: 'nowrap', // Prevent wrapping
   },
   holeWrapper: {
-    flex: 1,
     // Wood background - looks like hole showing the wood table beneath
     backgroundColor: '#d4b896', // Wood table base color
     // Match the card's bottom and left border styling on top and right
@@ -150,6 +151,8 @@ const styles = StyleSheet.create({
     padding: theme.spacing.sm, // Padding so wood shows around white rectangles
     justifyContent: 'center',
     alignItems: 'flex-start',
+    flex: 1, // Make each field take equal space
+    minWidth: 0, // Allow flex items to shrink below their content size
   },
   whiteRectangle: {
     // White rectangle that contains the text - sized to fit content
@@ -157,8 +160,8 @@ const styles = StyleSheet.create({
     borderRadius: 0, // Sharp corners
     paddingHorizontal: 3, // Just a few pixels
     paddingVertical: 3, // Just a few pixels
-    alignSelf: 'flex-start', // Size to content width
-    minWidth: 60, // Minimum width for placeholder visibility
+    width: '100%', // Take full width of parent
+    minWidth: 90, // Minimum width for placeholder visibility and longer words
     // Thin black borders on left and bottom
     borderLeftWidth: 1,
     borderBottomWidth: 1,
@@ -184,9 +187,13 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     // Ensure no opacity is applied
     opacity: 1,
+    width: '100%', // Take full width of parent
+    flex: 1, // Allow input to flex within its container
   },
   joinButton: {
-    width: '100%',
+    alignSelf: 'center',
+    width: 'auto',
+    paddingHorizontal: theme.spacing.xl,
   },
 });
 

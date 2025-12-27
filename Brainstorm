@@ -1,13 +1,23 @@
+https://boardgamegeek.com/collection/user/vnemecek
+
 New Test Users Created:
-Alice - alice@email.com
-    clean greek hunter
+
 Bob - bob@email.com
    
     timid orange demon
 Charlie - charlie@email.com
+wise gold unicorn
 Diana - diana@email.com
+
 Eve - eve@email.com
+huge greek beast
+
 Frank - frank@email.com
+
+
+Tagline
+MeepleUp lets board game friends asychronously prepare for their upcoming tabletop game day/night by browsing each-other's home collections, suggesting games from their own or their friend's collections, and weighing in on each-others suggested games. It also lets game day hosts manage calendar and RSVP logistics. Users can get novel game suggestions from Beeple, MeepleUp's friendly game comparison bot with the goal of finding your next favorite game hidden in the back of a friend's game shelf.
+
 
 
 Priorities
@@ -117,3 +127,224 @@ Note: The API calls use stats=1 parameter to include rating statistics. Search r
 
 
 Have slider controls for how much I like "publisher, theme, mechanics...  for beeple to use to give games a vibe score
+
+
+================================================================================
+LARGE COLLECTION HANDLING - ANALYSIS & STRATEGIES
+================================================================================
+
+CURRENT STATE ASSESSMENT:
+
+✅ GOOD - What's Already Working:
+1. Image Loading (Lazy):
+   - Game thumbnails are stored as URLs (not downloaded)
+   - Images load lazily via React Native Image component when rendered
+   - FlatList virtualization means only visible images load
+   - This is already optimized! ✅
+
+2. Display Pagination:
+   - FlatList has virtualization enabled:
+     * maxToRenderPerBatch={10}
+     * initialNumToRender={5}
+     * windowSize={10}
+   - Only renders visible items, so displaying 1000+ games is fine ✅
+
+3. Batch API Calls:
+   - BGG import uses batch API (50 games per call)
+   - Has rate limiting (1.5s between batches)
+   - Checks Firestore cache first to avoid redundant API calls ✅
+
+4. Local Storage:
+   - Collections stored in localStorage for offline access
+   - This is reasonable even for large collections (JSON is compressed) ✅
+
+⚠️ CONCERNS - Areas That Could Be Problematic:
+
+1. CollectionScreen Data Enrichment (CRITICAL ISSUE):
+   - Line 126-258: On mount, enriches ALL games with BGG data
+   - Uses Promise.all() to fetch data for every game simultaneously
+   - For 1000 games, this could:
+     * Create 1000+ Firestore/API requests on mount
+     * Take minutes to complete
+     * Block the UI or cause memory issues
+   - FIX NEEDED: Only enrich games that are visible or about to be visible
+
+2. CollectionsContext Memory Usage:
+   - Stores entire collection in React state (collections object)
+   - Stores entire collection in localStorage
+   - For 1000 games: ~500KB-2MB depending on data size
+   - This is acceptable for now, but could optimize later
+
+3. BGG Collection Fetch:
+   - fetchBGGCollection() fetches entire collection in one XML response
+   - BGG API returns all items at once (no pagination on their side)
+   - Large collections could result in very large XML responses (10MB+)
+   - Current implementation loads entire response into memory
+   - This is a BGG API limitation, but our code handles it
+
+4. Initial Load Performance:
+   - CollectionsContext loads from localStorage on mount (fast)
+   - But then CollectionScreen enriches all games immediately (slow for large collections)
+   - Users with 1000+ games will see slow initial load
+
+5. Firestore Query:
+   - CollectionsContext syncs entire collection from Firestore:
+     `db.collection('userGames').doc(userId).collection('games').get()`
+   - Firestore limit is 1MB per query response
+   - Very large collections might hit this limit
+   - Would need pagination or limit queries
+
+================================================================================
+STRATEGIES FOR HANDLING LARGE COLLECTIONS
+================================================================================
+
+PRIORITY 1: Fix Data Enrichment in BOTH Screens (CRITICAL)
+
+AFFECTS TWO LOCATIONS:
+
+1. CollectionScreen (User's Own Collection)
+   Location: src/screens/CollectionScreen.jsx, lines 126-258
+   Current Problem:
+     - Enriches ALL games on mount using Promise.all()
+     - For 1000 games, could be 1000+ Firestore/API calls
+     - Blocks UI on initial load
+
+2. BrowseAndProposeScreen (Meepleup Super-Collection)
+   Location: src/screens/BrowseAndProposeScreen.jsx, lines 404-452
+   Current Problem:
+     - useEffect loads BGG data for ALL aggregated games
+     - Uses Promise.all() to fetch data for all games in parallel
+     - For a meepleup with 10 users × 200 games each = 2000 games
+     - Could trigger 2000+ API calls on mount
+
+Both screens have the SAME ISSUE: They enrich all games at once instead of lazily.
+
+Solution: Lazy Enrichment (Same fix for both screens)
+  1. Only enrich games that are visible or near-visible (using FlatList callbacks)
+  2. Use intersection observer or FlatList's onViewableItemsChanged
+  3. Enrich in batches of 20-50 games at a time
+  4. Cache enriched data to avoid re-fetching
+
+Implementation:
+  - Use FlatList's onViewableItemsChanged to track visible items
+  - When items become visible, enrich them in batches
+  - Pre-enrich next batch while user is viewing current batch
+  - Store enriched data in a separate cache (not in main state)
+
+Alternative: Virtualized Enrichment
+  - Only enrich first 50-100 games on mount
+  - Enrich additional games as user scrolls
+  - Use a separate enrichment queue/cache
+
+Note: The super-collection could be even MORE problematic because:
+  - Multiple users' collections combined = potentially thousands of unique games
+  - All games enriched simultaneously = huge API load
+  - Could cause timeout/rate limiting issues
+
+PRIORITY 2: Optimize Firestore Queries (IMPORTANT)
+
+Current Approach:
+  - Fetches entire collection in one query
+  - Could hit Firestore 1MB limit for very large collections
+
+Solutions:
+  1. Add pagination to Firestore queries
+  2. Use limit() and startAfter() for pagination
+  3. Load games in batches of 500-1000
+  4. Consider using Firestore's pagination cursor
+
+Implementation:
+  - Modify CollectionsContext to support paginated loading
+  - Load first 500 games on mount
+  - Load additional games as needed (when user scrolls near end)
+  - Or load all games but in batches (user doesn't need to wait)
+
+PRIORITY 3: Optimize Memory Usage (OPTIONAL - Lower Priority)
+
+Current Approach:
+  - Stores full collection in memory and localStorage
+  - For 1000 games: ~500KB-2MB (acceptable)
+
+Potential Optimizations:
+  1. Store minimal data in localStorage (IDs only, fetch full data on demand)
+  2. Use IndexedDB instead of localStorage for better performance
+  3. Implement a LRU cache for game data
+  4. Only keep frequently accessed games in memory
+
+PRIORITY 4: BGG Import Performance (ALREADY GOOD)
+
+Current Implementation:
+  - Uses batch API calls (50 games per batch)
+  - 1.5s delay between batches
+  - Checks Firestore cache first
+
+For 1000 games:
+  - 20 batches needed
+  - ~30 seconds just for delays
+  - Plus API call time
+  - Total: ~2-5 minutes (acceptable for import)
+
+Optimizations (if needed):
+  1. Increase batch size if BGG allows (currently 50)
+  2. Parallel batch calls (with careful rate limiting)
+  3. Show progress indicator (already implemented)
+  4. Allow background import (already does this)
+
+PRIORITY 5: Add Collection Size Limits/Warnings (USER EXPERIENCE)
+
+Considerations:
+  - Warn users if collection is very large (>2000 games)
+  - Offer options to filter/limit what gets imported
+  - Consider pagination in BGG import UI (import in chunks)
+
+================================================================================
+IS THIS SOMETHING TO WORRY ABOUT?
+================================================================================
+
+Short Answer: YES, but it's manageable.
+
+Current Issues:
+  ✅ Images load lazily (already optimized)
+  ✅ FlatList virtualization works (already optimized)
+  ⚠️  CollectionScreen enriches ALL games on mount (needs fixing)
+  ⚠️  Firestore queries could hit limits (needs pagination)
+
+Real-World Impact:
+  - Collections with 100-500 games: Should work fine
+  - Collections with 500-1000 games: May be slow on initial load
+  - Collections with 1000+ games: Will definitely have performance issues
+
+Most Critical Fix:
+  - CollectionScreen data enrichment needs to be lazy
+  - This is the biggest performance bottleneck
+  - Should be fixed before users complain about slow loading
+
+Recommendation:
+  1. Fix CollectionScreen lazy enrichment (Priority 1)
+  2. Add Firestore pagination as safety net (Priority 2)
+  3. Monitor real-world usage to see if other optimizations needed
+  4. Consider collection size limits/warnings if needed
+
+================================================================================
+IMPLEMENTATION NOTES
+================================================================================
+
+For Lazy Enrichment (CollectionScreen):
+  - Use FlatList's onViewableItemsChanged
+  - Track which items have been enriched
+  - Use a Map/Set to cache enriched data
+  - Enrich in batches (20-50 at a time)
+  - Pre-enrich next batch while user views current
+
+For Firestore Pagination (CollectionsContext):
+  - Use Firestore's startAfter() for pagination
+  - Load first batch on mount
+  - Load additional batches as needed
+  - Or load all in background batches (non-blocking)
+
+Testing Strategy:
+  - Test with 100, 500, 1000, 2000+ games
+  - Measure initial load time
+  - Measure memory usage
+  - Test scroll performance
+  - Test import performance

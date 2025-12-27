@@ -90,9 +90,9 @@ const BGGImport = ({ onImportComplete }) => {
     );
 
     try {
-      // Filter out games that already exist in collection
+      // Filter out games that already exist in collection, and skip games without bggId
       const gamesToImport = games.filter(game => 
-        !existingBggIds.has(game.bggId.toString())
+        game && game.bggId && !existingBggIds.has(game.bggId.toString())
       );
       
       if (gamesToImport.length === 0) {
@@ -113,43 +113,68 @@ const BGGImport = ({ onImportComplete }) => {
         );
         
         // Step 2: Identify which games need BGG API calls
-        // (games not in Firestore or missing thumbnails/images)
+        // Strategy: Fetch ALL games during import (at API-friendly rate)
+        // Store complete "Thing" objects in Firestore so CollectionScreen can load from backend
         const gamesNeedingAPI = firestoreChecks
-          .filter(({ cached }) => !cached || !cached.thumbnail)
+          .filter(({ cached }) => !cached) // Only fetch if completely missing from Firestore
           .map(({ game }) => game.bggId);
         
-        // Step 3: Fetch missing games using batch API calls
+        if (__DEV__) {
+          console.log(`[BGG Import] ${gamesNeedingAPI.length} games need fetching from BGG API. Will fetch all at API-friendly rate.`);
+        }
+        
+        // Step 3: Fetch ALL missing games using batch API calls
+        // API-friendly: 50 games per batch, 3 second delay between batches
         let batchFetchedGames = new Map();
         if (gamesNeedingAPI.length > 0) {
-          if (__DEV__) {
-            console.log(`[BGG Import] Fetching ${gamesNeedingAPI.length} games from BGG API using batch calls`);
-          }
-          
           const { fetchBGGGameDetailsBatch } = await import('../services/bggApi');
           const BATCH_SIZE = 50; // BGG API limit
+          const DELAY_BETWEEN_BATCHES = 3000; // 3 seconds - be gentle on BGG API
+          
+          const totalBatches = Math.ceil(gamesNeedingAPI.length / BATCH_SIZE);
           
           for (let i = 0; i < gamesNeedingAPI.length; i += BATCH_SIZE) {
             const batch = gamesNeedingAPI.slice(i, i + BATCH_SIZE);
-            const batchResults = await fetchBGGGameDetailsBatch(batch);
+            const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
             
-            // Map results by game ID
-            batchResults.forEach(gameData => {
-              if (gameData && gameData.id) {
-                batchFetchedGames.set(gameData.id.toString(), gameData);
+            try {
+              if (__DEV__) {
+                console.log(`[BGG Import] Fetching batch ${batchNumber}/${totalBatches} (${batch.length} games)...`);
               }
-            });
+              
+              const batchResults = await fetchBGGGameDetailsBatch(batch);
+              
+              // Map results by game ID
+              if (batchResults && Array.isArray(batchResults)) {
+                batchResults.forEach(gameData => {
+                  if (gameData && gameData.id) {
+                    batchFetchedGames.set(gameData.id.toString(), gameData);
+                  }
+                });
+              }
+            } catch (batchError) {
+              // Continue with other batches even if one fails
+              if (__DEV__) {
+                console.warn(`[BGG Import] Batch ${batchNumber} failed for ${batch.length} games:`, batchError);
+              }
+            }
             
             // Update progress during batch fetching
-            const progress = Math.min(i + batch.length, gamesNeedingAPI.length);
+            // Progress is based on how many games we've fetched so far
+            const fetchedSoFar = Math.min(i + BATCH_SIZE, gamesNeedingAPI.length);
             setImportProgress({ 
-              current: Math.floor((progress / gamesNeedingAPI.length) * gamesToImport.length), 
+              current: Math.floor((fetchedSoFar / gamesNeedingAPI.length) * gamesToImport.length * 0.8), // 80% for fetching, 20% for processing
               total: gamesToImport.length 
             });
             
-            // Wait between batches (bulk operation)
+            // API-friendly delay between batches (except after the last batch)
             if (i + BATCH_SIZE < gamesNeedingAPI.length) {
-              await new Promise(resolve => setTimeout(resolve, 1500));
+              await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
             }
+          }
+          
+          if (__DEV__) {
+            console.log(`[BGG Import] Completed fetching ${batchFetchedGames.size} games from BGG API.`);
           }
         }
         
@@ -158,22 +183,34 @@ const BGGImport = ({ onImportComplete }) => {
           const { game, cached } = firestoreChecks[i];
           
           try {
+            // Validate game has required fields
+            if (!game || !game.bggId) {
+              if (__DEV__) {
+                console.warn(`[BGG Import] Skipping game with missing bggId:`, game);
+              }
+              failCount++;
+              continue;
+            }
+
             // Use batch-fetched data if available, otherwise use cached, otherwise use basic game data
             const batchData = batchFetchedGames.get(game.bggId.toString());
             const gameDetails = batchData || cached || null;
             
             // Format game data for MeepleUp collection
+            // Use batch-fetched data if available, otherwise use cached, otherwise use basic game data from BGG collection
             const gameData = {
               id: `bgg_${game.bggId}`,
               bggId: game.bggId,
-              title: gameDetails?.name || game.name,
-              description: gameDetails?.description || '',
-              image: gameDetails?.image || gameDetails?.thumbnail || game.image || game.thumbnail,
-              yearPublished: gameDetails?.yearPublished || game.yearPublished,
-              minPlayers: gameDetails?.minPlayers,
-              maxPlayers: gameDetails?.maxPlayers,
-              playingTime: gameDetails?.playingTime,
-              bggRating: gameDetails?.average || gameDetails?.averageRating || game.rating,
+              title: gameDetails?.name || cached?.name || game.name || 'Unknown Game',
+              description: gameDetails?.description || cached?.description || '',
+              // Use thumbnail/image from batch data, cached data, or BGG collection data
+              thumbnail: gameDetails?.thumbnail || cached?.thumbnail || game.thumbnail || null,
+              image: gameDetails?.image || cached?.image || game.image || game.thumbnail || null,
+              yearPublished: gameDetails?.yearPublished || cached?.yearPublished || game.yearPublished,
+              minPlayers: gameDetails?.minPlayers || cached?.minPlayers,
+              maxPlayers: gameDetails?.maxPlayers || cached?.maxPlayers,
+              playingTime: gameDetails?.playingTime || cached?.playingTime,
+              bggRating: gameDetails?.average || gameDetails?.averageRating || cached?.average || game.rating,
               userRating: game.rating,
               numplays: game.numplays,
               addedAt: new Date().toISOString(),
@@ -186,32 +223,55 @@ const BGGImport = ({ onImportComplete }) => {
               setImportedGames((prev) => [...prev, gameData]);
               existingBggIds.add(game.bggId.toString()); // Track as added
               successCount++;
+            } else {
+              if (__DEV__) {
+                console.warn(`[BGG Import] No userIdentifier, skipping game ${game.bggId}`);
+              }
+              failCount++;
             }
 
+            // Progress updates during game processing (final 20% of progress)
             setImportProgress({ 
-              current: i + 1, 
+              current: Math.floor((gamesToImport.length * 0.8) + ((i + 1) / gamesToImport.length) * gamesToImport.length * 0.2), 
               total: gamesToImport.length 
             });
           } catch (gameError) {
-            console.warn(`Failed to import game ${game.name}:`, gameError);
+            if (__DEV__) {
+              console.warn(`[BGG Import] Failed to import game ${game?.name || game?.bggId || 'unknown'}:`, gameError);
+              console.warn(`[BGG Import] Game data:`, game);
+              console.warn(`[BGG Import] Error stack:`, gameError.stack);
+            }
             failCount++;
           }
         }
         
-        // Also cache all batch-fetched games to Firestore for future use
+        // Step 5: Cache all batch-fetched games to Firestore (complete "Thing" objects)
+        // This ensures CollectionScreen can load everything from our backend without API calls
         if (batchFetchedGames.size > 0) {
           const { updateGameWithBGGData } = await import('../services/gameDatabase');
-          const cachePromises = Array.from(batchFetchedGames.values()).map(gameData =>
-            updateGameWithBGGData(gameData.id, gameData).catch(err => {
+          const cachePromises = Array.from(batchFetchedGames.values()).map((gameData, index) => {
+            // Update progress as we cache
+            if (index % 10 === 0) {
+              const cachedSoFar = index;
+              setImportProgress({ 
+                current: Math.floor((gamesToImport.length * 0.8) + (cachedSoFar / batchFetchedGames.size) * gamesToImport.length * 0.2),
+                total: gamesToImport.length 
+              });
+            }
+            
+            return updateGameWithBGGData(gameData.id, gameData).catch(err => {
               if (__DEV__) {
                 console.warn(`[BGG Import] Failed to cache game ${gameData.id}:`, err);
               }
-            })
-          );
-          // Cache in background (non-blocking)
-          Promise.all(cachePromises).catch(() => {
-            // Non-critical - just log
+            });
           });
+          
+          // Wait for all games to be cached (important - ensures complete data in Firestore)
+          await Promise.all(cachePromises);
+          
+          if (__DEV__) {
+            console.log(`[BGG Import] Cached ${batchFetchedGames.size} complete game objects to Firestore.`);
+          }
         }
       }
       

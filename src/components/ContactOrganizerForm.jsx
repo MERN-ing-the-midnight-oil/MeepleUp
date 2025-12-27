@@ -47,6 +47,7 @@ const ContactOrganizerForm = ({
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        keyboardDismissMode="interactive"
       >
         <Text style={styles.lead}>
           Introduce yourself and how you&apos;d like the organizer to follow up. They&apos;ll send the
@@ -108,7 +109,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: 150, // Extra padding to ensure submit button is visible above keyboard
   },
   lead: {
     fontSize: 14,

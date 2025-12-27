@@ -1490,7 +1490,12 @@ const ClaudeGameIdentifier = ({
         return;
       }
 
-    onAddToCollection(gameRecord);
+      try {
+        onAddToCollection(gameRecord);
+      } catch (addError) {
+        console.error('[ClaudeGameIdentifier] Error calling onAddToCollection:', addError);
+        throw addError;
+      }
     },
     [comments, gameCandidates, onAddToCollection, resetPhotoCapture]
   );

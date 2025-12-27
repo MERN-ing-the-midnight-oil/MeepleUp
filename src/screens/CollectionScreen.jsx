@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDim
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
+import Input from '../components/common/Input';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import TextListGameIdentifier from '../components/TextListGameIdentifier';
 import GameCard from '../components/GameCard';
 import BGGImport from '../components/BGGImport';
 import PoweredByBGG from '../components/PoweredByBGG';
-import { getGameById } from '../services/gameDatabase';
 import { getGameDetails } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
@@ -31,6 +31,7 @@ const CollectionScreen = () => {
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [showTextListModal, setShowTextListModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(''); // Title search query
   
   // Refs to maintain scroll position when sort changes
   const flatListRef = useRef(null);
@@ -106,6 +107,9 @@ const CollectionScreen = () => {
   console.log('[CollectionScreen] Raw collection length:', rawCollection.length);
   
   const [sortedCollection, setSortedCollection] = useState([]);
+  const [bggDataCache, setBggDataCache] = useState({}); // { gameId: bggData }
+  const enrichingRef = useRef(false); // Prevent concurrent enrichment
+  const enrichedGameIdsRef = useRef(new Set()); // Track which games have been enriched (use ref to avoid dependency issues)
   
   // Component mount/unmount logging
   useEffect(() => {
@@ -115,181 +119,229 @@ const CollectionScreen = () => {
     };
   }, []);
 
-  // Load BGG data and sort collection
-  useEffect(() => {
-    console.log('[CollectionScreen] loadAndSort effect triggered, rawCollection.length:', rawCollection.length, 'sortBy:', sortBy);
-    
-    const loadAndSort = async () => {
-      try {
-        console.log('[CollectionScreen] Starting loadAndSort, processing', rawCollection.length, 'games');
-        
-        const enrichedGames = await Promise.all(
-          rawCollection.map(async (game, index) => {
-            console.log(`[CollectionScreen] Processing game ${index + 1}/${rawCollection.length}:`, game.title || game.id);
-            
-            // Check if game needs backfill (missing thumbnails/images)
-            // We always fetch BGG data for rating/category display, but only do expensive operations if needed
-            const hasThumbnail = !!(game.thumbnail || game.bggThumbnail);
-            const hasImage = !!game.image;
-            const needsBackfill = !hasThumbnail || !hasImage;
-            
-            // Fetch BGG data for rating/category display, but optimize based on what's needed
-            let bggData = null;
-            let foundBggId = game.bggId;
-            
-            // If game already has thumbnail and image, we can skip BGG fetch entirely
-            // (unless we need it for rating/category - but that's optional)
-            if (game.bggId && needsBackfill) {
-              try {
-                console.log(`[CollectionScreen] Fetching BGG data for game ${index + 1}, bggId:`, game.bggId, 'needsBackfill:', needsBackfill);
-                // Use getGameDetails to ensure we get full-size images from BGG API
-                // This will fetch from Firestore first, then BGG API if image is missing
-                bggData = await getGameDetails(game.bggId);
-                if (!bggData) {
-                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - getGameDetails returned null for bggId:`, game.bggId);
-                }
-              } catch (error) {
-                console.error(`[CollectionScreen] Error loading BGG data for game ${index + 1} (${game.title || game.id}):`, error);
-              }
-            } else if (!game.bggId && game.title && game.title !== 'Unknown Game' && needsBackfill) {
-              // Only search for BGG ID if we need thumbnails/images (backfill)
-              // Don't search just to add bggId if thumbnails already exist
-              try {
-                console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - no bggId, searching BGG by title for backfill`);
-                const { searchGamesByName } = await import('../utils/api');
-                const searchResults = await searchGamesByName(game.title, true);
-                if (searchResults && searchResults.length > 0) {
-                  // Use the first (most relevant) result
-                  const match = searchResults[0];
-                  foundBggId = match.id;
-                  console.log(`[CollectionScreen] Found BGG match for "${game.title}": bggId=${foundBggId}`);
-                  
-                  // Get full details
-                  bggData = await getGameDetails(foundBggId);
-                  
-                  // Update game with bggId if we found one
-                  if (foundBggId && userIdentifier && game.id) {
-                    try {
-                      await updateGameInCollection(userIdentifier, game.id, { bggId: foundBggId });
-                      console.log(`[CollectionScreen] Added bggId to game ${game.title || game.id}`);
-                    } catch (updateError) {
-                      console.warn(`[CollectionScreen] Failed to add bggId to game ${game.title || game.id}:`, updateError);
-                    }
-                  }
-                } else {
-                  console.log(`[CollectionScreen] No BGG match found for "${game.title}"`);
-                }
-              } catch (searchError) {
-                console.warn(`[CollectionScreen] Error searching BGG for game "${game.title}":`, searchError);
-              }
-            } else if (game.bggId && !needsBackfill) {
-              // Game has thumbnails/images, but we still need BGG data for rating/category
-              // This should be fast if cached in Firestore
-              try {
-                bggData = await getGameDetails(game.bggId);
-                if (bggData) {
-                  console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) - fetched BGG data for rating/category (cached)`);
-                }
-              } catch (error) {
-                // Non-critical - game will display without rating/category
-                console.warn(`[CollectionScreen] Could not fetch BGG data for rating (non-critical):`, error);
-              }
-            }
-            
-            if (bggData) {
-              const rating = bggData.average ? getStarRating(bggData.average) : 0;
-              // Get primary category from badges (first one found)
-              const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
-                                    bggData.familyGamesRank ? 'Family' :
-                                    bggData.partyGamesRank ? 'Party' :
-                                    bggData.wargamesRank ? 'War' :
-                                    bggData.thematicRank ? 'Thematic' :
-                                    bggData.abstractsRank ? 'Abstract' :
-                                    bggData.childrensGamesRank ? 'Children' :
-                                    bggData.cgsRank ? 'CCG' : 'Other';
-              console.log(`[CollectionScreen] Game ${index + 1} (${game.title || game.id}) enriched, rating:`, rating, 'category:', primaryCategory, 'bggId:', foundBggId, 'hasThumbnail:', !!bggData.thumbnail, 'hasImage:', !!bggData.image);
-              
-              // Backfill missing thumbnails/images for older games
-              const needsThumbnailUpdate = bggData.thumbnail && !game.thumbnail && !game.bggThumbnail;
-              const needsImageUpdate = bggData.image && !game.image;
-              
-              if (needsThumbnailUpdate || needsImageUpdate) {
-                const updates = {};
-                if (needsThumbnailUpdate) {
-                  updates.thumbnail = bggData.thumbnail;
-                  updates.bggThumbnail = bggData.thumbnail;
-                }
-                if (needsImageUpdate) {
-                  updates.image = bggData.image;
-                }
-                
-                // Update in Firestore and local collection
-                if (userIdentifier && game.id) {
-                  try {
-                    await updateGameInCollection(userIdentifier, game.id, updates);
-                    console.log(`[CollectionScreen] Backfilled thumbnail/image for game ${game.title || game.id}`, {
-                      thumbnail: needsThumbnailUpdate ? 'added' : 'already exists',
-                      image: needsImageUpdate ? 'added' : 'already exists'
-                    });
-                  } catch (updateError) {
-                    console.error(`[CollectionScreen] Failed to backfill thumbnail for game ${game.title || game.id}:`, updateError);
-                  }
-                }
-              }
-              
-              return {
-                ...game,
-                ...(foundBggId && !game.bggId ? { bggId: foundBggId } : {}),
-                ...(needsThumbnailUpdate ? { thumbnail: bggData.thumbnail, bggThumbnail: bggData.thumbnail } : {}),
-                ...(needsImageUpdate ? { image: bggData.image } : {}),
-                _bggData: bggData,
-                _rating: rating,
-                _primaryCategory: primaryCategory,
-              };
-            }
-            
-            // Fallback: return game without BGG data
-            return {
-              ...game,
-              _rating: 0,
-              _primaryCategory: 'Other',
-            };
-          })
-        );
+  // Helper to enrich a single game with BGG data
+  const enrichGame = useCallback(async (game) => {
+    const gameId = game.bggId || game.id;
+    if (!gameId || enrichedGameIdsRef.current.has(gameId)) {
+      return null; // Already enriched or no ID
+    }
 
-        console.log('[CollectionScreen] All games enriched, sorting by:', sortBy);
-        enrichedGames.forEach((game, idx) => {
-          console.log(`[CollectionScreen] Enriched game ${idx + 1}:`, game.title || game.id, 'has_bggData:', !!game._bggData);
-        });
-
-        // Sort games
-        const sorted = [...enrichedGames].sort((a, b) => {
-          if (sortBy === 'rating') {
-            return (b._rating || 0) - (a._rating || 0); // Highest first
-          } else if (sortBy === 'category') {
-            const catA = a._primaryCategory || 'Other';
-            const catB = b._primaryCategory || 'Other';
-            if (catA !== catB) {
-              return catA.localeCompare(catB);
-            }
-            // Within same category, sort by rating
-            return (b._rating || 0) - (a._rating || 0);
-          } else if (sortBy === 'title') {
-            return (a.title || '').localeCompare(b.title || '');
-          }
-          return 0;
-        });
-
-        console.log('[CollectionScreen] Sorting complete, setting sortedCollection, length:', sorted.length);
-        setSortedCollection(sorted);
-        console.log('[CollectionScreen] sortedCollection state updated');
-      } catch (error) {
-        console.error('[CollectionScreen] Error in loadAndSort:', error);
+    try {
+      // Check if already in cache
+      if (bggDataCache[gameId]) {
+        enrichedGameIdsRef.current.add(gameId);
+        return bggDataCache[gameId];
       }
-    };
 
-    loadAndSort();
-  }, [rawCollection, sortBy]);
+      const bggData = await getGameDetails(gameId);
+      if (bggData) {
+        // Update cache
+        setBggDataCache(prev => ({ ...prev, [gameId]: bggData }));
+        enrichedGameIdsRef.current.add(gameId);
+        return bggData;
+      }
+    } catch (error) {
+      console.error(`[CollectionScreen] Error enriching game ${gameId}:`, error);
+    }
+    return null;
+  }, [bggDataCache]);
+
+  // Sort collection without enrichment (fast, immediate)
+  const sortedGames = useMemo(() => {
+    if (!rawCollection || rawCollection.length === 0) return [];
+    
+    const sorted = [...rawCollection].sort((a, b) => {
+      if (sortBy === 'title') {
+        return (a.title || '').localeCompare(b.title || '');
+      }
+      // For rating/category sort, we'll use cached BGG data if available
+      // Otherwise fall back to title sort
+      if (sortBy === 'rating') {
+        const aId = a.bggId || a.id;
+        const bId = b.bggId || b.id;
+        const aBgg = aId ? bggDataCache[aId] : null;
+        const bBgg = bId ? bggDataCache[bId] : null;
+        const aRating = aBgg?.average ? getStarRating(aBgg.average) : 0;
+        const bRating = bBgg?.average ? getStarRating(bBgg.average) : 0;
+        if (aRating !== bRating) {
+          return bRating - aRating;
+        }
+        // Fallback to title if ratings are same or unavailable
+        return (a.title || '').localeCompare(b.title || '');
+      } else if (sortBy === 'category') {
+        const aId = a.bggId || a.id;
+        const bId = b.bggId || b.id;
+        const aBgg = aId ? bggDataCache[aId] : null;
+        const bBgg = bId ? bggDataCache[bId] : null;
+        const getCategory = (bgg) => {
+          if (!bgg) return 'Other';
+          return bgg.strategyGamesRank ? 'Strategy' :
+                 bgg.familyGamesRank ? 'Family' :
+                 bgg.partyGamesRank ? 'Party' :
+                 bgg.wargamesRank ? 'War' :
+                 bgg.thematicRank ? 'Thematic' :
+                 bgg.abstractsRank ? 'Abstract' :
+                 bgg.childrensGamesRank ? 'Children' :
+                 bgg.cgsRank ? 'CCG' : 'Other';
+        };
+        const catA = getCategory(aBgg);
+        const catB = getCategory(bBgg);
+        if (catA !== catB) {
+          return catA.localeCompare(catB);
+        }
+        // Within same category, sort by rating
+        const aRating = aBgg?.average ? getStarRating(aBgg.average) : 0;
+        const bRating = bBgg?.average ? getStarRating(bBgg.average) : 0;
+        if (aRating !== bRating) {
+          return bRating - aRating;
+        }
+        return (a.title || '').localeCompare(b.title || '');
+      }
+      return 0;
+    });
+
+    return sorted;
+  }, [rawCollection, sortBy, bggDataCache]);
+
+  // Enrich games with BGG data from cache
+  const enrichedGames = useMemo(() => {
+    return sortedGames.map(game => {
+      const gameId = game.bggId || game.id;
+      const bggData = gameId ? bggDataCache[gameId] : null;
+      
+      if (bggData) {
+        const rating = bggData.average ? getStarRating(bggData.average) : 0;
+        const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
+                              bggData.familyGamesRank ? 'Family' :
+                              bggData.partyGamesRank ? 'Party' :
+                              bggData.wargamesRank ? 'War' :
+                              bggData.thematicRank ? 'Thematic' :
+                              bggData.abstractsRank ? 'Abstract' :
+                              bggData.childrensGamesRank ? 'Children' :
+                              bggData.cgsRank ? 'CCG' : 'Other';
+        
+        return {
+          ...game,
+          _bggData: bggData,
+          _rating: rating,
+          _primaryCategory: primaryCategory,
+        };
+      }
+      
+      return {
+        ...game,
+        _rating: 0,
+        _primaryCategory: 'Other',
+      };
+    });
+  }, [sortedGames, bggDataCache]);
+
+  // Filter games by search query (client-side, works on basic title field)
+  const filteredGames = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return enrichedGames;
+    }
+    const query = searchQuery.toLowerCase().trim();
+    return enrichedGames.filter(game => {
+      const title = (game.title || '').toLowerCase();
+      return title.includes(query);
+    });
+  }, [enrichedGames, searchQuery]);
+
+  // Update sortedCollection when filteredGames changes
+  useEffect(() => {
+    setSortedCollection(filteredGames);
+  }, [filteredGames]);
+
+  // Lazy enrichment: Enrich games in batches
+  const enrichGamesBatch = useCallback(async (gameIdsToEnrich) => {
+    if (enrichingRef.current) return; // Already enriching
+    if (gameIdsToEnrich.length === 0) return;
+
+    enrichingRef.current = true;
+    
+    try {
+      const gamesToEnrich = gameIdsToEnrich
+        .map(id => rawCollection.find(g => (g.bggId || g.id) === id))
+        .filter(Boolean);
+
+      // Enrich in batches of 50 (BGG API limit) to minimize API calls
+      // Conservative approach: longer delays between batches to be gentle on BGG API
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < gamesToEnrich.length; i += BATCH_SIZE) {
+        const batch = gamesToEnrich.slice(i, i + BATCH_SIZE);
+        const enrichPromises = batch.map(game => enrichGame(game));
+        await Promise.all(enrichPromises);
+        
+        // Conservative delay between batches (3 seconds) to be gentle on BGG API
+        if (i + BATCH_SIZE < gamesToEnrich.length) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+      }
+    } catch (error) {
+      console.error('[CollectionScreen] Error in enrichGamesBatch:', error);
+    } finally {
+      enrichingRef.current = false;
+    }
+  }, [rawCollection, enrichGame]);
+
+  // Handle visible items changed for lazy enrichment
+  // Conservative: Only enrich visible items + one page ahead (since we have pagination)
+  const handleViewableItemsChanged = useCallback(({ viewableItems }) => {
+    if (viewableItems.length === 0) return;
+    
+    // Enrich visible items
+    const gameIdsToEnrich = viewableItems
+      .map(({ item }) => item?.bggId || item?.id)
+      .filter(id => id && !enrichedGameIdsRef.current.has(id));
+    
+    if (gameIdsToEnrich.length > 0) {
+      // Pre-enrich only one page ahead (conservative - respect BGG API)
+      // With 3 columns and ~6 rows visible = ~18 items per "page"
+      const maxIndex = Math.max(...viewableItems.map(v => v.index || 0), 0);
+      const itemsPerPage = 18; // Conservative estimate: 3 cols × 6 rows
+      const nextPageStart = maxIndex + 1;
+      const nextPageEnd = nextPageStart + itemsPerPage;
+      
+      const preEnrichGames = sortedGames.slice(nextPageStart, nextPageEnd);
+      const preEnrichIds = preEnrichGames
+        .map(g => g.bggId || g.id)
+        .filter(id => id && !enrichedGameIdsRef.current.has(id));
+      
+      const allIdsToEnrich = [...new Set([...gameIdsToEnrich, ...preEnrichIds])];
+      if (allIdsToEnrich.length > 0) {
+        enrichGamesBatch(allIdsToEnrich);
+      }
+    }
+  }, [sortedGames, enrichGamesBatch]);
+
+  // Initial enrichment: Only enrich what's visible + one page ahead
+  // Conservative approach: Be gentle on BGG API, only enrich what user needs to see
+  useEffect(() => {
+    if (sortedGames.length === 0) return;
+    
+    // Only enrich first page (what's visible) + one page ahead
+    // With 3 columns and ~6 rows = ~18 items per page
+    // Enrich 2 pages worth = ~36 games initially
+    const itemsPerPage = 18; // Conservative: 3 cols × 6 rows
+    const initialEnrichCount = itemsPerPage * 2; // 2 pages = visible + next page
+    
+    // Delay initial enrichment to avoid conflicts with import process
+    const enrichmentDelay = 2000; // 2 second delay to be safe
+    
+    const enrichmentTimer = setTimeout(() => {
+      const gamesToEnrich = sortedGames.slice(0, initialEnrichCount);
+      const gameIdsToEnrich = gamesToEnrich
+        .map(g => g.bggId || g.id)
+        .filter(id => id && !enrichedGameIdsRef.current.has(id));
+
+      if (gameIdsToEnrich.length > 0) {
+        enrichGamesBatch(gameIdsToEnrich);
+      }
+    }, enrichmentDelay);
+
+    return () => clearTimeout(enrichmentTimer);
+  }, [sortedGames, enrichGamesBatch]); // Removed sortBy dependency - enrich same amount regardless
 
   // Group games by category when sortBy is 'category'
   const gamesByCategory = useMemo(() => {
@@ -301,24 +353,32 @@ const CollectionScreen = () => {
     ALL_CATEGORIES.forEach(cat => {
       grouped[cat] = [];
     });
+    // Add "Uncategorized" group for games without category data
+    grouped['Uncategorized'] = [];
 
-    sortedCollection.forEach(game => {
-      const category = game._primaryCategory || 'Other';
-      if (grouped[category]) {
-        grouped[category].push(game);
-      } else {
-        grouped['Other'].push(game);
+    // Use filteredGames instead of sortedCollection to respect search query
+    filteredGames.forEach(game => {
+      const category = game._primaryCategory || 'Uncategorized';
+      if (!grouped[category]) {
+        grouped[category] = [];
       }
+      grouped[category].push(game);
     });
 
     // Sort each category based on user preference
-    ALL_CATEGORIES.forEach(cat => {
+    [...ALL_CATEGORIES, 'Uncategorized'].forEach(cat => {
       const games = grouped[cat] || [];
       const sortMode = categorySortPreference[cat] || 'rating';
       
       games.sort((a, b) => {
         if (sortMode === 'rating') {
-          return (b._rating || 0) - (a._rating || 0);
+          const aRating = a._rating || 0;
+          const bRating = b._rating || 0;
+          if (aRating !== bRating) {
+            return bRating - aRating;
+          }
+          // Fallback to title sort if ratings are same
+          return (a.title || '').localeCompare(b.title || '');
         } else {
           // title sort (A-Z)
           return (a.title || '').localeCompare(b.title || '');
@@ -327,7 +387,7 @@ const CollectionScreen = () => {
     });
 
     return grouped;
-  }, [sortedCollection, sortBy, categorySortPreference]);
+  }, [filteredGames, sortBy, categorySortPreference]);
 
   // Toggle category sort preference
   const toggleCategorySort = useCallback((category) => {
@@ -343,9 +403,14 @@ const CollectionScreen = () => {
   const handleAddToCollection = (gameData) => {
     console.log('[CollectionScreen] handleAddToCollection called for:', gameData.title || gameData.id);
     if (userIdentifier) {
-      addGameToCollection(userIdentifier, gameData);
-      // Don't show alert for each game - too many alerts
-      // The user will see the games in their collection
+      try {
+        addGameToCollection(userIdentifier, gameData);
+        // Don't show alert for each game - too many alerts
+        // The user will see the games in their collection
+      } catch (addError) {
+        console.error('[CollectionScreen] Error in addGameToCollection:', addError);
+        throw addError;
+      }
     } else {
       console.warn('[CollectionScreen] handleAddToCollection: No userIdentifier');
     }
@@ -483,9 +548,24 @@ const CollectionScreen = () => {
         
         <View style={styles.inventoryHeader}>
           <Text style={styles.inventoryTitle}>Your Games Inventory</Text>
+          <View style={styles.searchContainer}>
+            <Input
+              placeholder="Search by title..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={styles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          {searchQuery.trim() && (
+            <Text style={styles.searchResultCount}>
+              {filteredGames.length} game{filteredGames.length !== 1 ? 's' : ''} found
+            </Text>
+          )}
         </View>
 
-        {ALL_CATEGORIES.map((category) => {
+        {[...ALL_CATEGORIES, 'Uncategorized'].map((category) => {
           const games = gamesByCategory[category] || [];
           return (
             <View key={category} style={styles.categorySection}>
@@ -509,7 +589,7 @@ const CollectionScreen = () => {
         })}
       </ScrollView>
     );
-  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, cardWidthPercent]);
+  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, cardWidthPercent, searchQuery, filteredGames]);
 
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
@@ -598,6 +678,16 @@ const CollectionScreen = () => {
         {sortedCollection.length > 0 && (
           <View style={styles.inventoryHeader}>
             <Text style={styles.inventoryTitle}>Your Games Inventory:</Text>
+            <View style={styles.searchContainer}>
+              <Input
+                placeholder="Search by title..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                style={styles.searchInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
             <View style={styles.sortRow}>
               <Text style={styles.sortLabel}>Sort by:</Text>
               <View style={styles.sortButtons}>
@@ -627,6 +717,11 @@ const CollectionScreen = () => {
                 </Pressable>
               </View>
             </View>
+            {searchQuery.trim() && (
+              <Text style={styles.searchResultCount}>
+                {sortedCollection.length} game{sortedCollection.length !== 1 ? 's' : ''} found
+              </Text>
+            )}
           </View>
         )}
 
@@ -695,6 +790,11 @@ const CollectionScreen = () => {
                 windowSize={10}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
+                onViewableItemsChanged={handleViewableItemsChanged}
+                viewabilityConfig={{
+                  itemVisiblePercentThreshold: 50,
+                  minimumViewTime: 100,
+                }}
                 onLayout={() => {
                   console.log('[CollectionScreen] FlatList onLayout called');
                 }}
@@ -1096,6 +1196,23 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.md,
+  },
+  searchContainer: {
+    marginBottom: theme.spacing.md,
+  },
+  searchInput: {
+    backgroundColor: theme.colors.backgroundSecondary,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+  },
+  searchResultCount: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+    fontStyle: 'italic',
   },
   categoryContent: {
     paddingBottom: 10,

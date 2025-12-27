@@ -300,11 +300,27 @@ export const CollectionsProvider = ({ children }) => {
   // Simple stable callbacks
   const addGameToCollection = useCallback((userId, gameData) => {
     if (!userId) return;
+    
     setCollections(prev => ({
       ...prev,
       [userId]: [...(prev[userId] || []), gameData],
     }));
-  }, []);
+    
+    // Also save to Firestore if available
+    if (db && gameData.id) {
+      // Firestore save happens asynchronously - don't await to avoid blocking
+      db.collection('userGames').doc(userId)
+        .collection('games').doc(gameData.id)
+        .set({
+          ...gameData,
+          addedAt: firebase.firestore.Timestamp.now(),
+          updatedAt: firebase.firestore.Timestamp.now(),
+        }, { merge: true })
+        .catch((firestoreError) => {
+          console.error('[CollectionsContext] Error saving game to Firestore:', firestoreError);
+        });
+    }
+  }, [db]);
 
   const removeGameFromCollection = useCallback((userId, gameId) => {
     if (!userId) return;

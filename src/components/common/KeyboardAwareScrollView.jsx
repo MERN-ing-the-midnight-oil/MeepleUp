@@ -1,14 +1,16 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   KeyboardAvoidingView,
   ScrollView,
   Platform,
   StyleSheet,
+  Keyboard,
 } from 'react-native';
 
 /**
  * A wrapper component that combines KeyboardAvoidingView and ScrollView
  * to handle keyboard interactions properly across iOS and Android.
+ * Automatically scrolls to end when keyboard appears to keep submit buttons visible.
  * 
  * @param {Object} props - Component props
  * @param {React.ReactNode} props.children - Child components
@@ -17,6 +19,7 @@ import {
  * @param {Object} props.style - Additional styles
  * @param {Object} props.contentContainerStyle - ScrollView content container styles
  * @param {boolean} props.keyboardShouldPersistTaps - Whether taps should persist when keyboard is visible
+ * @param {number} props.extraScrollHeight - Extra padding at bottom when keyboard is visible (defaults to 150)
  */
 const KeyboardAwareScrollView = React.forwardRef(({
   children,
@@ -25,16 +28,48 @@ const KeyboardAwareScrollView = React.forwardRef(({
   style,
   contentContainerStyle,
   keyboardShouldPersistTaps = 'handled',
+  extraScrollHeight = 150,
   ...scrollViewProps
 }, ref) => {
+  const scrollViewRef = useRef(null);
+  const keyboardDidShowListener = useRef(null);
+
+  // Use the forwarded ref or internal ref
+  const actualRef = ref || scrollViewRef;
+
   // Use provided offset or default to 0
   // The offset is mainly needed when there's a fixed header/navigation
-  // Setting to 0 lets the ScrollView handle scrolling naturally
   const offset = keyboardVerticalOffset !== undefined ? keyboardVerticalOffset : 0;
 
   // Use 'padding' behavior on iOS (works better with ScrollView)
   // On Android, ScrollView usually handles keyboard automatically, but padding can help
   const defaultBehavior = behavior ?? (Platform.OS === 'ios' ? 'padding' : 'padding');
+
+  useEffect(() => {
+    // Listen for keyboard show events and scroll to end to show submit buttons
+    keyboardDidShowListener.current = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        // Small delay to ensure keyboard animation has started
+        setTimeout(() => {
+          if (actualRef?.current) {
+            actualRef.current.scrollToEnd({ animated: true });
+          }
+        }, 100);
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener.current?.remove();
+    };
+  }, [actualRef]);
+
+  // Merge contentContainerStyle to ensure proper padding
+  const mergedContentContainerStyle = [
+    styles.contentContainer,
+    { paddingBottom: extraScrollHeight },
+    contentContainerStyle,
+  ];
 
   return (
     <KeyboardAvoidingView
@@ -43,10 +78,11 @@ const KeyboardAwareScrollView = React.forwardRef(({
       keyboardVerticalOffset={offset}
     >
       <ScrollView
-        ref={ref}
+        ref={actualRef}
         style={styles.scrollView}
-        contentContainerStyle={[styles.contentContainer, contentContainerStyle]}
+        contentContainerStyle={mergedContentContainerStyle}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={true}
         scrollEventThrottle={16}
         {...scrollViewProps}

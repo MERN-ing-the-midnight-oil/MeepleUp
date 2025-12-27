@@ -161,10 +161,8 @@ const Landing = () => {
         errorMessage = 'Please enter a valid email address.';
       } else if (err.code === 'auth/weak-password') {
         errorMessage = 'Password is too weak. Please use a stronger password.';
-      } else if (err.code === 'auth/user-not-found') {
-        errorMessage = 'No account found with this email. Please create an account first.';
-      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        errorMessage = 'Incorrect password. Try again or use "Forgot Password" to reset it.';
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        errorMessage = 'Your email or password was incorrect. Please try again.';
       }
       
       setError(errorMessage);

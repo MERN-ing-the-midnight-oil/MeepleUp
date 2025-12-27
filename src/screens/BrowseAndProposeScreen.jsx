@@ -400,56 +400,87 @@ const BrowseAndProposeScreen = () => {
     return result;
   }, [confirmedAttendees, collections, memberNames, selectedDate]);
 
-  // Load BGG data for aggregated games to get thumbnails and images
-  useEffect(() => {
-    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) {
-      setGamesWithBggData({});
-      return;
-    }
+  // Lazy enrichment: Track which games have been enriched
+  const enrichedGameIdsRef = useRef(new Set());
+  const enrichingRef = useRef(false);
 
-    const loadBggData = async () => {
+  // Helper to enrich games in batches
+  const enrichGamesBatch = useCallback(async (gameIdsToEnrich) => {
+    if (enrichingRef.current) return; // Already enriching
+    if (gameIdsToEnrich.length === 0) return;
+
+    enrichingRef.current = true;
+    
+    try {
+      const gamesToEnrich = gameIdsToEnrich
+        .map(id => aggregatedGames.find(g => (g.bggId || g.id) === id))
+        .filter(Boolean);
+
+      // Enrich in batches of 20 to avoid overwhelming the API
+      const BATCH_SIZE = 20;
       const bggDataMap = {};
       
-      // Load BGG data for games that don't already have it
-      const gamesToLoad = aggregatedGames.filter(game => {
-        const gameId = game.bggId || game.id;
-        return gameId && !game._bggData && !gamesWithBggData[gameId];
-      });
+      for (let i = 0; i < gamesToEnrich.length; i += BATCH_SIZE) {
+        const batch = gamesToEnrich.slice(i, i + BATCH_SIZE);
+        const loadPromises = batch.map(async (game) => {
+          const gameId = game.bggId || game.id;
+          if (!gameId || enrichedGameIdsRef.current.has(gameId)) return null;
 
-      if (gamesToLoad.length === 0) return;
-
-      console.log('[BrowseAndProposeScreen] Loading BGG data for', gamesToLoad.length, 'games');
-
-      // Load BGG data in parallel
-      const loadPromises = gamesToLoad.map(async (game) => {
-        const gameId = game.bggId || game.id;
-        if (!gameId) return null;
-
-        try {
-          const bggData = await getGameDetails(gameId);
-          if (bggData) {
-            return { gameId, bggData };
+          try {
+            const bggData = await getGameDetails(gameId);
+            if (bggData) {
+              enrichedGameIdsRef.current.add(gameId);
+              return { gameId, bggData };
+            }
+          } catch (error) {
+            console.error(`[BrowseAndProposeScreen] Error loading BGG data for game ${gameId}:`, error);
           }
-        } catch (error) {
-          console.error(`[BrowseAndProposeScreen] Error loading BGG data for game ${gameId}:`, error);
-        }
-        return null;
-      });
+          return null;
+        });
 
-      const results = await Promise.all(loadPromises);
-      results.forEach(result => {
-        if (result) {
-          bggDataMap[result.gameId] = result.bggData;
+        const results = await Promise.all(loadPromises);
+        results.forEach(result => {
+          if (result) {
+            bggDataMap[result.gameId] = result.bggData;
+          }
+        });
+
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < gamesToEnrich.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
-      });
+      }
 
       if (Object.keys(bggDataMap).length > 0) {
         setGamesWithBggData(prev => ({ ...prev, ...bggDataMap }));
       }
-    };
-
-    loadBggData();
+    } catch (error) {
+      console.error('[BrowseAndProposeScreen] Error in enrichGamesBatch:', error);
+    } finally {
+      enrichingRef.current = false;
+    }
   }, [aggregatedGames]);
+
+  // Lazy enrichment: Enrich games for current page and next page
+  useEffect(() => {
+    if (!Array.isArray(sortedGames) || sortedGames.length === 0) {
+      return;
+    }
+
+    // Get games for current page and next page (for pre-loading)
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + (ITEMS_PER_PAGE * 2); // Current page + next page
+    const gamesToEnrich = sortedGames.slice(startIndex, endIndex);
+    
+    const gameIdsToEnrich = gamesToEnrich
+      .map(g => g.bggId || g.id)
+      .filter(id => id && !enrichedGameIdsRef.current.has(id));
+
+    if (gameIdsToEnrich.length > 0) {
+      console.log(`[BrowseAndProposeScreen] Enriching ${gameIdsToEnrich.length} games for page ${currentPage}`);
+      enrichGamesBatch(gameIdsToEnrich);
+    }
+  }, [sortedGames, currentPage, enrichGamesBatch]);
 
   // Enrich aggregated games with BGG data
   const enrichedGames = useMemo(() => {

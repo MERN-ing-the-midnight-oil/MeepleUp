@@ -810,7 +810,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.bgColor,
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 200, // Increased padding to ensure submit button is visible above keyboard
   },
   header: {
     padding: theme.spacing.lg,

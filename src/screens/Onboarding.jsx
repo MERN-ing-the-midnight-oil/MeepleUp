@@ -641,6 +641,7 @@ const Onboarding = () => {
           ref={scrollViewRef}
           contentContainerStyle={[styles.container, styles.createFormContainer]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={true}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -1391,14 +1392,20 @@ const Onboarding = () => {
     <Modal
       isOpen={!!joinedEventName}
       onClose={() => setJoinedEventName(null)}
-      title="Congrats!"
+      title="Successfully Joined!"
     >
       <View style={styles.successModalContent}>
+        <View style={styles.successIconContainer}>
+          <MaterialIcons name="check-circle" size={64} color={theme.colors.success || theme.colors.meepleRed} />
+        </View>
         <Text style={styles.successModalText}>
-          You've successfully joined "{joinedEventName}"!
+          You've successfully joined
+        </Text>
+        <Text style={styles.successModalEventName}>
+          "{joinedEventName}"
         </Text>
         <Text style={styles.successModalSubtext}>
-          Look for it on the "MeepleUps" tab.
+          You can now see this MeepleUp in your "MeepleUps" tab and start proposing games!
         </Text>
         <Button
           label="Got it!"
@@ -1843,10 +1850,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: theme.spacing.md,
   },
+  successIconContainer: {
+    marginBottom: theme.spacing.md,
+  },
   successModalText: {
     fontSize: theme.typography.fontSize.lg,
-    fontWeight: theme.typography.fontWeight.semibold,
+    fontWeight: theme.typography.fontWeight.medium,
     color: theme.colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+  successModalEventName: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.meepleRed,
     textAlign: 'center',
     marginBottom: theme.spacing.md,
   },
@@ -1855,6 +1872,7 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     textAlign: 'center',
     marginBottom: theme.spacing.xl,
+    lineHeight: 22,
   },
   successModalButton: {
     width: '100%',

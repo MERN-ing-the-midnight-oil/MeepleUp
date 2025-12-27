@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Switch } from 'react-native';
+import { View, Text, StyleSheet, Switch, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import Button from './common/Button';
 import Input from './common/Input';
 import { theme } from '../utils/theme';
@@ -34,112 +34,132 @@ const CreateEventForm = ({
   };
 
   return (
-    <View style={styles.container}>
-      {error && <Text style={styles.error}>{error}</Text>}
-      
-      <Text style={styles.fieldLabel}>
-        MeepleUp name <Text style={styles.requiredAsterisk}>*</Text>
-      </Text>
-      <Input
-        value={eventForm.name}
-        onChangeText={(text) => onFormChange({ ...eventForm, name: text })}
-        placeholder="MeepleUp name"
-        style={styles.input}
-      />
-      
-      <Text style={styles.fieldLabel}>
-        Location <Text style={styles.requiredAsterisk}>*</Text>
-      </Text>
-      <Input
-        value={eventForm.location}
-        onChangeText={(text) => onFormChange({ ...eventForm, location: text })}
-        placeholder="Location (e.g., Jason's house)"
-        style={styles.input}
-      />
-      
-      <Text style={styles.fieldLabel}>Address</Text>
-      <Input
-        value={eventForm.address}
-        onChangeText={(text) => onFormChange({ ...eventForm, address: text })}
-        placeholder="Address (e.g., 123 Tolkien Dr.)"
-        style={styles.input}
-      />
-      
-      <Input
-        value={eventForm.scheduledFor}
-        onChangeText={(text) => onFormChange({ ...eventForm, scheduledFor: text })}
-        placeholder="Date & time (optional)"
-        style={styles.input}
-      />
-      
-      <Input
-        value={eventForm.description}
-        onChangeText={(text) => onFormChange({ ...eventForm, description: text })}
-        placeholder="Description (optional)"
-        multiline
-        numberOfLines={3}
-        style={styles.input}
-      />
-
-      {/* RSVP Settings */}
-      <View style={styles.rsvpSection}>
-        <Text style={styles.sectionTitle}>RSVP Settings</Text>
-        
-        <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Enable RSVP:</Text>
-          <Switch
-            value={rsvpSettings.enabled}
-            onValueChange={(value) => handleRSVPSettingChange('enabled', value)}
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoidingView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        showsVerticalScrollIndicator={true}
+      >
+        <View style={styles.container}>
+          {error && <Text style={styles.error}>{error}</Text>}
+          
+          <Text style={styles.fieldLabel}>
+            MeepleUp name <Text style={styles.requiredAsterisk}>*</Text>
+          </Text>
+          <Input
+            value={eventForm.name}
+            onChangeText={(text) => onFormChange({ ...eventForm, name: text })}
+            placeholder="MeepleUp name"
+            style={styles.input}
           />
-        </View>
+          
+          <Text style={styles.fieldLabel}>
+            Location <Text style={styles.requiredAsterisk}>*</Text>
+          </Text>
+          <Input
+            value={eventForm.location}
+            onChangeText={(text) => onFormChange({ ...eventForm, location: text })}
+            placeholder="Location (e.g., Jason's house)"
+            style={styles.input}
+          />
+          
+          <Text style={styles.fieldLabel}>Address</Text>
+          <Input
+            value={eventForm.address}
+            onChangeText={(text) => onFormChange({ ...eventForm, address: text })}
+            placeholder="Address (e.g., 123 Tolkien Dr.)"
+            style={styles.input}
+          />
+          
+          <Input
+            value={eventForm.scheduledFor}
+            onChangeText={(text) => onFormChange({ ...eventForm, scheduledFor: text })}
+            placeholder="Date & time (optional)"
+            style={styles.input}
+          />
+          
+          <Input
+            value={eventForm.description}
+            onChangeText={(text) => onFormChange({ ...eventForm, description: text })}
+            placeholder="Description (optional)"
+            multiline
+            numberOfLines={3}
+            style={styles.input}
+          />
 
-        {rsvpSettings.enabled && (
-          <>
+          {/* RSVP Settings */}
+          <View style={styles.rsvpSection}>
+            <Text style={styles.sectionTitle}>RSVP Settings</Text>
+            
             <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Allow Maybe Option:</Text>
+              <Text style={styles.settingLabel}>Enable RSVP:</Text>
               <Switch
-                value={rsvpSettings.allowMaybe}
-                onValueChange={(value) => handleRSVPSettingChange('allowMaybe', value)}
+                value={rsvpSettings.enabled}
+                onValueChange={(value) => handleRSVPSettingChange('enabled', value)}
               />
             </View>
 
-            <Text style={styles.fieldLabel}>Attendance Limit (optional):</Text>
-            <Input
-              value={rsvpSettings.attendanceLimit?.toString() || ''}
-              onChangeText={(text) => {
-                const limit = text.trim() ? parseInt(text.trim(), 10) : null;
-                handleRSVPSettingChange('attendanceLimit', isNaN(limit) ? null : limit);
-              }}
-              placeholder="e.g., 10 (leave empty for no limit)"
-              keyboardType="numeric"
-              style={styles.input}
+            {rsvpSettings.enabled && (
+              <>
+                <View style={styles.settingRow}>
+                  <Text style={styles.settingLabel}>Allow Maybe Option:</Text>
+                  <Switch
+                    value={rsvpSettings.allowMaybe}
+                    onValueChange={(value) => handleRSVPSettingChange('allowMaybe', value)}
+                  />
+                </View>
+
+                <Text style={styles.fieldLabel}>Attendance Limit (optional):</Text>
+                <Input
+                  value={rsvpSettings.attendanceLimit?.toString() || ''}
+                  onChangeText={(text) => {
+                    const limit = text.trim() ? parseInt(text.trim(), 10) : null;
+                    handleRSVPSettingChange('attendanceLimit', isNaN(limit) ? null : limit);
+                  }}
+                  placeholder="e.g., 10 (leave empty for no limit)"
+                  keyboardType="numeric"
+                  style={styles.input}
+                />
+                <Text style={styles.hint}>
+                  When the limit is reached, new RSVPs will be waitlisted
+                </Text>
+              </>
+            )}
+          </View>
+          
+          <View style={styles.actions}>
+            <Button
+              label={loading ? 'Organizing...' : 'Organize MeepleUp'}
+              onPress={onSubmit}
+              disabled={loading || !eventForm.name?.trim()}
+              style={styles.submitButton}
             />
-            <Text style={styles.hint}>
-              When the limit is reached, new RSVPs will be waitlisted
-            </Text>
-          </>
-        )}
-      </View>
-      
-      <View style={styles.actions}>
-        <Button
-          label={loading ? 'Organizing...' : 'Organize MeepleUp'}
-          onPress={onSubmit}
-          disabled={loading || !eventForm.name?.trim()}
-          style={styles.submitButton}
-        />
-        <Button
-          label="Cancel"
-          onPress={onCancel}
-          variant="outline"
-          style={styles.cancelButton}
-        />
-      </View>
-    </View>
+            <Button
+              label="Cancel"
+              onPress={onCancel}
+              variant="outline"
+              style={styles.cancelButton}
+            />
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  keyboardAvoidingView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 150, // Extra padding to ensure submit button is visible above keyboard
+  },
   container: {
     padding: theme.spacing.xl,
   },
