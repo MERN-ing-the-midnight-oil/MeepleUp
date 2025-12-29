@@ -1,7 +1,11 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { getHolidayForDate, HolidayIcon } from '../../utils/holidays';
 import storage from '../../utils/storage';
+
+// Module-level storage for restore position - persists across component instances
+// This ensures the position survives even if the component remounts
+let globalRestorePosition = null;
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -38,11 +42,14 @@ const CalendarDatePicker = ({
   
   const [currentMonthIndex, setCurrentMonthIndex] = useState(0);
   const scrollViewRef = useRef(null);
+  const savedScrollPositionRef = useRef(0); // Track scroll position to preserve it
+  const monthIndexRef = useRef(0); // Track month index in a ref to preserve across re-renders
+  const pendingRestoreRef = useRef(null); // Store position to restore after selectedDates changes
+  const isRestoringRef = useRef(false); // Flag to prevent scroll handlers from interfering during restore
   
   // Storage keys for persisting the last viewed month (only used during active use)
   const STORAGE_KEY = 'calendar_last_month_index';
   const STORAGE_TIMESTAMP_KEY = 'calendar_last_month_timestamp';
-  const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes - consider it same session
   const userInteractedRef = useRef(false);
   const isInitialMountRef = useRef(true);
 
@@ -131,23 +138,100 @@ const CalendarDatePicker = ({
   };
 
   const toggleDate = (date) => {
+    console.log('[CalendarDatePicker] ========== LONG-PRESS DETECTED ==========');
+    console.log('[CalendarDatePicker] toggleDate START - date being toggled:', {
+      date: date instanceof Date ? date.toISOString() : date,
+      dateKey: dateToKey(date),
+      dateString: date.toString(),
+    });
+    
     const dateKey = dateToKey(date);
     const newSelectedDates = [...selectedDates];
     
+    console.log('[CalendarDatePicker] Current selectedDates state:', {
+      count: selectedDates.length,
+      dates: selectedDates.map(d => ({
+        date: d.date instanceof Date ? d.date.toISOString() : d.date,
+        dateKey: dateToKey(d.date instanceof Date ? d.date : new Date(d.date)),
+      })),
+    });
+    
+    // CRITICAL: Capture position BEFORE calling onDatesChange
+    // Try multiple sources to get the most accurate position
+    let monthToPreserve = currentMonthIndex;
+    let scrollXToPreserve = savedScrollPositionRef.current;
+    
+    console.log('[CalendarDatePicker] toggleDate - scroll position state:', {
+      currentMonthIndex,
+      monthIndexRef: monthIndexRef.current,
+      savedScrollX: savedScrollPositionRef.current,
+      dateKey,
+    });
+    
+    // Priority: refs > state (refs are updated immediately on scroll)
+    if (monthIndexRef.current > 0) {
+      monthToPreserve = monthIndexRef.current;
+      scrollXToPreserve = savedScrollPositionRef.current > 0 
+        ? savedScrollPositionRef.current 
+        : monthToPreserve * screenWidth;
+      console.log('[CalendarDatePicker] toggleDate - using ref values:', { monthToPreserve, scrollXToPreserve });
+    } else if (currentMonthIndex > 0) {
+      monthToPreserve = currentMonthIndex;
+      scrollXToPreserve = monthToPreserve * screenWidth;
+      console.log('[CalendarDatePicker] toggleDate - using state value:', { monthToPreserve, scrollXToPreserve });
+    } else {
+      // Both are 0, user is on current month
+      monthToPreserve = 0;
+      scrollXToPreserve = 0;
+      console.log('[CalendarDatePicker] toggleDate - user is on current month (0)');
+    }
+    
+    // Store in BOTH ref AND module-level variable for maximum persistence
+    // Module-level variable survives even component remounts
+    const restoreData = {
+      monthIndex: monthToPreserve,
+      scrollX: scrollXToPreserve,
+      timestamp: Date.now(), // Add timestamp for debugging
+    };
+    pendingRestoreRef.current = restoreData;
+    globalRestorePosition = restoreData; // Also store globally
+    
+    // Also update refs immediately to ensure they're in sync
+    monthIndexRef.current = monthToPreserve;
+    savedScrollPositionRef.current = scrollXToPreserve;
+    
+    console.log('[CalendarDatePicker] toggleDate END - saved restore data:', {
+      monthToPreserve,
+      scrollXToPreserve,
+      restoreData: pendingRestoreRef.current,
+      dateKey,
+    });
+    
     if (selectedDatesMap.has(dateKey)) {
       // Remove date
+      console.log('[CalendarDatePicker] Date already selected - REMOVING date');
       const index = newSelectedDates.findIndex(d => {
         const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
         return dKey === dateKey;
       });
       if (index !== -1) {
+        console.log('[CalendarDatePicker] Removing date at index:', index);
         newSelectedDates.splice(index, 1);
       }
     } else {
       // Add date with default times - use LOCAL time to prevent timezone shifts
+      console.log('[CalendarDatePicker] Date not selected - ADDING new date');
       const year = date.getFullYear();
       const month = date.getMonth();
       const day = date.getDate();
+      
+      console.log('[CalendarDatePicker] Creating date object with:', {
+        year,
+        month,
+        day,
+        usualStartTime: usualStartTime ? usualStartTime.toISOString() : 'null (using default 18:00)',
+        usualEndTime: usualEndTime ? usualEndTime.toISOString() : 'null (using default 22:00)',
+      });
       
       // Create date at midnight local time
       const dateObj = new Date(year, month, day, 0, 0, 0, 0);
@@ -174,17 +258,37 @@ const CalendarDatePicker = ({
         endTime,
       };
       
+      console.log('[CalendarDatePicker] New date object created:', {
+        date: newDateObj.date.toISOString(),
+        startTime: newDateObj.startTime.toISOString(),
+        endTime: newDateObj.endTime.toISOString(),
+      });
+      
       newSelectedDates.push(newDateObj);
+      console.log('[CalendarDatePicker] Added to newSelectedDates array, new count:', newSelectedDates.length);
     }
     
     // Sort dates
+    console.log('[CalendarDatePicker] Sorting dates before calling onDatesChange');
     newSelectedDates.sort((a, b) => {
       const dateA = a.date instanceof Date ? a.date : new Date(a.date);
       const dateB = b.date instanceof Date ? b.date : new Date(b.date);
       return dateA.getTime() - dateB.getTime();
     });
     
+    console.log('[CalendarDatePicker] Final newSelectedDates before onDatesChange:', {
+      count: newSelectedDates.length,
+      dates: newSelectedDates.map(d => ({
+        date: d.date instanceof Date ? d.date.toISOString() : d.date,
+        startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+        endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+      })),
+    });
+    
+    console.log('[CalendarDatePicker] Calling onDatesChange callback...');
     onDatesChange(newSelectedDates);
+    console.log('[CalendarDatePicker] onDatesChange callback completed');
+    console.log('[CalendarDatePicker] ========== LONG-PRESS HANDLING COMPLETE ==========');
   };
 
   const isDateDisabled = (date) => {
@@ -228,59 +332,202 @@ const CalendarDatePicker = ({
   const availableWidth = screenWidth;
   const dayWidth = Math.floor(availableWidth / 7); // Each day gets exactly 1/7 of width
 
-  const isRestoringRef = useRef(false);
-
-  // On mount, restore saved month only if it was saved recently (user was actively using calendar)
+  // Always start at current month (index 0) on initial load - don't restore from storage
+  // This prevents flickering when users log in fresh
   useEffect(() => {
-    const restoreSavedMonth = async () => {
-      if (!isInitialMountRef.current) return; // Only run on initial mount
-      
-      try {
-        const savedIndex = await storage.getItem(STORAGE_KEY);
-        const savedTimestamp = await storage.getItem(STORAGE_TIMESTAMP_KEY);
-        
-        if (savedIndex !== null && savedTimestamp !== null) {
-          const index = parseInt(savedIndex, 10);
-          const timestamp = parseInt(savedTimestamp, 10);
-          const now = Date.now();
-          const timeSinceSave = now - timestamp;
-          
-          // Only restore if saved within session timeout (user was actively using calendar)
-          if (timeSinceSave < SESSION_TIMEOUT_MS && index >= 0 && index < months.length) {
-            isRestoringRef.current = true;
-            // Mark as interacted so we can save future changes
-            userInteractedRef.current = true;
-            setCurrentMonthIndex(index);
-            // Scroll to the saved position after a brief delay to ensure layout is complete
-            setTimeout(() => {
-              scrollViewRef.current?.scrollTo({
-                x: index * screenWidth,
-                animated: false,
-              });
-              // Clear restore flag and mark initial mount as complete after scroll
-              setTimeout(() => {
-                isRestoringRef.current = false;
-                isInitialMountRef.current = false;
-              }, 200);
-            }, 100);
-            return; // Exit early, don't set isInitialMountRef to false below
-          }
-        }
-        
-        // No valid restore (or no saved data), mark initial mount as complete
-        isInitialMountRef.current = false;
-      } catch (error) {
-        console.error('Error restoring saved month index:', error);
-        isInitialMountRef.current = false;
-      }
-    };
-    
-    restoreSavedMonth();
+    console.log('[CalendarDatePicker] Initial mount effect running, isInitialMount:', isInitialMountRef.current);
+    if (isInitialMountRef.current) {
+      // Mark initial mount as complete immediately - we always start at current month
+      isInitialMountRef.current = false;
+      console.log('[CalendarDatePicker] Marked initial mount as complete');
+    }
   }, []); // Only run on mount
 
-  // Save month index when user actively navigates (not on initial load or restore)
+  // Keep ref in sync with state
   useEffect(() => {
-    if (userInteractedRef.current && !isInitialMountRef.current && !isRestoringRef.current) {
+    monthIndexRef.current = currentMonthIndex;
+  }, [currentMonthIndex]);
+
+  // Preserve calendar scroll position when selectedDates changes (e.g., when user adds a date)
+  // Use useLayoutEffect to capture ref values synchronously before React commits
+  useLayoutEffect(() => {
+    const hasGlobalRestore = globalRestorePosition !== null;
+    
+    console.log('[CalendarDatePicker] useLayoutEffect triggered for selectedDates:', {
+      selectedDatesCount: selectedDates.length,
+      isInitialMount: isInitialMountRef.current,
+      hasGlobalRestore,
+      globalRestore: globalRestorePosition,
+      pendingRestore: pendingRestoreRef.current,
+    });
+    
+    // If globalRestorePosition is null but we have a pendingRestore, use that
+    if (!hasGlobalRestore && pendingRestoreRef.current) {
+      console.log('[CalendarDatePicker] globalRestorePosition is null, but pendingRestore exists - using it');
+      globalRestorePosition = pendingRestoreRef.current;
+    }
+    
+    // If we have a global restore position, restore even on initial mount
+    // This handles the case where the component remounts after toggleDate
+    // Also restore if we have pendingRestoreRef (even if globalRestorePosition was cleared)
+    const hasPendingRestore = pendingRestoreRef.current !== null;
+    if (!isInitialMountRef.current || hasGlobalRestore || hasPendingRestore) {
+      // PRIORITY 1: Use pendingRestoreRef if available (set in toggleDate)
+      // This is the most reliable since it's set right before onDatesChange
+      const restoreData = pendingRestoreRef.current;
+      
+      // If globalRestorePosition was cleared but we have pendingRestoreRef, restore it
+      if (!hasGlobalRestore && restoreData) {
+        console.log('[CalendarDatePicker] Restoring globalRestorePosition from pendingRestoreRef');
+        globalRestorePosition = restoreData;
+      }
+      
+      // PRIORITY 2: Try to read current scroll position directly from ScrollView
+      let currentScrollX = 0;
+      if (scrollViewRef.current) {
+        // Try to get current scroll position - this is a workaround since
+        // ScrollView doesn't expose a direct way to read contentOffset
+        // We'll use the refs as fallback
+        currentScrollX = savedScrollPositionRef.current;
+      }
+      
+      const refMonth = monthIndexRef.current;
+      const refScrollX = savedScrollPositionRef.current;
+      const stateMonth = currentMonthIndex;
+      
+      // PRIORITY 1: Use globalRestorePosition (module-level, survives remounts)
+      // PRIORITY 2: Use pendingRestoreRef (component-level ref)
+      // PRIORITY 3: Use ref values (updated immediately on scroll)
+      // PRIORITY 4: Fall back to state if refs are 0
+      const globalRestore = globalRestorePosition;
+      
+      console.log('[CalendarDatePicker] selectedDates changed (layout) - checking restore position:', {
+        globalRestore,
+        restoreData,
+        refMonth,
+        refScrollX,
+        currentScrollX,
+        stateMonth,
+        hasScrollView: !!scrollViewRef.current,
+      });
+      
+      let monthToRestore = 0;
+      let scrollXToRestore = 0;
+      
+      if (globalRestore && globalRestore.monthIndex >= 0) {
+        // PRIORITY 1: globalRestorePosition (survives remounts)
+        monthToRestore = globalRestore.monthIndex;
+        scrollXToRestore = globalRestore.scrollX;
+        console.log('[CalendarDatePicker] Using globalRestorePosition:', globalRestore);
+        // If we're restoring from global on initial mount, mark mount as complete
+        if (isInitialMountRef.current) {
+          isInitialMountRef.current = false;
+          console.log('[CalendarDatePicker] Restoring on initial mount, marking mount as complete');
+        }
+      } else if (restoreData && restoreData.monthIndex >= 0) {
+        monthToRestore = restoreData.monthIndex;
+        scrollXToRestore = restoreData.scrollX;
+        console.log('[CalendarDatePicker] Using pendingRestoreRef:', restoreData);
+      } else if (refMonth > 0 || refScrollX > 0) {
+        monthToRestore = refMonth;
+        scrollXToRestore = refScrollX > 0 ? refScrollX : refMonth * screenWidth;
+        console.log('[CalendarDatePicker] Using ref values:', { refMonth, refScrollX });
+      } else if (stateMonth > 0) {
+        monthToRestore = stateMonth;
+        scrollXToRestore = stateMonth * screenWidth;
+        console.log('[CalendarDatePicker] Using state value:', stateMonth);
+      } else {
+        console.log('[CalendarDatePicker] All values are 0, skipping restore');
+        return;
+      }
+      
+      // Calculate target scroll position
+      const targetX = scrollXToRestore > 0 ? scrollXToRestore : monthToRestore * screenWidth;
+      
+      console.log('[CalendarDatePicker] Final restore decision (layout):', {
+        monthToRestore,
+        scrollXToRestore,
+        targetX,
+      });
+      
+      if (scrollViewRef.current && monthToRestore >= 0 && targetX > 0) {
+        // Set restore flag to prevent scroll handlers from interfering
+        isRestoringRef.current = true;
+        
+        // Update state to match the restored position
+        if (monthToRestore !== currentMonthIndex) {
+          setCurrentMonthIndex(monthToRestore);
+        }
+        
+        // Update refs to match
+        monthIndexRef.current = monthToRestore;
+        savedScrollPositionRef.current = targetX;
+        
+        // Restore synchronously in layout effect
+        console.log('[CalendarDatePicker] Restoring scroll in layout effect to:', targetX);
+        scrollViewRef.current.scrollTo({
+          x: targetX,
+          animated: false,
+        });
+        
+        // Clear restore flag after a short delay, but keep globalRestorePosition longer
+        // to survive re-renders that happen after Firestore saves
+        setTimeout(() => {
+          isRestoringRef.current = false;
+          // Clear pendingRestoreRef but keep globalRestorePosition for much longer
+          // to survive re-renders/remounts that happen after async Firestore saves
+          pendingRestoreRef.current = null;
+          console.log('[CalendarDatePicker] Restore complete, re-enabling scroll handlers (keeping globalRestorePosition)');
+          
+          // Don't clear globalRestorePosition here - let it persist until user manually scrolls
+          // This ensures it survives re-renders/remounts that happen after async Firestore saves
+          // It will be cleared in handleScroll when user takes control
+        }, 100);
+      } else {
+        // If we couldn't restore, keep the data for the backup effect
+        console.log('[CalendarDatePicker] Could not restore in layout effect, keeping restore data for backup');
+      }
+    }
+  }, [selectedDates, screenWidth]); // Removed currentMonthIndex from deps to prevent loops
+  
+  // Also use regular useEffect as backup for async restore
+  useEffect(() => {
+    if (!isInitialMountRef.current && pendingRestoreRef.current) {
+      const restoreData = pendingRestoreRef.current;
+      const targetX = restoreData.scrollX > 0 ? restoreData.scrollX : restoreData.monthIndex * screenWidth;
+      
+      // Double-check restore after paint
+      requestAnimationFrame(() => {
+        if (scrollViewRef.current && targetX >= 0) {
+          isRestoringRef.current = true;
+          console.log('[CalendarDatePicker] Backup restore after paint to:', targetX);
+          
+          // Update state and refs
+          if (restoreData.monthIndex !== currentMonthIndex) {
+            setCurrentMonthIndex(restoreData.monthIndex);
+          }
+          monthIndexRef.current = restoreData.monthIndex;
+          savedScrollPositionRef.current = targetX;
+          
+          scrollViewRef.current.scrollTo({
+            x: targetX,
+            animated: false,
+          });
+          
+          // Clear restore flag and pending restore
+          setTimeout(() => {
+            isRestoringRef.current = false;
+            pendingRestoreRef.current = null;
+          }, 100);
+        }
+      });
+    }
+  }, [selectedDates, screenWidth, currentMonthIndex]);
+
+  // Save month index when user actively navigates (not on initial load)
+  // This allows the month to persist while viewing calendar day details modals
+  useEffect(() => {
+    if (userInteractedRef.current && !isInitialMountRef.current) {
       const saveMonthIndex = async () => {
         try {
           await storage.setItem(STORAGE_KEY, currentMonthIndex.toString());
@@ -295,11 +542,63 @@ const CalendarDatePicker = ({
   }, [currentMonthIndex]);
 
   const handleScroll = (event) => {
+    // Ignore scroll events during restore to prevent interference
+    if (isRestoringRef.current) {
+      return;
+    }
+    
+    // Clear globalRestorePosition when user manually scrolls
+    // This means the restore is complete and user has taken control
+    if (globalRestorePosition !== null) {
+      console.log('[CalendarDatePicker] User scrolled manually - clearing globalRestorePosition');
+      globalRestorePosition = null;
+    }
+    
     const offsetX = event.nativeEvent.contentOffset.x;
     const newIndex = Math.round(offsetX / screenWidth);
+    
+    // Always update refs to track current position (even if state hasn't updated yet)
+    savedScrollPositionRef.current = offsetX;
+    monthIndexRef.current = newIndex;
+    
+    // Update state if index changed - this ensures state reflects actual scroll position
     if (newIndex >= 0 && newIndex < months.length && newIndex !== currentMonthIndex) {
+      console.log('[CalendarDatePicker] Scroll detected, updating month index:', { 
+        oldIndex: currentMonthIndex, 
+        newIndex, 
+        offsetX,
+        monthIndexRef: monthIndexRef.current,
+      });
       userInteractedRef.current = true;
       setCurrentMonthIndex(newIndex);
+    }
+  };
+  
+  // Separate handler for momentum scroll end to ensure state is updated
+  const handleMomentumScrollEnd = (event) => {
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const newIndex = Math.round(offsetX / screenWidth);
+    
+    // Update refs regardless of restore flag
+    savedScrollPositionRef.current = offsetX;
+    monthIndexRef.current = newIndex;
+    
+    // Ignore state updates during restore
+    if (isRestoringRef.current) {
+      return;
+    }
+    
+    if (newIndex >= 0 && newIndex < months.length) {
+      console.log('[CalendarDatePicker] Momentum scroll ended, final position:', {
+        newIndex,
+        offsetX,
+        currentMonthIndex,
+      });
+      userInteractedRef.current = true;
+      // Always update state to match final scroll position
+      if (newIndex !== currentMonthIndex) {
+        setCurrentMonthIndex(newIndex);
+      }
     }
   };
 
@@ -307,6 +606,8 @@ const CalendarDatePicker = ({
     if (currentMonthIndex > 0) {
       const newIndex = currentMonthIndex - 1;
       userInteractedRef.current = true;
+      monthIndexRef.current = newIndex; // Update ref immediately
+      savedScrollPositionRef.current = newIndex * screenWidth; // Update saved position
       setCurrentMonthIndex(newIndex);
       scrollViewRef.current?.scrollTo({
         x: newIndex * screenWidth,
@@ -319,6 +620,8 @@ const CalendarDatePicker = ({
     if (currentMonthIndex < months.length - 1) {
       const newIndex = currentMonthIndex + 1;
       userInteractedRef.current = true;
+      monthIndexRef.current = newIndex; // Update ref immediately
+      savedScrollPositionRef.current = newIndex * screenWidth; // Update saved position
       setCurrentMonthIndex(newIndex);
       scrollViewRef.current?.scrollTo({
         x: newIndex * screenWidth,
@@ -360,7 +663,7 @@ const CalendarDatePicker = ({
       decelerationRate="fast"
       snapToInterval={screenWidth}
       snapToAlignment="start"
-      onMomentumScrollEnd={handleScroll}
+      onMomentumScrollEnd={handleMomentumScrollEnd}
       onScroll={handleScroll}
       scrollEventThrottle={16}
     >

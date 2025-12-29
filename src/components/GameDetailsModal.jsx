@@ -457,8 +457,6 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                   style={{
                     opacity: isFavorite ? shimmerOpacity : 1,
                     transform: isFavorite ? [{ scale: shimmerScale }] : [],
-                    alignItems: 'center',
-                    justifyContent: 'center',
                   }}
                 >
                   {isFavorite ? (
@@ -471,13 +469,13 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                   ) : (
                     <DottedHeart size={16} color="#FFFFFF" />
                   )}
-                  <Text style={[
-                    styles.favoriteButtonOverlayText,
-                    isFavorite && styles.favoriteButtonOverlayTextActive
-                  ]}>
-                    Favorite
-                  </Text>
                 </Animated.View>
+                <Text style={[
+                  styles.favoriteButtonOverlayText,
+                  isFavorite && styles.favoriteButtonOverlayTextActive
+                ]}>
+                  Favorite
+                </Text>
               </TouchableOpacity>
             )}
           </View>

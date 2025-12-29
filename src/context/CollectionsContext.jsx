@@ -74,6 +74,7 @@ export const CollectionsProvider = ({ children }) => {
     currentUserSyncedRef.current = userId;
     
     const sync = async () => {
+      setLoading(true);
       try {
         console.log(`[Collections] Fetching games for user: ${userId}`);
         const snapshot = await db.collection('userGames').doc(userId).collection('games').get();
@@ -184,6 +185,8 @@ export const CollectionsProvider = ({ children }) => {
         });
         // Reset flag on error so we can retry
         currentUserSyncedRef.current = null;
+      } finally {
+        setLoading(false);
       }
     };
     
@@ -371,6 +374,7 @@ export const CollectionsProvider = ({ children }) => {
       updateGameInCollection,
       syncGamesForUsers,
       loading,
+      initialised,
     };
   }, [
     collections, // It's OK for this to change!
@@ -380,6 +384,7 @@ export const CollectionsProvider = ({ children }) => {
     updateGameInCollection,
     syncGamesForUsers,
     loading,
+    initialised,
   ]);
 
   return (

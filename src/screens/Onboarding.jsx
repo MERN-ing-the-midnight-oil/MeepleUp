@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, useWindowDimensions, Switch, KeyboardAvoidingView, Platform, TouchableOpacity, Animated } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -51,11 +51,47 @@ const Onboarding = () => {
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const selectedDatesRef = useRef(selectedDates);
+  const scrollPositionRef = useRef(0); // Track scroll position to prevent jumps
   
   // Keep ref in sync with state
   useEffect(() => {
     selectedDatesRef.current = selectedDates;
   }, [selectedDates]);
+  
+  // Track scroll position
+  const handleScroll = (event) => {
+    const offsetY = event.nativeEvent.contentOffset?.y ?? 0;
+    if (offsetY >= 0) {
+      scrollPositionRef.current = offsetY;
+    }
+  };
+  
+  // Restore scroll position when selectedDates changes (e.g., when dates are added/updated)
+  // Use useLayoutEffect to restore synchronously before paint, preventing visible jumps
+  const previousDateCountRef = useRef(selectedDates.length);
+  useLayoutEffect(() => {
+    const currentDateCount = selectedDates.length;
+    const dateCountChanged = currentDateCount !== previousDateCountRef.current;
+    previousDateCountRef.current = currentDateCount;
+    
+    if (dateCountChanged && scrollViewRef.current && scrollPositionRef.current > 0) {
+      // Restore synchronously before paint to prevent visible jump
+      scrollViewRef.current.scrollTo({
+        y: scrollPositionRef.current,
+        animated: false,
+      });
+      
+      // Backup restore after paint
+      requestAnimationFrame(() => {
+        if (scrollViewRef.current && scrollPositionRef.current > 0) {
+          scrollViewRef.current.scrollTo({
+            y: scrollPositionRef.current,
+            animated: false,
+          });
+        }
+      });
+    }
+  }, [selectedDates.length]);
   
   // Debug: Log when editingDateIndex changes
   useEffect(() => {
@@ -235,7 +271,7 @@ const Onboarding = () => {
         address: eventAddress.trim() || '',
         eventDates,
         scheduledFor: scheduledForValue, // For backward compatibility
-        description: eventDescription.trim(),
+        description: '', // Description removed from UI
         visibility: 'private', // Invite only for v1
         organizerId: user.uid,
       };
@@ -256,14 +292,6 @@ const Onboarding = () => {
       }
       if (usualEndTime) {
         eventData.usualEndTime = usualEndTime.toISOString();
-      }
-
-      // Add member limit if provided
-      if (memberLimit.trim()) {
-        const limit = parseInt(memberLimit.trim(), 10);
-        if (!isNaN(limit) && limit > 0) {
-          eventData.memberLimit = limit;
-        }
       }
 
       const newEvent = await createEvent(eventData);
@@ -484,12 +512,12 @@ const Onboarding = () => {
           </View>
     
           {/* User's MeepleUps */}
-          {Array.isArray(sortedEvents) && sortedEvents.length > 0 && (
-            <View style={styles.eventsSection}>
-              <View style={styles.membershipsToken}>
-                <Text style={styles.membershipsTokenText}>Your Memberships</Text>
-              </View>
-              {sortedEvents.map((event) => {
+          <View style={styles.eventsSection}>
+            <View style={styles.membershipsToken}>
+              <Text style={styles.membershipsTokenText}>Your MeepleUps</Text>
+            </View>
+            {Array.isArray(sortedEvents) && sortedEvents.length > 0 ? (
+              sortedEvents.map((event) => {
                 if (!event || !event.id) return null;
                 const userIdentifier = user?.uid || user?.id;
                 const isOrganizer = event.organizerId === userIdentifier;
@@ -522,9 +550,16 @@ const Onboarding = () => {
                     navigation={navigation}
                   />
                 );
-              })}
-            </View>
-          )}
+              })
+            ) : (
+              <View style={styles.emptyMembershipsContainer}>
+                <MaterialIcons name="lock-outline" size={16} color={theme.colors.textSecondary} style={styles.emptyMembershipsIcon} />
+                <Text style={styles.emptyMembershipsText}>
+                  MeepleUps are invite-only.{'\n'}Join a friend's group or create one—your first MeepleUp will appear here.
+                </Text>
+              </View>
+            )}
+          </View>
           
           {/* Join an existing MeepleUp Section */}
           <View style={styles.joinSection}>
@@ -540,23 +575,19 @@ const Onboarding = () => {
           </View>
 
           <View style={styles.options}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.organizeCard,
-                pressed && styles.organizeCardPressed,
-              ]}
-              onPress={() => handleModeChange('create')}
-            >
+            <View style={styles.organizeCard}>
               <View style={styles.organizeTitleContainer}>
-                <Text style={styles.organizeTitle}>Organize a new MeepleUp</Text>
-                <View style={styles.addCircle}>
-                  <Text style={styles.circlePlus}>+</Text>
-                </View>
+                <Text style={styles.organizeTitle}>Host a MeepleUp</Text>
               </View>
               <Text style={styles.organizeSubtitle}>
-                Organize a new or established gaming group and share a join code with friends.
+                Invite your friends to a game night with a simple 3-word code.
               </Text>
-            </Pressable>
+              <Button
+                label="Host"
+                onPress={() => handleModeChange('create')}
+                style={styles.hostButton}
+              />
+            </View>
           </View>
           </View>
         </ScrollView>
@@ -643,10 +674,15 @@ const Onboarding = () => {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           showsVerticalScrollIndicator={true}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false }
-          )}
+          onScroll={(event) => {
+            // Track scroll position for restoration
+            handleScroll(event);
+            // Also update animated value for other uses
+            Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+              { useNativeDriver: false }
+            )(event);
+          }}
           scrollEventThrottle={16}
         >
         <View style={styles.content}>
@@ -675,7 +711,7 @@ const Onboarding = () => {
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>MeepleUp Name <Text style={styles.requiredAsterisk}>*</Text></Text>
               <Input
-                placeholder="Give your event a name"
+                placeholder="Give your gaming group a name"
                 value={eventName}
                 onChangeText={(text) => {
                   setEventName(text);
@@ -685,9 +721,52 @@ const Onboarding = () => {
               />
             </View>
 
+            {/* Location */}
+            <View style={styles.fieldContainer}>
+              <Text style={styles.fieldLabel}>Usual Location <Text style={styles.requiredAsterisk}>*</Text></Text>
+              <Input
+                placeholder="Where you usually meet"
+                value={eventLocation}
+                onChangeText={(text) => {
+                  setEventLocation(text);
+                  setError('');
+                }}
+                style={styles.input}
+              />
+              <View style={styles.subcategoryContainer}>
+                <Text style={styles.subcategoryLabel}>Address</Text>
+                <Input
+                  placeholder="(optional)"
+                  value={eventAddress}
+                  onChangeText={(text) => {
+                    setEventAddress(text);
+                    setError('');
+                  }}
+                  style={styles.subcategoryInput}
+                />
+              </View>
+
+              {/* Calendar Button */}
+              <Text style={styles.fieldLabel}>When do you plan to meet? <Text style={styles.requiredAsterisk}>*</Text></Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.calendarButtonPressable,
+                  pressed && styles.calendarButtonPressed,
+                ]}
+                onPress={() => setShowCalendarModal(true)}
+              >
+                <MaterialIcons name="calendar-today" size={20} color="#ffffff" style={styles.calendarButtonIcon} />
+                <Text style={styles.calendarButtonText}>
+                  {selectedDates.length > 0 
+                    ? `View Calendar (${selectedDates.length} date${selectedDates.length !== 1 ? 's' : ''} selected)`
+                    : 'Choose your next meeting day (you can always change it later).'}
+                </Text>
+              </Pressable>
+            </View>
+
             {/* Date & Time */}
             <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Date & Time <Text style={styles.requiredAsterisk}>*</Text></Text>
+              <Text style={styles.fieldLabel}>Date & Time</Text>
               
               {/* Usual Time */}
               <View style={styles.timeRow}>
@@ -700,14 +779,17 @@ const Onboarding = () => {
                     ]}
                     onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
                   >
-                    <Text style={styles.timeButtonText}>
+                    <Text style={[
+                      styles.timeButtonText,
+                      !usualStartTime && styles.timeButtonTextPlaceholder
+                    ]}>
                       {usualStartTime 
                         ? usualStartTime.toLocaleTimeString('en-US', {
                             hour: 'numeric',
                             minute: '2-digit',
                             hour12: true,
                           })
-                        : 'Not set (optional)'}
+                        : '(optional)'}
                     </Text>
                     <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                   </Pressable>
@@ -722,14 +804,17 @@ const Onboarding = () => {
                     ]}
                     onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
                   >
-                    <Text style={styles.timeButtonText}>
+                    <Text style={[
+                      styles.timeButtonText,
+                      !usualEndTime && styles.timeButtonTextPlaceholder
+                    ]}>
                       {usualEndTime 
                         ? usualEndTime.toLocaleTimeString('en-US', {
                             hour: 'numeric',
                             minute: '2-digit',
                             hour12: true,
                           })
-                        : 'Not set (optional)'}
+                        : '(optional)'}
                     </Text>
                     <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                   </Pressable>
@@ -737,46 +822,10 @@ const Onboarding = () => {
               </View>
             </View>
 
-            {/* Location */}
-            <View style={styles.fieldContainer}>
-              <Text style={styles.fieldLabel}>Default Location <Text style={styles.requiredAsterisk}>*</Text></Text>
-              <Input
-                placeholder="Jason's house"
-                value={eventLocation}
-                onChangeText={(text) => {
-                  setEventLocation(text);
-                  setError('');
-                }}
-                style={styles.input}
-              />
-              <Text style={styles.fieldLabel}>Address</Text>
-              <Input
-                placeholder="123 Tolkien Dr."
-                value={eventAddress}
-                onChangeText={(text) => {
-                  setEventAddress(text);
-                  setError('');
-                }}
-                style={styles.input}
-              />
-
-              {/* Calendar Button */}
-              <Button
-                label={selectedDates.length > 0 
-                  ? `View Calendar (${selectedDates.length} date${selectedDates.length !== 1 ? 's' : ''} selected)`
-                  : 'Select Dates from Calendar'}
-                onPress={() => setShowCalendarModal(true)}
-                variant="outline"
-                style={styles.calendarButton}
-              />
-            </View>
-
             {/* RSVP Required */}
             <View style={styles.fieldContainer}>
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleLabelContainer}>
-                  <Text style={styles.toggleLabel}>RSVP Required?</Text>
-                </View>
+              <View style={styles.toggleRowCentered}>
+                <Text style={styles.toggleLabel}>Ask people to RSVP?</Text>
                 <Switch
                   value={rsvpRequired}
                   onValueChange={setRsvpRequired}
@@ -788,48 +837,8 @@ const Onboarding = () => {
           </View>
         </View>
 
-        {/* Optional Fields */}
-        <View style={styles.section}>
-          {/* MeepleUp Description */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.fieldLabel}>MeepleUp Description</Text>
-            <Input
-              placeholder="Bring snacks! We'll be playing heavy euros."
-              value={eventDescription}
-              onChangeText={(text) => {
-                setEventDescription(text);
-                setError('');
-              }}
-              multiline
-              numberOfLines={3}
-              maxLength={500}
-              style={styles.input}
-            />
-            <Text style={styles.charCount}>
-              {eventDescription.length}/500 characters
-            </Text>
-          </View>
-
-          {/* Member Limit */}
-          <View style={styles.fieldContainer}>
-            <Text style={styles.fieldLabel}>Member Limit</Text>
-            <Input
-              placeholder="Leave blank for unlimited"
-              value={memberLimit}
-              onChangeText={(text) => {
-                // Only allow numbers
-                const numericValue = text.replace(/[^0-9]/g, '');
-                setMemberLimit(numericValue);
-                setError('');
-              }}
-              keyboardType="numeric"
-              style={styles.input}
-            />
-          </View>
-        </View>
-
         <Button
-          label={loading ? 'Creating...' : 'Create This MeepleUp'}
+          label={loading ? 'Creating...' : 'Create This MeepleUp!'}
           onPress={handleCreateEvent}
           disabled={loading}
           style={styles.fullButton}
@@ -859,14 +868,17 @@ const Onboarding = () => {
                   ]}
                   onPress={() => setShowTimePicker({ type: 'usualStart', dateIndex: null })}
                 >
-                  <Text style={styles.timeButtonText}>
+                  <Text style={[
+                    styles.timeButtonText,
+                    !usualStartTime && styles.timeButtonTextPlaceholder
+                  ]}>
                     {usualStartTime 
                       ? usualStartTime.toLocaleTimeString('en-US', {
                           hour: 'numeric',
                           minute: '2-digit',
                           hour12: true,
                         })
-                      : 'Not set (optional)'}
+                      : '(optional)'}
                   </Text>
                   <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                 </Pressable>
@@ -881,14 +893,17 @@ const Onboarding = () => {
                   ]}
                   onPress={() => setShowTimePicker({ type: 'usualEnd', dateIndex: null })}
                 >
-                  <Text style={styles.timeButtonText}>
+                  <Text style={[
+                    styles.timeButtonText,
+                    !usualEndTime && styles.timeButtonTextPlaceholder
+                  ]}>
                     {usualEndTime 
                       ? usualEndTime.toLocaleTimeString('en-US', {
                           hour: 'numeric',
                           minute: '2-digit',
                           hour12: true,
                         })
-                      : 'Not set (optional)'}
+                      : '(optional)'}
                   </Text>
                   <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                 </Pressable>
@@ -1535,6 +1550,20 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.xs,
   },
+  subcategoryContainer: {
+    marginLeft: theme.spacing.lg,
+    marginTop: theme.spacing.sm,
+  },
+  subcategoryLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.medium,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
+  },
+  subcategoryInput: {
+    marginBottom: theme.spacing.lg,
+    borderRadius: 0,
+  },
   fieldExample: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.textSecondary,
@@ -1547,6 +1576,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: theme.spacing.md,
     paddingVertical: theme.spacing.sm,
+  },
+  toggleRowCentered: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    gap: theme.spacing.sm,
   },
   toggleLabelContainer: {
     flex: 1,
@@ -1622,12 +1659,48 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     flex: 1,
   },
+  timeButtonTextPlaceholder: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.normal,
+    color: theme.colors.textSecondary,
+  },
   timeIcon: {
     marginLeft: theme.spacing.sm,
   },
   calendarButton: {
     marginTop: theme.spacing.sm,
     borderRadius: 0,
+  },
+  calendarButtonPressable: {
+    ...commonStyles.button,
+    backgroundColor: theme.colors.feltGreen,
+    borderWidth: 2,
+    borderColor: theme.colors.feltGreen,
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: theme.spacing.sm,
+    ...theme.shadows.card,
+  },
+  calendarButtonPressed: {
+    opacity: 0.9,
+    backgroundColor: theme.colors.feltGreen,
+    transform: [{ scale: 0.98 }],
+  },
+  calendarButtonIcon: {
+    marginRight: theme.spacing.sm,
+  },
+  calendarButtonText: {
+    ...commonStyles.buttonText,
+    color: '#ffffff',
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    flex: 1,
+    textAlign: 'center',
   },
   modalContent: {
     padding: theme.spacing.xl,
@@ -1695,6 +1768,22 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(255, 255, 255, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
+  },
+  emptyMembershipsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: theme.spacing.lg,
+    paddingTop: theme.spacing.xl,
+  },
+  emptyMembershipsIcon: {
+    marginRight: theme.spacing.sm,
+    marginTop: 2, // Slight vertical alignment adjustment
+  },
+  emptyMembershipsText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    lineHeight: theme.typography.fontSize.sm * theme.typography.lineHeight.normal,
+    flex: 1,
   },
   eventsSectionTitle: {
     fontSize: theme.typography.fontSize.lg,
@@ -1781,9 +1870,6 @@ const styles = StyleSheet.create({
     borderColor: '#6b5435', // Darker brown border
     borderStyle: 'solid',
   },
-  organizeCardPressed: {
-    opacity: 0.9,
-  },
   organizeTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1799,37 +1885,16 @@ const styles = StyleSheet.create({
     textShadowRadius: 1,
     flex: 1,
   },
-  addCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.meepleRed,
-    justifyContent: 'center',
-    alignItems: 'center',
-    // Thick appearance with shadows
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 8,
-    // Border for thickness effect
-    borderWidth: 2,
-    borderColor: '#a02d22', // Darker red border
-    // Additional shadow layers for depth
-    borderBottomWidth: 4,
-    borderBottomColor: '#8b2519', // Even darker on bottom
-  },
-  circlePlus: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: theme.typography.fontWeight.bold,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
   organizeSubtitle: {
     fontSize: theme.typography.fontSize.base,
     color: '#4a3d2f', // Darker brown text on cardboard
     lineHeight: theme.typography.fontSize.base * theme.typography.lineHeight.normal,
+    marginBottom: theme.spacing.lg,
+  },
+  hostButton: {
+    alignSelf: 'center',
+    width: 'auto',
+    paddingHorizontal: theme.spacing.xl,
   },
   joinTitle: {
     fontSize: theme.typography.fontSize['2xl'],

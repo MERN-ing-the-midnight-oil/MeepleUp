@@ -89,8 +89,8 @@ const Auth = ({ route: routeProp }) => {
         errorMessage = 'Please enter a valid email address.';
       } else if (err.code === 'auth/weak-password') {
         errorMessage = 'Password is too weak. Please use a stronger password.';
-      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        errorMessage = 'Your email or password was incorrect. Please try again.';
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-login-credentials') {
+        errorMessage = 'We couldn\'t sign you in. Please check your email and password, or use "Forgot Password" if you need help.';
       }
       
       setError(errorMessage);

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { Platform, KeyboardAvoidingView, Dimensions } from 'react-native';
 import {
   View,
@@ -248,6 +248,41 @@ const EventHub = () => {
 
   const event = getEventById(eventId);
   const userId = user?.uid || user?.id || null;
+  
+  // Log when event object reference changes (causes re-renders)
+  const eventRef = useRef(event);
+  const scheduleFormRef = useRef(scheduleForm);
+  
+  useEffect(() => {
+    scheduleFormRef.current = scheduleForm;
+  }, [scheduleForm]);
+  
+  useEffect(() => {
+    if (eventRef.current !== event) {
+      console.log('[EventHub] ⚠️  Event object reference changed - this will cause re-render');
+      console.log('[EventHub] Event reference change details:', {
+        eventId: event?.id,
+        eventDatesCount: event?.eventDates?.length,
+        previousEventDatesCount: eventRef.current?.eventDates?.length,
+        lastUpdatedAt: event?.lastUpdatedAt,
+        previousLastUpdatedAt: eventRef.current?.lastUpdatedAt,
+        currentScheduleFormDatesCount: scheduleFormRef.current?.selectedDates?.length,
+      });
+      
+      // Check if scheduleForm should be preserved (if eventDates haven't actually changed)
+      const eventDatesChanged = 
+        event?.eventDates?.length !== eventRef.current?.eventDates?.length ||
+        JSON.stringify(event?.eventDates?.map(ed => ed.date)) !== 
+        JSON.stringify(eventRef.current?.eventDates?.map(ed => ed.date));
+      
+      if (!eventDatesChanged && scheduleFormRef.current?.selectedDates?.length > 0) {
+        console.log('[EventHub] ⚠️  Event updated but eventDates unchanged - scheduleForm should be preserved');
+        console.log('[EventHub] Current scheduleForm has', scheduleFormRef.current.selectedDates.length, 'dates');
+      }
+      
+      eventRef.current = event;
+    }
+  }, [event, scheduleForm]);
 
   const memberStatus = event && userId
     ? getMembershipStatus(event.id, userId)
@@ -385,15 +420,33 @@ const EventHub = () => {
     }
   }, [selectedDateDetail]);
 
-  // Initialize schedule form when event loads
+  // Track the last initialized eventId to prevent resetting scheduleForm on every event update
+  const lastInitializedEventIdRef = useRef(null);
+  
+  // Initialize schedule form when event loads (only once per eventId)
   useEffect(() => {
-    if (event) {
+    console.log('[EventHub] ========== scheduleForm INITIALIZATION useEffect RUNNING ==========');
+    console.log('[EventHub] useEffect trigger - event:', {
+      id: event?.id,
+      lastInitializedId: lastInitializedEventIdRef.current,
+      shouldInitialize: event?.id && event.id !== lastInitializedEventIdRef.current,
+      hasEventDates: !!event?.eventDates,
+      eventDatesType: Array.isArray(event?.eventDates) ? 'array' : typeof event?.eventDates,
+      eventDatesCount: Array.isArray(event?.eventDates) ? event?.eventDates.length : 'N/A',
+      hasScheduledFor: !!event?.scheduledFor,
+    });
+    
+    if (event && event.id && event.id !== lastInitializedEventIdRef.current) {
+      console.log('[EventHub] Initializing scheduleForm for new eventId:', event.id);
+      lastInitializedEventIdRef.current = event.id;
+      console.log('[EventHub] Event exists, initializing scheduleForm from event data...');
       // Parse existing scheduledFor or eventDates
       let selectedDates = [];
       const defaultStartTime = new Date(new Date().setHours(18, 0, 0, 0));
       const defaultEndTime = new Date(new Date().setHours(22, 0, 0, 0));
       
       if (event.eventDates && Array.isArray(event.eventDates)) {
+        console.log('[EventHub] Using event.eventDates array format, count:', event.eventDates.length);
         // New format: array of dates with times and locations
         selectedDates = event.eventDates.map(ed => {
           const date = safeParseDate(ed.date);
@@ -408,7 +461,16 @@ const EventHub = () => {
             note: ed.note || '',
           };
         });
+        console.log('[EventHub] Parsed selectedDates from eventDates:', {
+          count: selectedDates.length,
+          dates: selectedDates.map(d => ({
+            date: d.date.toISOString(),
+            startTime: d.startTime.toISOString(),
+            endTime: d.endTime.toISOString(),
+          })),
+        });
       } else if (event.scheduledFor) {
+        console.log('[EventHub] Using legacy scheduledFor format');
         // Old format: single date string
         try {
           const date = safeParseDate(event.scheduledFor);
@@ -421,11 +483,25 @@ const EventHub = () => {
               address: event.address || event.exactLocation || '',
               note: '',
             }];
+            console.log('[EventHub] Parsed selectedDates from scheduledFor:', {
+              count: selectedDates.length,
+              date: selectedDates[0].date.toISOString(),
+            });
           }
         } catch (e) {
-          // Silently handle parsing errors
+          console.error('[EventHub] Error parsing scheduledFor:', e);
         }
+      } else {
+        console.log('[EventHub] No eventDates or scheduledFor found - initializing with empty array');
       }
+      
+      console.log('[EventHub] Setting scheduleForm state with:', {
+        selectedDatesCount: selectedDates.length,
+        usualStartTime: event.usualStartTime ? new Date(event.usualStartTime).toISOString() : 'null',
+        usualEndTime: event.usualEndTime ? new Date(event.usualEndTime).toISOString() : 'null',
+        location: event.location || event.generalLocation || '',
+        address: event.address || event.exactLocation || '',
+      });
       
       setScheduleForm({
         selectedDates,
@@ -447,8 +523,19 @@ const EventHub = () => {
         location: event.location || event.generalLocation || '',
         address: event.address || event.exactLocation || '',
       });
+      
+      console.log('[EventHub] ✅ scheduleForm initialization complete');
+    } else {
+      if (!event) {
+        console.log('[EventHub] No event object - skipping scheduleForm initialization');
+      } else if (!event.id) {
+        console.log('[EventHub] Event has no id - skipping scheduleForm initialization');
+      } else {
+        console.log('[EventHub] Event already initialized - skipping to prevent reset');
+      }
     }
-  }, [event]);
+    console.log('[EventHub] ========== scheduleForm INITIALIZATION useEffect COMPLETE ==========');
+  }, [event?.id]); // Only depend on event.id, not the entire event object
 
   // GamesTab-specific logic removed - will be rebuilt
 
@@ -493,11 +580,15 @@ const EventHub = () => {
               if (memberDoc.exists) {
                 const memberData = memberDoc.data();
                 // Support both old format (rsvpStatus) and new format (rsvpStatuses)
-                if (memberData.rsvpStatuses) {
+                if (memberData.rsvpStatuses && typeof memberData.rsvpStatuses === 'object' && memberData.rsvpStatuses.constructor === Object) {
+                  // Normal format: object with date keys
                   rsvps[member.userId] = memberData.rsvpStatuses;
-                } else if (memberData.rsvpStatus) {
+                } else if (memberData.rsvpStatus && typeof memberData.rsvpStatus === 'string') {
                   // Backward compatibility: convert single status to date-specific
                   rsvps[member.userId] = { default: memberData.rsvpStatus };
+                } else {
+                  // No valid RSVP data found
+                  rsvps[member.userId] = {};
                 }
               }
             }
@@ -538,13 +629,18 @@ const EventHub = () => {
                   console.log(`[EventHub] Set name from member doc for ${member.userId}: ${memberData.userName}`);
                 }
                 // Support both old format (rsvpStatus) and new format (rsvpStatuses)
-                if (memberData.rsvpStatuses) {
+                if (memberData.rsvpStatuses && typeof memberData.rsvpStatuses === 'object' && memberData.rsvpStatuses.constructor === Object) {
+                  // Normal format: object with date keys
                   rsvps[member.userId] = memberData.rsvpStatuses;
                   console.log(`[EventHub] Set RSVP statuses for ${member.userId}:`, memberData.rsvpStatuses);
-                } else if (memberData.rsvpStatus) {
+                } else if (memberData.rsvpStatus && typeof memberData.rsvpStatus === 'string') {
                   // Backward compatibility: convert single status to date-specific
                   rsvps[member.userId] = { default: memberData.rsvpStatus };
                   console.log(`[EventHub] Set RSVP status (legacy) for ${member.userId}: ${memberData.rsvpStatus}`);
+                } else {
+                  // No valid RSVP data found
+                  rsvps[member.userId] = {};
+                  console.log(`[EventHub] No valid RSVP data for ${member.userId}, setting empty object`);
                 }
                 if (memberData.userAvatarUrl && memberData.userAvatarUrl.trim() !== '') {
                   avatars[member.userId] = memberData.userAvatarUrl;
@@ -729,38 +825,57 @@ const EventHub = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memberIdsKey, event?.id, user?.uid, user?.id]);
 
-  // Fetch current user's RSVP from Firestore
+  // Real-time listener for all members' RSVP updates
   useEffect(() => {
-    if (!userId || !event?.id || !db) return;
+    if (!event?.id || !db || !members.length) return;
 
-    const fetchCurrentUserRSVP = async () => {
-      try {
-        const memberDoc = await db.collection('gamingGroups').doc(event.id)
-          .collection('members').doc(userId).get();
+    console.log('[EventHub] Setting up members RSVP listener for event:', event.id);
+
+    const membersRef = db.collection('gamingGroups').doc(event.id).collection('members');
+    
+    // Set up real-time listener for all member documents
+    const unsubscribe = membersRef.onSnapshot(
+      (snapshot) => {
+        console.log('[EventHub] Members RSVP snapshot received, size:', snapshot.size);
         
-        if (memberDoc.exists) {
-          const memberData = memberDoc.data();
-          // Support both old format (rsvpStatus) and new format (rsvpStatuses)
-          if (memberData.rsvpStatuses) {
-            setMemberRSVPs(prev => ({
-              ...prev,
-              [userId]: memberData.rsvpStatuses,
-            }));
-          } else if (memberData.rsvpStatus) {
+        const rsvps = {};
+        snapshot.forEach((doc) => {
+          const memberData = doc.data();
+          const memberUserId = doc.id;
+          
+          // Process RSVP data for this member
+          if (memberData.rsvpStatuses && typeof memberData.rsvpStatuses === 'object' && memberData.rsvpStatuses.constructor === Object) {
+            rsvps[memberUserId] = memberData.rsvpStatuses;
+            console.log(`[EventHub] Updated RSVP statuses for ${memberUserId}:`, Object.keys(memberData.rsvpStatuses).length, 'dates');
+          } else if (memberData.rsvpStatus && typeof memberData.rsvpStatus === 'string') {
             // Backward compatibility: convert single status to date-specific
-            setMemberRSVPs(prev => ({
-              ...prev,
-              [userId]: { default: memberData.rsvpStatus },
-            }));
+            rsvps[memberUserId] = { default: memberData.rsvpStatus };
+            console.log(`[EventHub] Updated RSVP status (legacy) for ${memberUserId}: ${memberData.rsvpStatus}`);
+          } else {
+            rsvps[memberUserId] = {};
           }
-        }
-      } catch (error) {
-        console.error('Error fetching current user RSVP:', error);
-      }
-    };
+        });
 
-    fetchCurrentUserRSVP();
-  }, [userId, event?.id]);
+        // Update state with all RSVP data (merge with existing to preserve other data)
+        setMemberRSVPs(prev => {
+          const updated = { ...prev };
+          Object.keys(rsvps).forEach(userId => {
+            updated[userId] = rsvps[userId];
+          });
+          console.log('[EventHub] Updated memberRSVPs from listener, total members:', Object.keys(updated).length);
+          return updated;
+        });
+      },
+      (error) => {
+        console.error('[EventHub] Error in members RSVP listener:', error);
+      }
+    );
+
+    return () => {
+      console.log('[EventHub] Cleaning up members RSVP listener');
+      unsubscribe();
+    };
+  }, [event?.id, db, members.length]);
 
   if (!event) {
     return (
@@ -1070,7 +1185,7 @@ const EventHub = () => {
       };
       
       updatedEventDates[selectedDateDetail.index] = updatedDate;
-      await updateEventSchedule(event.id, userId, {
+      await updateEventSchedule(event.id, {
         eventDates: updatedEventDates,
       });
 
@@ -1284,7 +1399,7 @@ const EventHub = () => {
         updateData.usualEndTime = defaultTimeForm.usualEndTime.toISOString();
       }
 
-      await updateEventSchedule(event.id, userId, updateData);
+      await updateEventSchedule(event.id, updateData);
       setEditingDefaultTime(false);
       Alert.alert('Success', 'Default time updated successfully.');
     } catch (error) {
@@ -1305,7 +1420,7 @@ const EventHub = () => {
         address: defaultLocationForm.address,
       };
 
-      await updateEventSchedule(event.id, userId, updateData);
+      await updateEventSchedule(event.id, updateData);
       setEditingDefaultLocation(false);
       Alert.alert('Success', 'Default location updated successfully.');
     } catch (error) {
@@ -1334,15 +1449,28 @@ const EventHub = () => {
     }
   };
 
-  const handleDatesChange = (dates) => {
-    console.log('[EventHub] handleDatesChange called with dates:', {
+  const handleDatesChange = async (dates) => {
+    console.log('[EventHub] ========== handleDatesChange CALLED ==========');
+    console.log('[EventHub] handleDatesChange - input dates:', {
       count: dates.length,
       dates: dates.map(d => ({
         date: d.date instanceof Date ? d.date.toISOString() : d.date,
         startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
         endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+        location: d.location,
+        address: d.address,
+        note: d.note,
       })),
     });
+    
+    console.log('[EventHub] Current scheduleForm state:', {
+      selectedDatesCount: scheduleForm.selectedDates.length,
+      location: scheduleForm.location,
+      address: scheduleForm.address,
+    });
+    
+    // Save scroll position before state update to prevent scroll reset
+    const savedScroll = scrollPositionRef.current;
     
     // Dates are now objects with { date, startTime, endTime, location, address, note } structure
     // Ensure new dates get default location values if not set
@@ -1353,7 +1481,7 @@ const EventHub = () => {
       note: d.note !== undefined ? d.note : '',
     }));
     
-    console.log('[EventHub] ✅ Updating scheduleForm with dates (highlighted in green):', {
+    console.log('[EventHub] Dates with locations applied:', {
       count: datesWithLocations.length,
       dates: datesWithLocations.map(d => ({
         date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -1361,11 +1489,135 @@ const EventHub = () => {
         endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
         location: d.location,
         address: d.address,
+        note: d.note,
       })),
     });
     
+    console.log('[EventHub] Updating scheduleForm state with new dates...');
+    console.log('[EventHub] BEFORE setScheduleForm - isOrganizerOrCoOrganizer:', isOrganizerOrCoOrganizer);
+    console.log('[EventHub] BEFORE setScheduleForm - event?.id:', event?.id);
+    console.log('[EventHub] BEFORE setScheduleForm - userId:', userId);
+    
+    // CRITICAL: Save scroll position BEFORE state update to prevent scroll reset
+    const savedScrollY = scrollPositionRef.current;
+    console.log('[EventHub] Saved scroll position before state update:', savedScrollY);
+    
     setScheduleForm({ ...scheduleForm, selectedDates: datesWithLocations });
+    
+    console.log('[EventHub] ✅ scheduleForm state updated (dates should appear green in calendar)');
+    
+    // Restore scroll position immediately using useLayoutEffect-like approach
+    // Use a ref to track if we need to restore after this update
+    if (scheduleScrollRef.current && savedScrollY > 0) {
+      // Use requestAnimationFrame to restore after React has updated, but do it synchronously
+      // in the next frame to minimize the visible jump
+      requestAnimationFrame(() => {
+        if (scheduleScrollRef.current) {
+          console.log('[EventHub] Restoring scroll position immediately to:', savedScrollY);
+          scheduleScrollRef.current.scrollTo({
+            y: savedScrollY,
+            animated: false,
+          });
+        }
+      });
+    }
+    
+    // Save to Firestore if user is organizer/co-organizer
+    if (isOrganizerOrCoOrganizer && event?.id) {
+      console.log('[EventHub] 🚀 Starting backend save to Firestore...');
+      try {
+        // Convert dates to ISO string format for Firestore
+        const eventDates = datesWithLocations.map(d => ({
+          date: d.date instanceof Date ? d.date.toISOString() : d.date,
+          startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+          endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+          location: d.location || '',
+          exactLocation: d.address || '',
+          note: d.note || '',
+        }));
+        
+        console.log('[EventHub] Calling updateEventSchedule with:', {
+          eventId: event.id,
+          eventDatesCount: eventDates.length,
+          eventDates: eventDates,
+        });
+        
+        // Note: updateEventSchedule will update the events state, causing a re-render
+        // This is expected, but the scheduleForm initialization useEffect should not reset
+        // because it only depends on event?.id, not the entire event object
+        await updateEventSchedule(event.id, {
+          eventDates: eventDates,
+        });
+        
+        console.log('[EventHub] ✅ Backend save completed successfully!');
+        console.log('[EventHub] ⚠️  Note: Event object will update, causing re-render, but scheduleForm should not reset');
+      } catch (error) {
+        console.error('[EventHub] ❌ Error saving to Firestore:', error);
+        console.error('[EventHub] Error details:', {
+          code: error.code,
+          message: error.message,
+        });
+        // Don't show error to user - this is a background save
+        // The dates are still in local state, so user can try again
+      }
+    } else {
+      console.log('[EventHub] ⚠️  Skipping backend save - conditions not met:', {
+        isOrganizerOrCoOrganizer,
+        hasEventId: !!event?.id,
+      });
+    }
+    
+    console.log('[EventHub] ========== handleDatesChange COMPLETE ==========');
+    
+    // Restore scroll position immediately - use multiple strategies to ensure it works
+    // Strategy 1: Immediate restore (if ScrollView is still mounted)
+    if (scheduleScrollRef.current && savedScroll > 0) {
+      // Try immediate restore first
+      try {
+        scheduleScrollRef.current.scrollTo({
+          y: savedScroll,
+          animated: false,
+        });
+        console.log('[EventHub] Immediate scroll restore attempted to:', savedScroll);
+      } catch (e) {
+        console.warn('[EventHub] Immediate scroll restore failed:', e);
+      }
+    }
+    
+    // Strategy 2: Restore after React has updated (backup)
+    requestAnimationFrame(() => {
+      if (scheduleScrollRef.current && savedScroll > 0) {
+        scheduleScrollRef.current.scrollTo({
+          y: savedScroll,
+          animated: false,
+        });
+        console.log('[EventHub] Backup scroll restore to:', savedScroll);
+      }
+    });
   };
+  
+  // useLayoutEffect to preserve scroll position when scheduleForm.selectedDates changes
+  // This runs synchronously before browser paint, preventing visible jumps
+  // Track the previous date count to detect when dates are added/removed
+  const previousDateCountRef = useRef(scheduleForm.selectedDates.length);
+  
+  useLayoutEffect(() => {
+    const currentDateCount = scheduleForm.selectedDates.length;
+    const dateCountChanged = currentDateCount !== previousDateCountRef.current;
+    previousDateCountRef.current = currentDateCount;
+    
+    if (dateCountChanged) {
+      const savedScroll = scrollPositionRef.current;
+      if (scheduleScrollRef.current && savedScroll > 0) {
+        console.log('[EventHub] useLayoutEffect: Date count changed, restoring scroll to:', savedScroll);
+        // Restore synchronously before paint to prevent visible jump
+        scheduleScrollRef.current.scrollTo({
+          y: savedScroll,
+          animated: false,
+        });
+      }
+    }
+  }, [scheduleForm.selectedDates.length]);
 
   const handleTimeChange = (event, date, type, dateIndex) => {
     if (Platform.OS === 'android') {
@@ -4408,14 +4660,17 @@ const EventHub = () => {
 
   // Get available event dates for date selector (only future dates)
   // Moved outside GamesTabComponent so it's accessible in the dependency array
+  // Sorted chronologically (soonest at top)
   const eventDates = useMemo(() => {
     if (!event) return [];
     
     const now = new Date();
     now.setHours(0, 0, 0, 0); // Compare dates only (ignore time)
     
+    let dates = [];
+    
     if (event?.eventDates && Array.isArray(event.eventDates)) {
-      return event.eventDates.map((ed, index) => {
+      dates = event.eventDates.map((ed, index) => {
         const date = safeParseDate(ed.date);
         return {
           index,
@@ -4439,7 +4694,7 @@ const EventHub = () => {
         eventDate.setHours(0, 0, 0, 0);
         // Only include if it's a future date
         if (eventDate >= now) {
-          return [{
+          dates = [{
             index: 0,
             date,
             dateString: event.scheduledFor,
@@ -4451,8 +4706,45 @@ const EventHub = () => {
       }
     }
     
-    return [];
+    // Sort chronologically (soonest at top)
+    dates.sort((a, b) => {
+      if (!a.date || !b.date) return 0;
+      return a.date.getTime() - b.date.getTime();
+    });
+    
+    return dates;
   }, [event]);
+
+  // Find user's next upcoming event where RSVP = "going"
+  const nextGoingEventIndex = useMemo(() => {
+    if (!userId || !event || eventDates.length === 0) return null;
+    
+    const userMember = members.find(m => m.userId === userId);
+    if (!userMember) return null;
+    
+    const userRsvps = memberRSVPs[userId] || {};
+    
+    // Find first event date where user RSVP'd "going"
+    for (let i = 0; i < eventDates.length; i++) {
+      const ed = eventDates[i];
+      const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
+      
+      let rsvpStatus = null;
+      if (typeof userRsvps === 'string') {
+        // Legacy format: single status string
+        rsvpStatus = ed.date ? null : userRsvps;
+      } else if (typeof userRsvps === 'object' && userRsvps.constructor === Object) {
+        // Normal format: object with date keys
+        rsvpStatus = userRsvps[dateKey] || null;
+      }
+      
+      if (rsvpStatus === 'going') {
+        return i; // Return the index in the sorted eventDates array
+      }
+    }
+    
+    return null;
+  }, [userId, event, eventDates, members, memberRSVPs]);
 
   // Games Tab Component - Rebuilt from scratch
   // Memoize to prevent recreation on every render (which causes modal to remount)
@@ -5075,13 +5367,23 @@ const EventHub = () => {
                       // Get all members' RSVP statuses for this date
                       const membersWithRSVP = members.map(member => {
                         if (!member || !member.userId) return null;
-                        const memberRsvps = memberRSVPs[member.userId] || {};
+                        const memberRsvps = memberRSVPs[member.userId];
                         let rsvpStatus = null;
-                        if (typeof memberRsvps === 'string') {
+                        
+                        // Handle different data types
+                        if (!memberRsvps || memberRsvps === null || memberRsvps === undefined) {
+                          rsvpStatus = null;
+                        } else if (typeof memberRsvps === 'string') {
+                          // Legacy format: single status string
                           rsvpStatus = ed.date ? null : memberRsvps;
-                        } else {
+                        } else if (typeof memberRsvps === 'object' && memberRsvps.constructor === Object) {
+                          // Normal format: object with date keys
                           rsvpStatus = memberRsvps[dateKey] || null;
+                        } else {
+                          // Handle other types (Timestamp, etc.) - treat as no response
+                          rsvpStatus = null;
                         }
+                        
                         return {
                           userId: member.userId,
                           userName: memberNames[member.userId] || member.userId,
@@ -5090,18 +5392,86 @@ const EventHub = () => {
                         };
                       }).filter(Boolean);
 
+                      // Get RSVP settings and current user's RSVP status for this date
+                      const rsvpSettings = event?.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
+                      const showRSVPForDate = isMember && rsvpSettings?.enabled;
+                      const dateRSVP = showRSVPForDate ? getRSVPForDate(userId, ed.date) : null;
+                      
+                      // Progressive engagement logic
+                      const isNextGoingEvent = nextGoingEventIndex !== null && filteredIndex === nextGoingEventIndex;
+                      const isBeforeNextGoing = nextGoingEventIndex !== null && filteredIndex < nextGoingEventIndex;
+                      const isAfterNextGoing = nextGoingEventIndex !== null && filteredIndex > nextGoingEventIndex;
+                      const isNotGoingBeforeNext = isBeforeNextGoing && dateRSVP === 'not-going';
+                      
+                      // Determine engagement level
+                      let engagementLevel = 'full'; // Default: full interactivity
+                      if (isNotGoingBeforeNext) {
+                        engagementLevel = 'minimal'; // Events before next attendance where user RSVP'd "not going"
+                      } else if (isAfterNextGoing) {
+                        engagementLevel = 'basic'; // Events after next attendance
+                      } else if (isNextGoingEvent) {
+                        engagementLevel = 'full'; // User's next upcoming event they're attending
+                      }
+                      
+                      // Debug logging
+                      if (__DEV__) {
+                        console.log('[EventHub] Progressive Engagement:', {
+                          filteredIndex,
+                          nextGoingEventIndex,
+                          dateRSVP,
+                          engagementLevel,
+                          isNextGoingEvent,
+                          isBeforeNextGoing,
+                          isAfterNextGoing,
+                          isNotGoingBeforeNext
+                        });
+                      }
+
+                      // For minimal engagement: only show RSVP status, no interactivity
+                      if (engagementLevel === 'minimal') {
+                        return (
+                          <View key={originalIndex} style={[styles.dateCard, styles.dateCardMinimal]}>
+                            <View style={styles.dateCardContent}>
+                              <View style={styles.dateCardTopRow}>
+                                <View style={styles.dateCardTextBlock}>
+                                  <Text style={styles.dateCardTitle}>
+                                    {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
+                                  </Text>
+                                  <Text style={styles.dateCardSubtext}>
+                                    {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
+                                  </Text>
+                                </View>
+                                <View style={styles.dateCardRSVPsContainer}>
+                                  <Text style={styles.dateCardRSVPStatusText}>
+                                    Your RSVP: {dateRSVP === 'not-going' ? '❌ Not Going' : dateRSVP || 'No response'}
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      }
+
+                      // For full engagement: show all features with prominent CTAs
+                      const showFullInteractivity = engagementLevel === 'full';
+                      
                       return (
                         <TouchableOpacity
                           key={originalIndex}
-                          style={styles.dateCard}
+                          style={[styles.dateCard, showFullInteractivity && styles.dateCardHighlighted]}
                           onPress={() => {
+                            // Only allow navigation for full engagement events
+                            if (!showFullInteractivity && engagementLevel === 'basic') {
+                              return; // Don't navigate for basic engagement events
+                            }
                             console.log('[EventHub] Date selector clicked:', { 
                               originalIndex,
                               filteredIndex,
                               currentEventId, 
                               platform: Platform.OS,
                               hasNavigate: !!navigate,
-                              hasNavigation: !!navigation?.navigate
+                              hasNavigation: !!navigation?.navigate,
+                              engagementLevel
                             });
                             if (Platform.OS === 'web' && navigate && currentEventId) {
                               console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
@@ -5114,29 +5484,276 @@ const EventHub = () => {
                               });
                             }
                           }}
+                          disabled={!showFullInteractivity && engagementLevel === 'basic'}
                         >
                           <LinearGradient
-                            colors={['#fff8f0', '#f5e6d3', '#e8d4b8', '#f5e6d3', '#fff8f0']}
+                            colors={showFullInteractivity 
+                              ? ['#fff8f0', '#f5e6d3', '#e8d4b8', '#f5e6d3', '#fff8f0']
+                              : ['#f5f5f5', '#e8e8e8', '#d8d8d8', '#e8e8e8', '#f5f5f5']
+                            }
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
                             locations={[0, 0.3, 0.5, 0.7, 1]}
                             style={styles.dateCardBackground}
                           >
                             <View style={styles.dateCardContent}>
-                              <View style={styles.dateCardTextBlock}>
-                                <Text style={styles.dateCardTitle}>
+                              <View style={styles.dateCardTopRow}>
+                                <View style={styles.dateCardTextBlock}>
+                                  <Text style={styles.dateCardTitle}>
+                                    {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
+                                    {showFullInteractivity && (
+                                      <Text style={styles.dateCardNextEventBadge}> 🎯 Your Next Game Night</Text>
+                                    )}
+                                  </Text>
+                                  <Text style={styles.dateCardSubtext}>
+                                    {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
+                                  </Text>
+                                  {ed.location ? (
+                                    <Text style={styles.dateCardLocation} numberOfLines={1}>
+                                      {ed.location}
+                                    </Text>
+                                  ) : null}
+                                  {showFullInteractivity && (
+                                    <Text style={styles.dateCardCTAText}>
+                                      🎲 Browse games • 📝 Propose • 👍 Weigh in
+                                    </Text>
+                                  )}
+                                </View>
+                                <View style={styles.dateCardRSVPsContainer}>
+                                  {membersWithRSVP.map((member) => {
+                                    const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
+                                    const rsvpStatus = member.rsvpStatus;
+                                    const rsvpStyle =
+                                      rsvpStatus === 'going' ? styles.rsvpBadgeGoing :
+                                      rsvpStatus === 'maybe' ? styles.rsvpBadgeMaybe :
+                                      rsvpStatus === 'not going' ? styles.rsvpBadgeNotGoing :
+                                      styles.rsvpBadgeUnknown;
+                                    const rsvpTextColor =
+                                      rsvpStatus === 'going' ? '#2e9b5e' :
+                                      rsvpStatus === 'maybe' ? '#a06c00' :
+                                      rsvpStatus === 'not going' ? '#b33936' :
+                                      '#555';
+                                    
+                                    return (
+                                      <TouchableOpacity
+                                        key={member.userId}
+                                        style={styles.dateListRSVPItem}
+                                        onPress={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedUserForProfile({
+                                            userId: member.userId,
+                                            userName: member.userName,
+                                            avatarUrl: member.avatarUrl
+                                          });
+                                        }}
+                                      >
+                                        {hasValidAvatar ? (
+                                          <Image
+                                            source={{ uri: member.avatarUrl }}
+                                            style={styles.dateListAvatarImage}
+                                            resizeMode="cover"
+                                          />
+                                        ) : (
+                                          <View style={styles.dateListAvatarPlaceholder}>
+                                            <Text style={styles.dateListAvatarInitial}>
+                                              {member.userName.charAt(0).toUpperCase()}
+                                            </Text>
+                                          </View>
+                                        )}
+                                        <View style={[styles.dateListRSVPBadge, rsvpStyle]}>
+                                          <Text style={[styles.dateListRSVPBadgeText, { color: rsvpTextColor }]}>
+                                            {rsvpStatus === 'no response' ? '?' : rsvpStatus === 'going' ? '✓' : rsvpStatus === 'maybe' ? '?' : '✗'}
+                                          </Text>
+                                        </View>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </View>
+                              
+                              {/* RSVP toggle section - always show */}
+                              {showRSVPForDate && (
+                                <View 
+                                  style={styles.dateCardRSVPToggle}
+                                  onStartShouldSetResponder={() => true}
+                                  onMoveShouldSetResponder={() => true}
+                                >
+                                  <Text style={styles.dateCardRSVPToggleLabel}>Your RSVP for this date:</Text>
+                                  <View style={styles.dateCardRSVPButtons}>
+                                    <View style={styles.dateRSVPButtonsRow}>
+                                      <Button
+                                        label="✅ Going"
+                                        onPress={(e) => {
+                                          if (e) {
+                                            e.stopPropagation?.();
+                                            e.preventDefault?.();
+                                          }
+                                          handleRSVP('going', ed.date, null);
+                                        }}
+                                        variant={dateRSVP === 'going' ? 'primary' : 'outline'}
+                                        style={styles.dateCardRSVPButton}
+                                        textStyle={styles.dateRSVPButtonText}
+                                      />
+                                      {rsvpSettings.allowMaybe && (
+                                        <Button
+                                          label="🤔 Maybe"
+                                          onPress={(e) => {
+                                            if (e) {
+                                              e.stopPropagation?.();
+                                              e.preventDefault?.();
+                                            }
+                                            handleRSVP('maybe', ed.date, null);
+                                          }}
+                                          variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
+                                          style={styles.dateCardRSVPButton}
+                                          textStyle={styles.dateRSVPButtonText}
+                                        />
+                                      )}
+                                    </View>
+                                    <View style={styles.dateRSVPButtonsRow}>
+                                      <Button
+                                        label="❌ Can't Make It"
+                                        onPress={(e) => {
+                                          if (e) {
+                                            e.stopPropagation?.();
+                                            e.preventDefault?.();
+                                          }
+                                          handleRSVP('not-going', ed.date, null);
+                                        }}
+                                        variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
+                                        style={styles.dateCardRSVPButton}
+                                        textStyle={styles.dateRSVPButtonText}
+                                      />
+                                    </View>
+                                  </View>
+                                </View>
+                              )}
+                            </View>
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <Text style={styles.sectionCopy}>
+                    No game night dates scheduled yet. Ask the organizer to add dates!
+                  </Text>
+                )}
+              </>
+            )}
+
+            {/* For organizers: Keep the original section container */}
+            {isOrganizer && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Propose Games</Text>
+                <Text style={styles.sectionCopy}>
+                  Choose a date to browse the super collection and propose games.
+                </Text>
+                
+                {eventDates.length > 0 ? (
+                  <View style={styles.dateListContainer}>
+                      {eventDates.map((ed, filteredIndex) => {
+                      const currentEventId = eventId || event?.id;
+                      const originalIndex = ed.index; // Use the original index from the eventDates array
+                      const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
+                      
+                      // Get all members' RSVP statuses for this date
+                      const membersWithRSVP = members.map(member => {
+                        if (!member || !member.userId) return null;
+                        const memberRsvps = memberRSVPs[member.userId] || {};
+                        let rsvpStatus = null;
+                        if (typeof memberRsvps === 'string') {
+                          // Backward compatibility: old format with single status
+                          rsvpStatus = ed.date ? null : memberRsvps;
+                        } else {
+                          rsvpStatus = memberRsvps[dateKey] || null;
+                        }
+                        return {
+                          userId: member.userId,
+                          userName: memberNames[member.userId] || member.userId,
+                          avatarUrl: memberAvatars[member.userId] || null,
+                          rsvpStatus: rsvpStatus || 'no response',
+                        };
+                      }).filter(Boolean);
+
+                      // Get RSVP settings and current user's RSVP status for this date
+                      const rsvpSettings = event?.rsvpSettings || { enabled: true, allowMaybe: true, attendanceLimit: null };
+                      const showRSVPForDate = isMember && rsvpSettings?.enabled;
+                      const dateRSVP = showRSVPForDate ? getRSVPForDate(userId, ed.date) : null;
+                      
+                      // Progressive engagement logic (same as non-organizer view)
+                      const isNextGoingEvent = nextGoingEventIndex !== null && filteredIndex === nextGoingEventIndex;
+                      const isBeforeNextGoing = nextGoingEventIndex !== null && filteredIndex < nextGoingEventIndex;
+                      const isAfterNextGoing = nextGoingEventIndex !== null && filteredIndex > nextGoingEventIndex;
+                      const isNotGoingBeforeNext = isBeforeNextGoing && dateRSVP === 'not-going';
+                      
+                      // Determine engagement level
+                      let engagementLevel = 'full'; // Default: full interactivity
+                      if (isNotGoingBeforeNext) {
+                        engagementLevel = 'minimal'; // Events before next attendance where user RSVP'd "not going"
+                      } else if (isAfterNextGoing) {
+                        engagementLevel = 'basic'; // Events after next attendance
+                      } else if (isNextGoingEvent) {
+                        engagementLevel = 'full'; // User's next upcoming event they're attending
+                      }
+                      
+                      const showFullInteractivity = engagementLevel === 'full';
+
+                        return (
+                          <TouchableOpacity
+                            key={originalIndex}
+                          style={[styles.dateListItem, showFullInteractivity && styles.dateListItemHighlighted]}
+                                        onPress={() => {
+                            // Only allow navigation for full engagement events
+                            if (!showFullInteractivity && engagementLevel === 'basic') {
+                              return; // Don't navigate for basic engagement events
+                            }
+                            console.log('[EventHub] Date selector clicked:', { 
+                              originalIndex,
+                              filteredIndex,
+                              currentEventId, 
+                              platform: Platform.OS,
+                              hasNavigate: !!navigate,
+                              hasNavigation: !!navigation?.navigate,
+                              engagementLevel
+                            });
+                            if (Platform.OS === 'web' && navigate && currentEventId) {
+                              console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
+                              navigate(`/event/${currentEventId}/browse/${originalIndex}`);
+                            } else if (navigation?.navigate && currentEventId) {
+                              console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: originalIndex });
+                              navigation.navigate('BrowseAndPropose', { 
+                                eventId: currentEventId, 
+                                dateIndex: originalIndex 
+                              });
+                            }
+                          }}
+                          disabled={!showFullInteractivity && engagementLevel === 'basic'}
+                        >
+                          <View style={styles.dateListItemContent}>
+                            <View style={styles.dateListItemTopRow}>
+                              <View style={styles.dateListTextBlock}>
+                                <Text style={styles.dateListTitle}>
                                   {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
+                                  {showFullInteractivity && (
+                                    <Text style={styles.dateListNextEventBadge}> 🎯 Your Next Game Night</Text>
+                                  )}
                                 </Text>
-                                <Text style={styles.dateCardSubtext}>
+                                <Text style={styles.dateListSubtext}>
                                   {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
                                 </Text>
                                 {ed.location ? (
-                                  <Text style={styles.dateCardLocation} numberOfLines={1}>
+                                  <Text style={styles.dateListLocation} numberOfLines={1}>
                                     {ed.location}
                                   </Text>
                                 ) : null}
+                                {showFullInteractivity && (
+                                  <Text style={styles.dateListCTAText}>
+                                    🎲 Browse games • 📝 Propose • 👍 Weigh in
+                                  </Text>
+                                )}
                               </View>
-                              <View style={styles.dateCardRSVPsContainer}>
+                              <View style={styles.dateListRSVPsContainer}>
                                 {membersWithRSVP.map((member) => {
                                   const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
                                   const rsvpStatus = member.rsvpStatus;
@@ -5187,140 +5804,64 @@ const EventHub = () => {
                                 })}
                               </View>
                             </View>
-                          </LinearGradient>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                ) : (
-                  <Text style={styles.sectionCopy}>
-                    No game night dates scheduled yet. Ask the organizer to add dates!
-                  </Text>
-                )}
-              </>
-            )}
-
-            {/* For organizers: Keep the original section container */}
-            {isOrganizer && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Propose Games</Text>
-                <Text style={styles.sectionCopy}>
-                  Choose a date to browse the super collection and propose games.
-                </Text>
-                
-                {eventDates.length > 0 ? (
-                  <View style={styles.dateListContainer}>
-                      {eventDates.map((ed, filteredIndex) => {
-                      const currentEventId = eventId || event?.id;
-                      const originalIndex = ed.index; // Use the original index from the eventDates array
-                      const dateKey = ed?.date ? getDateKey(ed.date) : 'default';
-                      
-                      // Get all members' RSVP statuses for this date
-                      const membersWithRSVP = members.map(member => {
-                        if (!member || !member.userId) return null;
-                        const memberRsvps = memberRSVPs[member.userId] || {};
-                        let rsvpStatus = null;
-                        if (typeof memberRsvps === 'string') {
-                          // Backward compatibility: old format with single status
-                          rsvpStatus = ed.date ? null : memberRsvps;
-                        } else {
-                          rsvpStatus = memberRsvps[dateKey] || null;
-                        }
-                        return {
-                          userId: member.userId,
-                          userName: memberNames[member.userId] || member.userId,
-                          avatarUrl: memberAvatars[member.userId] || null,
-                          rsvpStatus: rsvpStatus || 'no response',
-                        };
-                      }).filter(Boolean);
-
-                        return (
-                          <TouchableOpacity
-                            key={originalIndex}
-                          style={styles.dateListItem}
-                                        onPress={() => {
-                            console.log('[EventHub] Date selector clicked:', { 
-                              originalIndex,
-                              filteredIndex,
-                              currentEventId, 
-                              platform: Platform.OS,
-                              hasNavigate: !!navigate,
-                              hasNavigation: !!navigation?.navigate
-                            });
-                            if (Platform.OS === 'web' && navigate && currentEventId) {
-                              console.log('[EventHub] Navigating to web route:', `/event/${currentEventId}/browse/${originalIndex}`);
-                              navigate(`/event/${currentEventId}/browse/${originalIndex}`);
-                            } else if (navigation?.navigate && currentEventId) {
-                              console.log('[EventHub] Navigating to native screen:', 'BrowseAndPropose', { eventId: currentEventId, dateIndex: originalIndex });
-                              navigation.navigate('BrowseAndPropose', { 
-                                eventId: currentEventId, 
-                                dateIndex: originalIndex 
-                              });
-                            }
-                          }}
-                        >
-                          <View style={styles.dateListTextBlock}>
-                            <Text style={styles.dateListTitle}>
-                              {ed.date ? formatDate(ed.date.toISOString()) : 'Invalid Date'}
-                              </Text>
-                            <Text style={styles.dateListSubtext}>
-                              {ed.startTime ? formatTime(ed.startTime.toISOString()) : 'Time TBD'}
-                                </Text>
-                            {ed.location ? (
-                              <Text style={styles.dateListLocation} numberOfLines={1}>
-                                {ed.location}
-                                      </Text>
-                            ) : null}
-                                    </View>
-                          <View style={styles.dateListRSVPsContainer}>
-                            {membersWithRSVP.map((member) => {
-                              const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
-                              const rsvpStatus = member.rsvpStatus;
-                              const rsvpStyle =
-                                rsvpStatus === 'going' ? styles.rsvpBadgeGoing :
-                                rsvpStatus === 'maybe' ? styles.rsvpBadgeMaybe :
-                                rsvpStatus === 'not going' ? styles.rsvpBadgeNotGoing :
-                                styles.rsvpBadgeUnknown;
-                              const rsvpTextColor =
-                                rsvpStatus === 'going' ? '#2e9b5e' :
-                                rsvpStatus === 'maybe' ? '#a06c00' :
-                                rsvpStatus === 'not going' ? '#b33936' :
-                                '#555';
-                              
-                              return (
-                                <TouchableOpacity
-                                  key={member.userId}
-                                  style={styles.dateListRSVPItem}
-                                  onPress={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedUserForProfile({
-                                      userId: member.userId,
-                                      userName: member.userName,
-                                      avatarUrl: member.avatarUrl
-                                    });
-                                  }}
-                                >
-                                  {hasValidAvatar ? (
-                                    <Image
-                                      source={{ uri: member.avatarUrl }}
-                                      style={styles.dateListAvatarImage}
-                                      resizeMode="cover"
+                            
+                            {/* RSVP toggle section */}
+                            {showRSVPForDate && (
+                              <View 
+                                style={styles.dateCardRSVPToggle}
+                                onStartShouldSetResponder={() => true}
+                                onMoveShouldSetResponder={() => true}
+                              >
+                                <Text style={styles.dateCardRSVPToggleLabel}>Your RSVP for this date:</Text>
+                                <View style={styles.dateCardRSVPButtons}>
+                                  <View style={styles.dateRSVPButtonsRow}>
+                                    <Button
+                                      label="✅ Going"
+                                      onPress={(e) => {
+                                        if (e) {
+                                          e.stopPropagation?.();
+                                          e.preventDefault?.();
+                                        }
+                                        handleRSVP('going', ed.date, null);
+                                      }}
+                                      variant={dateRSVP === 'going' ? 'primary' : 'outline'}
+                                      style={styles.dateCardRSVPButton}
+                                      textStyle={styles.dateRSVPButtonText}
                                     />
-                                  ) : (
-                                    <View style={styles.dateListAvatarPlaceholder}>
-                                      <Text style={styles.dateListAvatarInitial}>
-                                        {member.userName.charAt(0).toUpperCase()}
-                                      </Text>
-                                    </View>
-                                  )}
-                                  <View style={[styles.dateListRSVPBadge, rsvpStyle]}>
-                                    <Text style={[styles.dateListRSVPBadgeText, { color: rsvpTextColor }]}>
-                                      {rsvpStatus === 'no response' ? '?' : rsvpStatus === 'going' ? '✓' : rsvpStatus === 'maybe' ? '?' : '✗'}
-                                    </Text>
+                                    {rsvpSettings.allowMaybe && (
+                                      <Button
+                                        label="🤔 Maybe"
+                                        onPress={(e) => {
+                                          if (e) {
+                                            e.stopPropagation?.();
+                                            e.preventDefault?.();
+                                          }
+                                          handleRSVP('maybe', ed.date, null);
+                                        }}
+                                        variant={dateRSVP === 'maybe' ? 'primary' : 'outline'}
+                                        style={styles.dateCardRSVPButton}
+                                        textStyle={styles.dateRSVPButtonText}
+                                      />
+                                    )}
                                   </View>
-                                </TouchableOpacity>
-                              );
-                            })}
+                                  <View style={styles.dateRSVPButtonsRow}>
+                                    <Button
+                                      label="❌ Can't Make It"
+                                      onPress={(e) => {
+                                        if (e) {
+                                          e.stopPropagation?.();
+                                          e.preventDefault?.();
+                                        }
+                                        handleRSVP('not-going', ed.date, null);
+                                      }}
+                                      variant={dateRSVP === 'not-going' ? 'primary' : 'outline'}
+                                      style={styles.dateCardRSVPButton}
+                                      textStyle={styles.dateRSVPButtonText}
+                                    />
+                                  </View>
+                                </View>
+                              </View>
+                            )}
                           </View>
                         </TouchableOpacity>
                               );
@@ -8750,15 +9291,22 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   dateListItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e0e0e0',
     backgroundColor: '#f8f7f5',
+    overflow: 'hidden',
+  },
+  dateListItemContent: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'column',
+  },
+  dateListItemTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.sm,
   },
   proposeGamesTitle: {
     fontSize: theme.typography.fontSize['2xl'],
@@ -8786,7 +9334,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
-    aspectRatio: 2,
+    minHeight: 120,
+  },
+  dateCardHighlighted: {
+    borderWidth: 8,
+    borderColor: theme.colors.meepleRed,
+    shadowColor: theme.colors.meepleRed,
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  dateCardMinimal: {
+    borderWidth: 2,
+    borderColor: '#d0d0d0',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    opacity: 0.7,
   },
   dateCardBackground: {
     position: 'relative',
@@ -8800,9 +9364,14 @@ const styles = StyleSheet.create({
   dateCardContent: {
     padding: theme.spacing.xl,
     flex: 1,
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
+  },
+  dateCardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: theme.spacing.md,
   },
   dateCardTextBlock: {
     flex: 1,
@@ -8824,6 +9393,23 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.xs,
   },
+  dateCardNextEventBadge: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.meepleRed,
+    marginLeft: theme.spacing.xs,
+  },
+  dateCardCTAText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.semibold,
+    marginTop: theme.spacing.xs,
+  },
+  dateCardRSVPStatusText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
+  },
   dateCardRSVPsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -8831,6 +9417,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     maxWidth: 200,
+  },
+  dateCardRSVPToggle: {
+    marginTop: theme.spacing.md,
+    paddingTop: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  dateCardRSVPToggleLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
+    marginBottom: theme.spacing.sm,
+    color: theme.colors.textPrimary,
+  },
+  dateCardRSVPButtons: {
+    gap: theme.spacing.xs,
+  },
+  dateCardRSVPButton: {
+    flex: 1,
+    padding: 6,
+    minHeight: 36,
+    height: 36,
   },
   dateListTextBlock: {
     flex: 1,
@@ -8849,6 +9456,23 @@ const styles = StyleSheet.create({
   dateListLocation: {
     fontSize: 12,
     color: '#777',
+    marginTop: 4,
+  },
+  dateListItemHighlighted: {
+    borderWidth: 3,
+    borderColor: theme.colors.meepleRed,
+    backgroundColor: '#fff8f0',
+  },
+  dateListNextEventBadge: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: theme.colors.meepleRed,
+    marginLeft: 8,
+  },
+  dateListCTAText: {
+    fontSize: 12,
+    color: theme.colors.meepleRed,
+    fontWeight: '600',
     marginTop: 4,
   },
   rsvpBadge: {

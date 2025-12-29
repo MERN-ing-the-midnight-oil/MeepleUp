@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { Platform, View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Image, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
@@ -119,6 +119,45 @@ const BrowseAndProposeScreen = () => {
   const matchScoresRef = useRef({}); // Ref to track current scores without dependency
   const [userProposalLimit, setUserProposalLimit] = useState(5); // Default to 5
   const [sortBy, setSortBy] = useState('title'); // 'title', 'matchScore', 'bggRating', 'owner'
+  
+  // Refs to maintain scroll position when proposedGames updates
+  const scrollViewRef = useRef(null);
+  const scrollPositionRef = useRef(0);
+  
+  // Track scroll position
+  const handleScroll = useCallback((event) => {
+    const offsetY = event.nativeEvent.contentOffset?.y ?? 0;
+    if (offsetY >= 0) {
+      scrollPositionRef.current = offsetY;
+    }
+  }, []);
+  
+  // Restore scroll position when proposedGames changes
+  // Use useLayoutEffect to restore synchronously before paint, preventing visible jumps
+  const previousProposedGamesCountRef = useRef(proposedGames.length);
+  useLayoutEffect(() => {
+    const currentCount = proposedGames.length;
+    const countChanged = currentCount !== previousProposedGamesCountRef.current;
+    previousProposedGamesCountRef.current = currentCount;
+    
+    if (countChanged && scrollViewRef.current && scrollPositionRef.current > 0) {
+      // Restore synchronously before paint to prevent visible jump
+      scrollViewRef.current.scrollTo({
+        y: scrollPositionRef.current,
+        animated: false,
+      });
+      
+      // Backup restore after paint
+      requestAnimationFrame(() => {
+        if (scrollViewRef.current && scrollPositionRef.current > 0) {
+          scrollViewRef.current.scrollTo({
+            y: scrollPositionRef.current,
+            animated: false,
+          });
+        }
+      });
+    }
+  }, [proposedGames.length]);
   
   // Helper function to check if a game is favorited by the current user
   const isGameFavorited = useCallback((game) => {
@@ -399,6 +438,91 @@ const BrowseAndProposeScreen = () => {
     
     return result;
   }, [confirmedAttendees, collections, memberNames, selectedDate]);
+
+  // Filter proposals to only include games owned by confirmed attendees for the selected date
+  // Since proposals are now date-specific, we just need to filter by game availability
+  const filteredProposals = useMemo(() => {
+    if (!selectedDate || confirmedAttendees.length === 0) {
+      return [];
+    }
+
+    // Create a map of gameId -> game from aggregatedGames for quick lookup
+    const gamesByGameId = new Map();
+    aggregatedGames.forEach(game => {
+      const gameId = String(game.bggId || game.id);
+      if (gameId) {
+        gamesByGameId.set(gameId, game);
+      }
+    });
+
+    return proposedGames.filter(proposal => {
+      const gameId = String(proposal.gameId || '');
+      const game = gamesByGameId.get(gameId);
+      
+      // Only include proposals for games in aggregatedGames (owned by confirmed attendees)
+      return !!game;
+    });
+  }, [proposedGames, aggregatedGames, confirmedAttendees, selectedDate]);
+
+  // Cleanup orphaned proposals when aggregatedGames changes (e.g., when owners change RSVP)
+  useEffect(() => {
+    if (!event?.id || !db || !selectedDate || proposedGames.length === 0) return;
+    
+    const dateKey = getDateKey(selectedDate.date);
+    const availableGameIds = new Set(
+      aggregatedGames.map(g => String(g.bggId || g.id))
+    );
+    
+    // Find proposals for games that are no longer in aggregatedGames
+    const orphanedProposals = proposedGames.filter(proposal => {
+      const gameId = String(proposal.gameId || '');
+      return !availableGameIds.has(gameId);
+    });
+    
+    if (orphanedProposals.length === 0) return;
+    
+    // Clean up orphaned proposals
+    const cleanup = async () => {
+      console.log(`[BrowseAndProposeScreen] Cleaning up ${orphanedProposals.length} orphaned proposals for date ${dateKey}`);
+      
+      for (const proposal of orphanedProposals) {
+        const gameId = String(proposal.gameId || '');
+        const proposalDocId = `${dateKey}_${gameId}`;
+        
+        try {
+          // Delete the proposal document
+          await db.collection('gamingGroups').doc(event.id)
+            .collection('nominations').doc(proposalDocId)
+            .delete();
+          
+          // Delete all rating documents for this proposal
+          // Rating documents have userId field, proposal documents don't
+          const ratingsSnapshot = await db.collection('gamingGroups').doc(event.id)
+            .collection('nominations')
+            .where('dateKey', '==', dateKey)
+            .where('gameId', '==', gameId)
+            .get();
+          
+          const batch = db.batch();
+          ratingsSnapshot.forEach(doc => {
+            const data = doc.data();
+            // Only delete rating documents (they have userId field, proposals don't)
+            if (data.userId && data.userId !== data.nominatedBy) {
+              batch.delete(doc.ref);
+            }
+          });
+          
+          if (ratingsSnapshot.size > 0) {
+            await batch.commit();
+          }
+        } catch (error) {
+          console.error(`[BrowseAndProposeScreen] Error cleaning up proposal for ${gameId}:`, error);
+        }
+      }
+    };
+    
+    cleanup();
+  }, [proposedGames, aggregatedGames, event?.id, selectedDate, db]);
 
   // Lazy enrichment: Track which games have been enriched
   const enrichedGameIdsRef = useRef(new Set());
@@ -1042,12 +1166,22 @@ const BrowseAndProposeScreen = () => {
     };
   }, [event?.id, db, userId, user]);
   
-  // Load proposed games (nominations)
+  // Load proposed games (nominations) for the selected date
   useEffect(() => {
-    if (!event?.id || !db) return;
+    if (!event?.id || !db || !selectedDate) {
+      setProposedGames([]);
+      setUserProposals(new Set());
+      return;
+    }
     
+    const dateKey = getDateKey(selectedDate.date);
+    
+    // Query proposals for this specific date using dateKey prefix
+    // Document IDs are in format: {dateKey}_{gameId} for proposals
+    // and {dateKey}_{gameId}_{userId} for ratings
     const unsubscribe = db.collection('gamingGroups').doc(event.id)
       .collection('nominations')
+      .where('dateKey', '==', dateKey)
       .onSnapshot((snapshot) => {
         const proposalsMap = new Map();
         const userProposalsSet = new Set();
@@ -1056,11 +1190,12 @@ const BrowseAndProposeScreen = () => {
         snapshot.forEach((doc) => {
           const data = doc.data();
           const gameId = data.gameId;
+          const docDateKey = data.dateKey;
           
-          if (!gameId) return;
+          if (!gameId || docDateKey !== dateKey) return;
           
           // Check if this is a proposal document (not a rating document)
-          // Rating documents have userId that differs from nominatedBy, or have userId but no nominatedBy
+          // Rating documents have userId that differs from nominatedBy
           const isRatingDoc = data.userId && data.userId !== data.nominatedBy;
           
           if (!isRatingDoc) {
@@ -1071,6 +1206,7 @@ const BrowseAndProposeScreen = () => {
                 gameName: data.gameName || 'Unknown Game',
                 gameImage: data.gameImage || null,
                 proposedBy: data.nominatedBy || data.userId || userId,
+                dateKey: docDateKey,
                 ratings: {},
               });
             }
@@ -1086,8 +1222,9 @@ const BrowseAndProposeScreen = () => {
         snapshot.forEach((doc) => {
           const data = doc.data();
           const gameId = data.gameId;
+          const docDateKey = data.dateKey;
           
-          if (!gameId) return;
+          if (!gameId || docDateKey !== dateKey) return;
           
           // Check if this is a rating document
           const isRatingDoc = data.userId && data.userId !== data.nominatedBy;
@@ -1101,6 +1238,7 @@ const BrowseAndProposeScreen = () => {
                 gameName: data.gameName || 'Unknown Game',
                 gameImage: data.gameImage || null,
                 proposedBy: data.nominatedBy || userId,
+                dateKey: docDateKey,
                 ratings: {},
               });
             }
@@ -1115,10 +1253,14 @@ const BrowseAndProposeScreen = () => {
         
         setProposedGames(Array.from(proposalsMap.values()));
         setUserProposals(userProposalsSet);
+      }, (error) => {
+        console.error('[BrowseAndProposeScreen] Error loading proposals:', error);
+        setProposedGames([]);
+        setUserProposals(new Set());
       });
     
     return unsubscribe;
-  }, [event?.id, userId]);
+  }, [event?.id, selectedDate, userId, db]);
   
   const handleOpenGameDetails = useCallback((game) => {
     setSelectedGame(game);
@@ -1288,7 +1430,30 @@ const BrowseAndProposeScreen = () => {
       userId,
       userProposalsCount: userProposals.size,
       gameId: game.bggId || game.id,
+      hasSelectedDate: !!selectedDate,
+      dateKey: selectedDate ? getDateKey(selectedDate.date) : null,
     });
+    
+    // Validate that we have a selected date
+    if (!selectedDate) {
+      Alert.alert('Error', 'Please select a date to propose a game.');
+      return;
+    }
+    
+    // Validate that the game is in aggregatedGames (owned by confirmed attendees)
+    const gameId = String(game.bggId || game.id);
+    const isGameAvailable = aggregatedGames.some(g => String(g.bggId || g.id) === gameId);
+    if (!isGameAvailable) {
+      Alert.alert('Error', 'This game is not available for this date. Only games owned by confirmed attendees can be proposed.');
+      return;
+    }
+    
+    // Validate that the current user is a confirmed attendee
+    const userIsAttending = confirmedAttendees.some(a => a.userId === userId);
+    if (!userIsAttending) {
+      Alert.alert('Error', 'You must be confirmed as attending this date to propose games.');
+      return;
+    }
     
     if (!event?.id || !db || !userId) {
       console.error('[BrowseAndPropose] Missing required data:', {
@@ -1298,8 +1463,6 @@ const BrowseAndProposeScreen = () => {
       });
       return;
     }
-    
-    const gameId = game.bggId || game.id;
     
     if (userProposals.size >= userProposalLimit) {
       Alert.alert('Limit Reached', `You can only propose up to ${userProposalLimit} game${userProposalLimit !== 1 ? 's' : ''}. Remove a proposal first to propose another game.`);
@@ -1374,19 +1537,27 @@ const BrowseAndProposeScreen = () => {
         }
       }
       
+      const dateKey = getDateKey(selectedDate.date);
+      
       const proposalDoc = {
         gameId,
         gameName: game.title || 'Unknown Game',
         gameImage: game.image || game.thumbnail || null,
         nominatedBy: userId,
+        dateKey, // Store dateKey for querying
         createdAt: firebase.firestore.Timestamp.now(),
       };
+      
+      // Use dateKey in document ID to make proposals date-specific
+      const proposalDocId = `${dateKey}_${gameId}`;
       
       console.log('[BrowseAndPropose] Attempting to save proposal:', {
         eventId: event.id,
         gameId,
+        dateKey,
+        proposalDocId,
         proposalDoc,
-        documentPath: `gamingGroups/${event.id}/nominations/${gameId}`,
+        documentPath: `gamingGroups/${event.id}/nominations/${proposalDocId}`,
       });
       
       // Ensure nominatedBy is explicitly set for Firestore rule validation
@@ -1397,23 +1568,13 @@ const BrowseAndProposeScreen = () => {
       
       await db.collection('gamingGroups').doc(event.id)
         .collection('nominations')
-        .doc(gameId)
+        .doc(proposalDocId)
         .set(finalProposalDoc, { merge: true });
       
       console.log('[BrowseAndPropose] Proposal saved successfully');
       
-      setUserProposals(prev => new Set([...prev, gameId]));
-      setProposedGames(prev => {
-        const exists = prev.some(n => n.gameId === gameId);
-        if (exists) return prev;
-        return [...prev, {
-          gameId,
-          gameName: proposalDoc.gameName,
-          gameImage: proposalDoc.gameImage,
-          proposedBy: userId,
-          ratings: {},
-        }];
-      });
+      // Note: userProposals and proposedGames will be updated via the snapshot listener
+      // No need to manually update state here
       
       // Notify game owners about the proposal
       try {
@@ -1476,10 +1637,12 @@ const BrowseAndProposeScreen = () => {
 
 
   const handleRateGame = async (gameId, newRating) => {
-    if (!event?.id || !db || !userId) return;
+    if (!event?.id || !db || !userId || !selectedDate) return;
     
     const proposal = proposedGames.find(p => p.gameId === gameId);
     if (!proposal) return;
+    
+    const dateKey = proposal.dateKey || getDateKey(selectedDate.date);
     
     const userRating = proposal.ratings?.[userId] ?? null;
     
@@ -1487,13 +1650,17 @@ const BrowseAndProposeScreen = () => {
     const ratingToSave = userRating === newRating ? null : newRating;
     
     try {
+      // Rating document ID format: {dateKey}_{gameId}_{userId}
+      const ratingDocId = `${dateKey}_${gameId}_${userId}`;
+      
       if (ratingToSave === null) {
         // Clear the rating
         await db.collection('gamingGroups').doc(event.id)
           .collection('nominations')
-          .doc(`${gameId}_${userId}`)
+          .doc(ratingDocId)
           .delete();
         
+        // Note: State will be updated via snapshot listener, but update optimistically
         setProposedGames(prev => prev.map(n => {
           if (n.gameId === gameId) {
             const newRatings = { ...n.ratings };
@@ -1511,12 +1678,13 @@ const BrowseAndProposeScreen = () => {
           userId,
           rating: ratingToSave,
           nominatedBy: proposal.proposedBy,
+          dateKey, // Include dateKey for querying
           updatedAt: firebase.firestore.Timestamp.now(),
         };
         
         await db.collection('gamingGroups').doc(event.id)
           .collection('nominations')
-          .doc(`${gameId}_${userId}`)
+          .doc(ratingDocId)
           .set(ratingDoc, { merge: true });
         
         setProposedGames(prev => prev.map(n => {
@@ -1567,12 +1735,18 @@ const BrowseAndProposeScreen = () => {
         <View style={styles.headerSpacer} />
       </View>
       
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+      >
         {/* Beeple Game Optimizer */}
-        {proposedGames.length > 0 && confirmedAttendees.length > 0 && (
+        {filteredProposals.length > 0 && confirmedAttendees.length > 0 && (
           <View style={styles.section}>
             <BeepleGameOptimizer
-              proposedGames={proposedGames}
+              proposedGames={filteredProposals}
               confirmedAttendees={confirmedAttendees}
               memberRSVPs={memberRSVPs}
               memberNames={memberNames}
@@ -1585,13 +1759,13 @@ const BrowseAndProposeScreen = () => {
         )}
 
         {/* Proposed Games Section */}
-        {proposedGames.length > 0 && (
+        {filteredProposals.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Proposed Games</Text>
             <Text style={styles.sectionCopy}>
               Rate each game to help decide what to play.
             </Text>
-            {proposedGames.map((proposal) => {
+            {filteredProposals.map((proposal) => {
               // Ensure gameId is always a string
               const rawGameId = proposal.gameId;
               const gameId = rawGameId ? String(rawGameId) : null;
@@ -2170,6 +2344,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4a90e2',
     fontWeight: '500',
+  },
+  proposerWarningContainer: {
+    marginTop: 6,
+    padding: 8,
+    backgroundColor: '#fff3cd',
+    borderRadius: 4,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ffc107',
+  },
+  proposerWarningText: {
+    fontSize: 12,
+    color: '#856404',
+    fontStyle: 'italic',
   },
   ratingDisplayContainer: {
     marginTop: 12,

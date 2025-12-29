@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDimensions, ScrollView } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
+import LoadingSpinner from '../components/common/LoadingSpinner';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import TextListGameIdentifier from '../components/TextListGameIdentifier';
 import GameCard from '../components/GameCard';
@@ -24,7 +25,7 @@ const CollectionScreen = () => {
   
   const { width } = useWindowDimensions();
   const { user } = useAuth();
-  const { collections, getUserCollection, addGameToCollection, removeGameFromCollection, updateGameInCollection } = useCollections();
+  const { collections, getUserCollection, addGameToCollection, removeGameFromCollection, updateGameInCollection, loading, initialised } = useCollections();
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'import'
   const [sortBy, setSortBy] = useState('category'); // 'rating', 'category', 'title'
   const [categorySortPreference, setCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
@@ -45,27 +46,39 @@ const CollectionScreen = () => {
   }, []);
   
   // Restore scroll position after sort changes
-  useEffect(() => {
+  // Use useLayoutEffect to restore synchronously before paint, preventing visible jumps
+  useLayoutEffect(() => {
     // Only restore if we have a saved position > 0 (not at top)
     if (scrollPositionRef.current <= 0) return;
     
-    // Use requestAnimationFrame to ensure layout has updated
+    // Restore synchronously before paint to prevent visible jump
+    if (flatListRef.current) {
+      flatListRef.current.scrollToOffset({ 
+        offset: scrollPositionRef.current, 
+        animated: false 
+      });
+    }
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ 
+        y: scrollPositionRef.current, 
+        animated: false 
+      });
+    }
+    
+    // Backup restore after paint in case the above didn't work
     requestAnimationFrame(() => {
-      // Use a small delay to ensure content has rendered
-      setTimeout(() => {
-        if (flatListRef.current) {
-          flatListRef.current.scrollToOffset({ 
-            offset: scrollPositionRef.current, 
-            animated: false 
-          });
-        }
-        if (scrollViewRef.current) {
-          scrollViewRef.current.scrollTo({ 
-            y: scrollPositionRef.current, 
-            animated: false 
-          });
-        }
-      }, 100);
+      if (flatListRef.current && scrollPositionRef.current > 0) {
+        flatListRef.current.scrollToOffset({ 
+          offset: scrollPositionRef.current, 
+          animated: false 
+        });
+      }
+      if (scrollViewRef.current && scrollPositionRef.current > 0) {
+        scrollViewRef.current.scrollTo({ 
+          y: scrollPositionRef.current, 
+          animated: false 
+        });
+      }
     });
   }, [sortBy]);
   
@@ -545,25 +558,6 @@ const CollectionScreen = () => {
         scrollEventThrottle={16}
       >
         {renderHeader()}
-        
-        <View style={styles.inventoryHeader}>
-          <Text style={styles.inventoryTitle}>Your Games Inventory</Text>
-          <View style={styles.searchContainer}>
-            <Input
-              placeholder="Search by title..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              style={styles.searchInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-          {searchQuery.trim() && (
-            <Text style={styles.searchResultCount}>
-              {filteredGames.length} game{filteredGames.length !== 1 ? 's' : ''} found
-            </Text>
-          )}
-        </View>
 
         {[...ALL_CATEGORIES, 'Uncategorized'].map((category) => {
           const games = gamesByCategory[category] || [];
@@ -744,6 +738,15 @@ const CollectionScreen = () => {
     rawCollectionLength: rawCollection.length,
     userIdentifier: userIdentifier ? 'present' : 'missing'
   });
+
+  // Show loading spinner while collections are initializing or loading
+  if (!initialised || loading) {
+    return (
+      <View style={styles.container}>
+        <LoadingSpinner />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -1201,12 +1204,20 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   searchInput: {
-    backgroundColor: theme.colors.backgroundSecondary,
+    backgroundColor: theme.colors.surfaceColor,
     borderRadius: theme.borderRadius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+    borderWidth: 2,
+    borderColor: theme.colors.meepleRed,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.textPrimary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   searchResultCount: {
     fontSize: theme.typography.fontSize.sm,

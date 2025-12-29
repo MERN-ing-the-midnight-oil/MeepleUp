@@ -24,18 +24,18 @@ const JoinForm = ({
   return (
     <View style={[styles.container, style]}>
       {showTitle && (
-        <Text style={styles.title}>Join an existing MeepleUp</Text>
+        <Text style={styles.title}>Join a MeepleUp</Text>
       )}
       {showSubtitle && (
         <Text style={styles.subtitle}>
-          Enter the three-word join code provided by your game night organizer.
+          Have a 3-word invite code from your host?
         </Text>
       )}
       
       {error && <Text style={styles.error}>{error}</Text>}
       
-      <View style={styles.joinCodeFields}>
-        <View style={styles.holeWrapper}>
+      <View style={styles.holeWrapper}>
+        <View style={styles.joinCodeFields}>
           <View style={styles.whiteRectangle}>
             <Input
               placeholder="battery"
@@ -47,8 +47,6 @@ const JoinForm = ({
               placeholderTextColor="rgba(0, 0, 0, 0.5)"
             />
           </View>
-        </View>
-        <View style={styles.holeWrapper}>
           <View style={styles.whiteRectangle}>
             <Input
               placeholder="horse"
@@ -60,8 +58,6 @@ const JoinForm = ({
               placeholderTextColor="rgba(0, 0, 0, 0.5)"
             />
           </View>
-        </View>
-        <View style={styles.holeWrapper}>
           <View style={styles.whiteRectangle}>
             <Input
               placeholder="staple"
@@ -133,9 +129,9 @@ const styles = StyleSheet.create({
   joinCodeFields: {
     flexDirection: 'row',
     gap: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
     width: '100%', // Ensure container takes full width
     flexWrap: 'nowrap', // Prevent wrapping
+    flex: 1, // Allow container to fill available space
   },
   holeWrapper: {
     // Wood background - looks like hole showing the wood table beneath
@@ -149,10 +145,8 @@ const styles = StyleSheet.create({
     borderRightColor: '#6b5435',
     borderRadius: 8,
     padding: theme.spacing.sm, // Padding so wood shows around white rectangles
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    flex: 1, // Make each field take equal space
-    minWidth: 0, // Allow flex items to shrink below their content size
+    marginBottom: theme.spacing.lg,
+    width: '100%', // Ensure container takes full width
   },
   whiteRectangle: {
     // White rectangle that contains the text - sized to fit content
@@ -160,8 +154,8 @@ const styles = StyleSheet.create({
     borderRadius: 0, // Sharp corners
     paddingHorizontal: 3, // Just a few pixels
     paddingVertical: 3, // Just a few pixels
-    width: '100%', // Take full width of parent
-    minWidth: 90, // Minimum width for placeholder visibility and longer words
+    flex: 1, // Make each field take equal space (1/3 each)
+    minWidth: 0, // Allow flex items to shrink below content size
     // Thin black borders on left and bottom
     borderLeftWidth: 1,
     borderBottomWidth: 1,
@@ -187,8 +181,8 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     // Ensure no opacity is applied
     opacity: 1,
-    width: '100%', // Take full width of parent
     flex: 1, // Allow input to flex within its container
+    width: '100%', // Take full width of parent rectangle
   },
   joinButton: {
     alignSelf: 'center',

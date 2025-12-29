@@ -926,45 +926,171 @@ export const EventsProvider = ({ children }) => {
 
   const updateEvent = useCallback(
     async (eventId, updates) => {
-      if (!db) return;
-        try {
-          const groupRef = db.collection('gamingGroups').doc(eventId);
-        const firestoreUpdates = {
-          ...updates,
-              updatedAt: firebase.firestore.Timestamp.now(),
-        };
+      console.log('[EventsContext] ========== updateEvent CALLED ==========');
+      console.log('[EventsContext] updateEvent - eventId:', eventId);
+      console.log('[EventsContext] updateEvent - updates:', {
+        ...updates,
+        eventDates: updates.eventDates ? {
+          count: Array.isArray(updates.eventDates) ? updates.eventDates.length : 'not an array',
+          firstDate: Array.isArray(updates.eventDates) && updates.eventDates.length > 0 
+            ? updates.eventDates[0] 
+            : 'no dates',
+        } : 'no eventDates in updates',
+      });
+      
+      if (!db) {
+        console.log('[EventsContext] ⚠️  No database available, returning early');
+        return;
+      }
+      
+      try {
+        const groupRef = db.collection('gamingGroups').doc(eventId);
+        
+        // Convert eventDates to Firestore Timestamps if present
+        const firestoreUpdates = { ...updates };
+        if (firestoreUpdates.eventDates && Array.isArray(firestoreUpdates.eventDates)) {
+          console.log('[EventsContext] Converting eventDates to Firestore Timestamps...');
+          firestoreUpdates.eventDates = firestoreUpdates.eventDates.map((ed) => {
+            // Handle both ISO string and Date object formats
+            const date = ed.date instanceof Date ? ed.date : new Date(ed.date);
+            const startTime = ed.startTime instanceof Date ? ed.startTime : new Date(ed.startTime);
+            const endTime = ed.endTime instanceof Date ? ed.endTime : new Date(ed.endTime);
+            
+            return {
+              date: firebase.firestore.Timestamp.fromDate(date),
+              startTime: firebase.firestore.Timestamp.fromDate(startTime),
+              endTime: firebase.firestore.Timestamp.fromDate(endTime),
+              location: ed.location || '',
+              exactLocation: ed.exactLocation || ed.address || '',
+              note: ed.note || '',
+            };
+          });
+          
+          // Update nextEventDate to the first event date if eventDates exist
+          if (firestoreUpdates.eventDates.length > 0) {
+            firestoreUpdates.nextEventDate = firestoreUpdates.eventDates[0].date;
+          }
+          
+          console.log('[EventsContext] Converted eventDates to Timestamps:', {
+            count: firestoreUpdates.eventDates.length,
+            firstDate: firestoreUpdates.eventDates[0]?.date?.toDate?.()?.toISOString(),
+          });
+        }
+        
+        // Convert usualStartTime and usualEndTime if present
+        if (firestoreUpdates.usualStartTime) {
+          const usualStartTime = firestoreUpdates.usualStartTime instanceof Date 
+            ? firestoreUpdates.usualStartTime 
+            : new Date(firestoreUpdates.usualStartTime);
+          firestoreUpdates.usualStartTime = firebase.firestore.Timestamp.fromDate(usualStartTime);
+        }
+        if (firestoreUpdates.usualEndTime) {
+          const usualEndTime = firestoreUpdates.usualEndTime instanceof Date 
+            ? firestoreUpdates.usualEndTime 
+            : new Date(firestoreUpdates.usualEndTime);
+          firestoreUpdates.usualEndTime = firebase.firestore.Timestamp.fromDate(usualEndTime);
+        }
+        
+        firestoreUpdates.updatedAt = firebase.firestore.Timestamp.now();
+        
+        console.log('[EventsContext] Preparing Firestore update:', {
+          hasEventDates: !!firestoreUpdates.eventDates,
+          eventDatesType: Array.isArray(firestoreUpdates.eventDates) ? 'array' : typeof firestoreUpdates.eventDates,
+          eventDatesCount: Array.isArray(firestoreUpdates.eventDates) ? firestoreUpdates.eventDates.length : 'N/A',
+          eventDatesFormat: Array.isArray(firestoreUpdates.eventDates) && firestoreUpdates.eventDates.length > 0
+            ? {
+                firstDateType: typeof firestoreUpdates.eventDates[0].date,
+                isTimestamp: firestoreUpdates.eventDates[0].date?.toDate ? 'Timestamp' : 'not Timestamp',
+                firstDateValue: firestoreUpdates.eventDates[0].date?.toDate?.()?.toISOString(),
+              }
+            : 'no dates',
+        });
+        
+        console.log('[EventsContext] Calling Firestore update...');
         await groupRef.update(firestoreUpdates);
-        setEvents((prev) =>
-          prev.map((event) =>
+        console.log('[EventsContext] ✅ Firestore update completed successfully');
+        
+        console.log('[EventsContext] Updating local events state...');
+        setEvents((prev) => {
+          const updated = prev.map((event) =>
             event.id === eventId ? { ...event, ...updates, lastUpdatedAt: new Date().toISOString() } : event
-          )
-        );
+          );
+          console.log('[EventsContext] Local events state updated - this will cause EventHub to re-render');
+          return updated;
+        });
+        console.log('[EventsContext] ✅ Local events state updated');
+        console.log('[EventsContext] ========== updateEvent COMPLETE ==========');
         } catch (error) {
-        console.error('[EventsContext] Error updating event:', error);
+        console.error('[EventsContext] ❌ Error updating event:', error);
+        console.error('[EventsContext] Error details:', {
+          code: error.code,
+          message: error.message,
+          stack: error.stack,
+        });
         throw error;
       }
     },
     [db],
   );
 
+  // Helper to get date key from event date
+  const getDateKey = (eventDate) => {
+    if (!eventDate) return 'default';
+    const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
+    // Format using local date components to avoid timezone shifts
+    date.setHours(0, 0, 0, 0);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`; // YYYY-MM-DD format using local date
+  };
+
   const updateMemberRSVP = useCallback(
-    async (eventId, userId, rsvpStatus, rsvpStatuses = {}) => {
+    async (eventId, userId, status, eventDate = null) => {
       if (!db) return;
       try {
         const membersRef = db.collection('gamingGroups').doc(eventId).collection('members').doc(userId);
-        await membersRef.update({
-          rsvpStatus,
-          rsvpStatuses,
+        
+        // Get current RSVP data from Firestore
+        const memberDoc = await membersRef.get();
+        const currentData = memberDoc.exists ? memberDoc.data() : {};
+        
+        // Get current rsvpStatuses or initialize empty object
+        let rsvpStatuses = {};
+        if (currentData.rsvpStatuses && typeof currentData.rsvpStatuses === 'object' && currentData.rsvpStatuses.constructor === Object) {
+          rsvpStatuses = { ...currentData.rsvpStatuses };
+        } else if (currentData.rsvpStatus && typeof currentData.rsvpStatus === 'string') {
+          // Legacy format: convert single status to date-specific
+          rsvpStatuses = { default: currentData.rsvpStatus };
+        }
+        
+        // Update the specific date key
+        const dateKey = getDateKey(eventDate);
+        if (status) {
+          rsvpStatuses[dateKey] = status;
+        } else {
+          // Remove the status for this date if status is null/empty
+          delete rsvpStatuses[dateKey];
+        }
+        
+        // Set rsvpStatus to null since we're using date-specific statuses now
+        const updateData = {
+          rsvpStatus: null, // Legacy field, set to null
+          rsvpStatuses: rsvpStatuses,
           rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
-        });
-      setEvents((prev) =>
-        prev.map((event) =>
-          event.id === eventId
-            ? {
-                ...event,
+        };
+        
+        await membersRef.set(updateData, { merge: true });
+        
+        // Update local events state
+        setEvents((prev) =>
+          prev.map((event) =>
+            event.id === eventId
+              ? {
+                  ...event,
                   members: event.members.map((member) =>
                     member.userId === userId
-                      ? { ...member, rsvpStatus, rsvpStatuses, rsvpUpdatedAt: new Date().toISOString() }
+                      ? { ...member, rsvpStatus: null, rsvpStatuses, rsvpUpdatedAt: new Date().toISOString() }
                       : member
                   ),
                 }
@@ -973,15 +1099,29 @@ export const EventsProvider = ({ children }) => {
         );
       } catch (error) {
         console.error('[EventsContext] Error updating member RSVP:', error);
-              throw error;
-            }
+        throw error;
+      }
     },
     [db],
   );
 
   const updateEventSchedule = useCallback(
     async (eventId, scheduleUpdates) => {
-      return updateEvent(eventId, scheduleUpdates);
+      console.log('[EventsContext] ========== updateEventSchedule CALLED ==========');
+      console.log('[EventsContext] updateEventSchedule - eventId:', eventId);
+      console.log('[EventsContext] updateEventSchedule - scheduleUpdates:', {
+        ...scheduleUpdates,
+        eventDates: scheduleUpdates.eventDates ? {
+          count: Array.isArray(scheduleUpdates.eventDates) ? scheduleUpdates.eventDates.length : 'not an array',
+          sample: Array.isArray(scheduleUpdates.eventDates) && scheduleUpdates.eventDates.length > 0
+            ? scheduleUpdates.eventDates[0]
+            : 'no dates',
+        } : 'no eventDates',
+      });
+      console.log('[EventsContext] updateEventSchedule - delegating to updateEvent...');
+      const result = await updateEvent(eventId, scheduleUpdates);
+      console.log('[EventsContext] ========== updateEventSchedule COMPLETE ==========');
+      return result;
     },
     [updateEvent],
   );
