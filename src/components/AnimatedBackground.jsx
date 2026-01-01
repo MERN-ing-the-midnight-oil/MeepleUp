@@ -151,6 +151,7 @@ const AnimatedBackground = ({ children, enabled = true }) => {
   const particleIdRef = useRef(0);
   const usedSegmentsRef = useRef(new Set());
   const spawnIntervalRef = useRef(null);
+  const [animationEnabled, setAnimationEnabled] = useState(enabled);
   
   // Spawn rate: faster for smaller screens, slower for larger
   const getSpawnInterval = () => {
@@ -161,7 +162,7 @@ const AnimatedBackground = ({ children, enabled = true }) => {
   };
   
   const spawnMeeple = () => {
-    if (!enabled || width === 0 || height === 0) return;
+    if (!animationEnabled || width === 0 || height === 0) return;
     
     const layer = selectLayer();
     const x = getStratifiedX(width, usedSegmentsRef.current);
@@ -181,8 +182,25 @@ const AnimatedBackground = ({ children, enabled = true }) => {
     setParticles(prev => prev.filter(p => p.id !== id));
   };
   
+  // Disable animation after 7 seconds
   useEffect(() => {
     if (!enabled) {
+      setAnimationEnabled(false);
+      return;
+    }
+    
+    setAnimationEnabled(true);
+    const timer = setTimeout(() => {
+      setAnimationEnabled(false);
+    }, 30000); // 30 seconds
+    
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [enabled]);
+  
+  useEffect(() => {
+    if (!animationEnabled) {
       if (spawnIntervalRef.current) {
         clearInterval(spawnIntervalRef.current);
         spawnIntervalRef.current = null;
@@ -197,18 +215,18 @@ const AnimatedBackground = ({ children, enabled = true }) => {
     const interval = getSpawnInterval();
     spawnIntervalRef.current = setInterval(spawnMeeple, interval);
     
-    return () => {
-      if (spawnIntervalRef.current) {
-        clearInterval(spawnIntervalRef.current);
-        spawnIntervalRef.current = null;
-      }
-    };
-  }, [enabled, width, height]);
+      return () => {
+        if (spawnIntervalRef.current) {
+          clearInterval(spawnIntervalRef.current);
+          spawnIntervalRef.current = null;
+        }
+      };
+    }, [animationEnabled, width, height]);
   
   return (
     <View style={styles.container}>
       {/* Background layers */}
-      {enabled && (
+      {animationEnabled && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {particles.map(particle => (
             <MeepleParticle

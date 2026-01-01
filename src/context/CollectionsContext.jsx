@@ -73,6 +73,8 @@ export const CollectionsProvider = ({ children }) => {
     // Mark as syncing immediately to prevent duplicate runs
     currentUserSyncedRef.current = userId;
     
+    // Note: This sync happens in the background. If local storage has cached games,
+    // they will be shown immediately while this sync updates them in the background.
     const sync = async () => {
       setLoading(true);
       try {

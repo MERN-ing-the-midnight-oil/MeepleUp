@@ -15,28 +15,47 @@ import {
 import { useResponsive } from '../../utils/responsive';
 import { theme, commonStyles } from '../../utils/theme';
 
-const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
+const ModalComponent = ({ isOpen, onClose, children, title, fullScreen = false }) => {
   const { width, height } = useWindowDimensions();
   const { isMobile, isTablet } = useResponsive();
   
-  // For fullScreen modals, use "none" animation to prevent flickering on re-renders
-  // Regular modals still use "slide" for better UX
-  const animationType = fullScreen ? 'none' : 'slide';
+  // Use "none" animation to prevent re-animation on re-renders
+  // This prevents the minimize/maximize effect when modal content updates
+  // The slide animation was causing the modal to re-animate on every re-render
+  const animationType = 'none';
   
-  // Responsive modal width
-  const modalWidth = isMobile ? '95%' : isTablet ? '85%' : '90%';
-  const maxModalWidth = isMobile ? width * 0.95 : isTablet ? 600 : 700;
+  // Responsive modal width - memoize to prevent recalculation
+  const modalWidth = React.useMemo(() => isMobile ? '95%' : isTablet ? '85%' : '90%', [isMobile, isTablet]);
+  const maxModalWidth = React.useMemo(() => isMobile ? width * 0.95 : isTablet ? 600 : 700, [isMobile, isTablet, width]);
   
   // Calculate max height for ScrollView (accounting for header and padding)
   // Use a percentage that works well with the content container's maxHeight: 80%
-  const maxScrollHeight = Platform.OS === 'web' ? '60vh' : height * 0.6;
+  const maxScrollHeight = React.useMemo(() => Platform.OS === 'web' ? '60vh' : height * 0.6, [height]);
   
-    return (
+  // Memoize onRequestClose to prevent recreation on every render
+  const handleRequestClose = React.useCallback(() => {
+    console.log('[Modal] onRequestClose called (Android back button or similar)');
+    onClose();
+  }, [onClose]);
+  
+  // Only log when modal actually opens/closes, not on every render
+  const prevIsOpenRef = React.useRef(isOpen);
+  React.useEffect(() => {
+    if (prevIsOpenRef.current !== isOpen) {
+      console.log('[Modal] Modal state changed, isOpen:', isOpen, 'title:', title);
+      prevIsOpenRef.current = isOpen;
+    }
+  }, [isOpen, title]);
+  
+  // Ref to maintain scroll position
+  const scrollViewRef = React.useRef(null);
+  
+  return (
     <RNModal
       visible={isOpen}
       transparent={true}
       animationType={animationType}
-      onRequestClose={onClose}
+      onRequestClose={handleRequestClose}
     >
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
@@ -81,6 +100,8 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
                   </View>
                 )}
                 <ScrollView
+                  ref={scrollViewRef}
+                  key="modal-scrollview" // Stable key to prevent unmounting
                   contentContainerStyle={styles.scrollContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={true}
@@ -88,6 +109,9 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
                   nestedScrollEnabled={true}
                   removeClippedSubviews={false}
                   maintainVisibleContentPosition={null}
+                  keyboardDismissMode="none" // Prevent keyboard from dismissing on scroll
+                  scrollEventThrottle={16}
+                  bounces={false} // Prevent bouncing that might cause layout shifts
                 >
                   {children}
                 </ScrollView>
@@ -97,7 +121,7 @@ const Modal = ({ isOpen, onClose, children, title, fullScreen = false }) => {
         </View>
       </KeyboardAvoidingView>
     </RNModal>
-    );
+  );
 };
 
 const styles = StyleSheet.create({
@@ -234,5 +258,30 @@ const styles = StyleSheet.create({
     } : {}),
   },
 });
+
+// Memoize Modal to prevent re-renders that cause minimizing/maximizing
+// When modal is open, we allow children to update (for input values) but prevent
+// the Modal structure from re-rendering, which causes the collapse/expand behavior
+const Modal = React.memo(ModalComponent, (prevProps, nextProps) => {
+  // Critical props that should trigger re-render
+  const isOpenChanged = prevProps.isOpen !== nextProps.isOpen;
+  const titleChanged = prevProps.title !== nextProps.title;
+  const fullScreenChanged = prevProps.fullScreen !== nextProps.fullScreen;
+  const onCloseChanged = prevProps.onClose !== nextProps.onClose;
+  
+  // If modal is open and staying open, prevent re-render even if children change
+  // React will still update the children through reconciliation, but the Modal
+  // structure (ScrollView, KeyboardAvoidingView, etc.) won't re-render
+  const isOpenAndStayingOpen = prevProps.isOpen && nextProps.isOpen && !isOpenChanged;
+  
+  // Only update if critical props changed
+  // When modal is open, children changes are handled by React's reconciliation
+  // without re-rendering the Modal component structure
+  const shouldUpdate = isOpenChanged || titleChanged || fullScreenChanged || (onCloseChanged && !isOpenAndStayingOpen);
+  
+  return !shouldUpdate; // true = props equal (skip render), false = different (update)
+});
+
+Modal.displayName = 'Modal';
 
 export default Modal;

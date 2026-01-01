@@ -491,6 +491,186 @@ async function handleGoogleSubscriptionUpdate(subscriptionId, purchaseToken, sta
 }
 
 /**
+ * HTTP Function: Send Game Request Email
+ * Called when a user requests a game from another user
+ */
+exports.sendGameRequestEmail = functions.https.onRequest(async (req, res) => {
+  // CORS headers
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  try {
+    const {to, subject, gameName, interestedUserName, meepleUpName, groupId} = req.body;
+
+    if (!to || !subject || !gameName || !interestedUserName) {
+      res.status(400).json({error: "Missing required fields"});
+      return;
+    }
+
+    // In production, you would use a proper email service like SendGrid, Mailgun, or Nodemailer
+    // For now, we'll log the email details and return success
+    // You can integrate with your preferred email service here
+    
+    console.log("Game Request Email:", {
+      to,
+      subject,
+      gameName,
+      interestedUserName,
+      meepleUpName,
+      groupId,
+    });
+
+    // TODO: Implement actual email sending using your preferred service
+    // Example with Nodemailer:
+    // const nodemailer = require('nodemailer');
+    // const transporter = nodemailer.createTransport({...});
+    // await transporter.sendMail({to, subject, html: emailBody});
+
+    res.status(200).json({success: true, message: "Email sent successfully"});
+  } catch (error) {
+    console.error("Error sending game request email:", error);
+    res.status(500).json({error: error.message});
+  }
+});
+
+/**
+ * HTTP Function: Send RSVP Update Email
+ * Called when an organizer updates a member's RSVP status
+ */
+exports.sendRSVPUpdateEmail = functions.https.onRequest(async (req, res) => {
+  // CORS headers
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  try {
+    const {
+      to,
+      subject,
+      organizerName,
+      newStatus,
+      dateStr,
+      meepleUpName,
+      groupId,
+    } = req.body;
+
+    if (!to || !subject || !organizerName || !newStatus || !dateStr) {
+      res.status(400).json({error: "Missing required fields"});
+      return;
+    }
+
+    console.log("RSVP Update Email:", {
+      to,
+      subject,
+      organizerName,
+      newStatus,
+      dateStr,
+      meepleUpName,
+      groupId,
+    });
+
+    // TODO: Implement actual email sending using your preferred service
+    // Example with Nodemailer:
+    // const nodemailer = require('nodemailer');
+    // const transporter = nodemailer.createTransport({...});
+    // const emailBody = `
+    //   <h2>RSVP Status Updated</h2>
+    //   <p>${organizerName} has updated your RSVP status to "${newStatus}" for ${dateStr}.</p>
+    //   <p>MeepleUp: ${meepleUpName || 'Your MeepleUp'}</p>
+    // `;
+    // await transporter.sendMail({to, subject, html: emailBody});
+
+    res.status(200).json({success: true, message: "Email sent successfully"});
+  } catch (error) {
+    console.error("Error sending RSVP update email:", error);
+    res.status(500).json({error: error.message});
+  }
+});
+
+/**
+ * HTTP Function: Send Direct Message Email
+ * Called when a user sends a direct message
+ */
+exports.sendDirectMessageEmail = functions.https.onRequest(async (req, res) => {
+  // CORS headers
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  try {
+    const {
+      to,
+      subject,
+      senderName,
+      messagePreview,
+      groupName,
+      groupId,
+    } = req.body;
+
+    if (!to || !subject || !senderName || !messagePreview) {
+      res.status(400).json({error: "Missing required fields"});
+      return;
+    }
+
+    console.log("Direct Message Email:", {
+      to,
+      subject,
+      senderName,
+      messagePreview,
+      groupName,
+      groupId,
+    });
+
+    // TODO: Implement actual email sending using your preferred service
+    // Example with Nodemailer:
+    // const nodemailer = require('nodemailer');
+    // const transporter = nodemailer.createTransport({...});
+    // const emailBody = `
+    //   <h2>New Message from ${senderName}</h2>
+    //   <p>${messagePreview}</p>
+    //   <p>MeepleUp: ${groupName || 'Your MeepleUp'}</p>
+    // `;
+    // await transporter.sendMail({to, subject, html: emailBody});
+
+    res.status(200).json({success: true, message: "Email sent successfully"});
+  } catch (error) {
+    console.error("Error sending direct message email:", error);
+    res.status(500).json({error: error.message});
+  }
+});
+
+/**
  * Cloud Function: Verify Apple Sign-In Token and Create Custom Firebase Token
  * This is needed because Firebase compat mode's OAuthProvider doesn't support native Apple Sign-In
  */

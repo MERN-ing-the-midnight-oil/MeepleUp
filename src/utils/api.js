@@ -449,8 +449,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
 
 /**
  * Get detailed game information by BGG ID
- * Priority: Firebase Firestore -> BGG API
- * BGG API is used to fetch thumbnails/images when not available in Firestore
+ * Priority: Firebase Firestore -> BGG API (only if game not found in Firestore)
  */
 export const getGameDetails = async (gameId) => {
   try {
@@ -459,7 +458,6 @@ export const getGameDetails = async (gameId) => {
     }
 
     let gameData = null;
-    let hasThumbnail = false;
 
     // Try Firebase Firestore first
     try {
@@ -502,75 +500,10 @@ export const getGameDetails = async (gameId) => {
           publisher: firestoreGame.publisher || null,
           averageWeight: firestoreGame.averageWeight || firestoreGame.complexity || null,
         };
-        hasThumbnail = !!(gameData.thumbnail || gameData.image);
       }
     } catch (firestoreError) {
       if (__DEV__) {
         console.log('[Firestore] Not available, will try BGG API');
-      }
-    }
-
-    // If we have game data but no thumbnail/image, fetch from BGG API and cache it
-    if (gameData && !hasThumbnail) {
-      try {
-        if (__DEV__) {
-          console.log('[BGG API] Fetching thumbnail/image for game:', gameId);
-        }
-        const { fetchBGGGameDetails } = await import('../services/bggApi');
-        const bggData = await fetchBGGGameDetails(gameId);
-        
-        if (bggData) {
-          // Merge BGG API data (thumbnails) with existing game data
-          gameData.thumbnail = bggData.thumbnail || gameData.thumbnail || null;
-          gameData.image = bggData.image || gameData.image || null;
-          
-          // Also update other fields if they're missing
-          if (!gameData.minPlayers && bggData.minPlayers) gameData.minPlayers = bggData.minPlayers;
-          if (!gameData.maxPlayers && bggData.maxPlayers) gameData.maxPlayers = bggData.maxPlayers;
-          if (!gameData.playingTime && bggData.playingTime) gameData.playingTime = bggData.playingTime;
-          if (!gameData.minAge && bggData.minAge) gameData.minAge = bggData.minAge;
-          if (!gameData.description && bggData.description) gameData.description = bggData.description;
-          
-          // Update category ranks if they're missing
-          if (!gameData.strategyGamesRank && bggData.strategyGamesRank) gameData.strategyGamesRank = bggData.strategyGamesRank;
-          if (!gameData.familyGamesRank && bggData.familyGamesRank) gameData.familyGamesRank = bggData.familyGamesRank;
-          if (!gameData.partyGamesRank && bggData.partyGamesRank) gameData.partyGamesRank = bggData.partyGamesRank;
-          if (!gameData.abstractsRank && bggData.abstractsRank) gameData.abstractsRank = bggData.abstractsRank;
-          if (!gameData.thematicRank && bggData.thematicRank) gameData.thematicRank = bggData.thematicRank;
-          if (!gameData.wargamesRank && bggData.wargamesRank) gameData.wargamesRank = bggData.wargamesRank;
-          if (!gameData.childrensGamesRank && bggData.childrensGamesRank) gameData.childrensGamesRank = bggData.childrensGamesRank;
-          if (!gameData.cgsRank && bggData.cgsRank) gameData.cgsRank = bggData.cgsRank;
-          
-          // Update BGG data fields for recommendations if they're missing
-          if (!gameData.mechanics && bggData.mechanics) gameData.mechanics = bggData.mechanics;
-          if (!gameData.categories && bggData.categories) gameData.categories = bggData.categories;
-          if (!gameData.publishers && bggData.publishers) gameData.publishers = bggData.publishers;
-          if (!gameData.publisher && bggData.publisher) gameData.publisher = bggData.publisher;
-          if (!gameData.averageWeight && (bggData.averageWeight || bggData.complexity)) gameData.averageWeight = bggData.averageWeight || bggData.complexity;
-          
-          // Cache BGG data to Firestore for future use (non-blocking)
-          try {
-            const { updateGameWithBGGData } = await import('../services/gameDatabase');
-            updateGameWithBGGData(gameId, bggData).catch(err => {
-              if (__DEV__) {
-                console.warn('[Game Details] Failed to cache BGG data:', err);
-              }
-            });
-          } catch (cacheError) {
-            // Non-critical - just log it
-            if (__DEV__) {
-              console.warn('[Game Details] Error caching BGG data:', cacheError);
-            }
-          }
-          
-          if (__DEV__) {
-            console.log('[BGG API] Successfully fetched thumbnail:', gameData.thumbnail ? 'yes' : 'no');
-          }
-        }
-      } catch (bggError) {
-        if (__DEV__) {
-          console.warn('[BGG API] Failed to fetch thumbnail:', bggError);
-        }
       }
     }
 

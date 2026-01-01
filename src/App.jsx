@@ -1,11 +1,11 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { EventsProvider } from './context/EventsContext';
+import { EventsProvider, useEvents } from './context/EventsContext';
 import { CollectionsProvider } from './context/CollectionsContext';
 import { AvailabilityProvider } from './context/AvailabilityContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { SubscriptionProvider } from './context/SubscriptionContext';
+import { SubscriptionProvider } from './context/SubscriptionProvider';
 import WebNavigation from './components/WebNavigation';
 import ParallaxBackground from './components/ParallaxBackground';
 import Onboarding from './screens/Onboarding';
@@ -52,6 +52,132 @@ const PublicRoute = ({ children }) => {
   return !isAuthenticated ? children : <Navigate to="/events" replace />;
 };
 
+// Smart redirect component that checks if user is member of exactly one meepleUp
+const SmartEventsRedirect = () => {
+  const { user } = useAuth();
+  const { getUserEvents, loading, events } = useEvents();
+  const navigate = useNavigate();
+  const [hasRedirected, setHasRedirected] = useState(false);
+  const [hasFinishedChecking, setHasFinishedChecking] = useState(false);
+  const checkTimeoutRef = useRef(null);
+
+  // Log when component mounts
+  useEffect(() => {
+    console.log('🚀 [SmartEventsRedirect] Component mounted/rendered');
+  }, []);
+
+  useEffect(() => {
+    console.log('🔄 [SmartEventsRedirect] useEffect triggered', { 
+      hasRedirected, 
+      loading, 
+      hasUser: !!user, 
+      eventsCount: events.length,
+      userId: user?.uid || user?.id 
+    });
+    
+    // Don't check again if we've already redirected
+    if (hasRedirected) {
+      console.log('⏭️ [SmartEventsRedirect] Already redirected, skipping');
+      return;
+    }
+
+    // Clear any pending timeout
+    if (checkTimeoutRef.current) {
+      clearTimeout(checkTimeoutRef.current);
+      checkTimeoutRef.current = null;
+    }
+
+    // Wait for events to load and user to be available
+    if (loading) {
+      console.log('⏳ [SmartEventsRedirect] Still loading events...');
+      return;
+    }
+
+    if (!user) {
+      console.log('❌ [SmartEventsRedirect] No user found');
+      setHasFinishedChecking(true);
+      return;
+    }
+
+    const userId = user.uid || user.id;
+    if (!userId) {
+      console.log('❌ [SmartEventsRedirect] No userId found');
+      setHasFinishedChecking(true);
+      return;
+    }
+
+    // Get all events where user is a member
+    const userEvents = getUserEvents();
+    console.log('📊 [SmartEventsRedirect] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
+    
+    // Filter to only active events (not archived)
+    const activeEvents = userEvents.filter(event => event.isActive !== false);
+    console.log('[SmartEventsRedirect] Active events:', activeEvents.length);
+
+    // If user is a member of exactly one active meepleUp, redirect to its logistics tab
+    if (activeEvents.length === 1) {
+      const eventId = activeEvents[0].id;
+      console.log('[SmartEventsRedirect] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
+      setHasRedirected(true);
+      setHasFinishedChecking(true);
+      navigate(`/event/${eventId}`, { replace: true });
+      return;
+    }
+
+    // If we have events but not exactly one, we're done checking
+    if (activeEvents.length !== 1 && (userEvents.length > 0 || events.length > 0)) {
+      console.log('[SmartEventsRedirect] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+      setHasFinishedChecking(true);
+      return;
+    }
+
+    // If events haven't loaded yet, wait a bit for Firestore sync
+    if (activeEvents.length === 0 && events.length === 0 && !loading) {
+      console.log('[SmartEventsRedirect] Waiting for Firestore sync...');
+      checkTimeoutRef.current = setTimeout(() => {
+        const delayedUserEvents = getUserEvents();
+        const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive !== false);
+        console.log('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length);
+        
+        if (delayedActiveEvents.length === 1) {
+          const eventId = delayedActiveEvents[0].id;
+          console.log('[SmartEventsRedirect] ✓ Redirecting to event after Firestore sync:', eventId);
+          setHasRedirected(true);
+          setHasFinishedChecking(true);
+          navigate(`/event/${eventId}`, { replace: true });
+        } else {
+          console.log('[SmartEventsRedirect] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+          setHasFinishedChecking(true);
+        }
+        checkTimeoutRef.current = null;
+      }, 2000); // Wait 2 seconds for Firestore to sync
+
+      return () => {
+        if (checkTimeoutRef.current) {
+          clearTimeout(checkTimeoutRef.current);
+          checkTimeoutRef.current = null;
+        }
+      };
+    }
+  }, [user, getUserEvents, loading, navigate, events, hasRedirected]);
+
+  // Show loading spinner while loading events or checking
+  if (loading || (!hasFinishedChecking && !hasRedirected && user)) {
+    console.log('⏳ [SmartEventsRedirect] Showing loading spinner');
+    return <div className="container"><div className="spinner" /></div>;
+  }
+
+  // If we redirected, show a brief loading state while navigation happens
+  if (hasRedirected) {
+    console.log('✅ [SmartEventsRedirect] Redirected, showing loading spinner');
+    return <div className="container"><div className="spinner" /></div>;
+  }
+
+  // Otherwise, show the events screen
+  console.log('📋 [SmartEventsRedirect] Showing EventsScreen (no redirect)');
+  return <EventsScreen />;
+};
+
 const AppContent = () => {
   return (
     <Router>
@@ -81,7 +207,7 @@ const AppContent = () => {
           path="/events"
           element={
             <ProtectedRoute>
-              <EventsScreen />
+              <SmartEventsRedirect />
             </ProtectedRoute>
           }
         />

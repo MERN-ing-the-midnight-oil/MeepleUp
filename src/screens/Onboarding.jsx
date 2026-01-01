@@ -22,7 +22,9 @@ const Onboarding = () => {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const { user, updateUser } = useAuth();
-  const { joinEventWithCode, createEvent, getUserEvents, leaveEvent, getEventById } = useEvents();
+  const { joinEventWithCode, createEvent, getUserEvents, leaveEvent, getEventById, getUserArchivedEvents, loading: eventsLoading, events } = useEvents();
+  const [hasCheckedRedirect, setHasCheckedRedirect] = useState(false);
+  const redirectTimeoutRef = useRef(null);
   const [joinCodeWord1, setJoinCodeWord1] = useState('');
   const [joinCodeWord2, setJoinCodeWord2] = useState('');
   const [joinCodeWord3, setJoinCodeWord3] = useState('');
@@ -48,6 +50,7 @@ const Onboarding = () => {
   const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
+  const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const selectedDatesRef = useRef(selectedDates);
@@ -97,6 +100,84 @@ const Onboarding = () => {
   useEffect(() => {
     console.log('[Onboarding] editingDateIndex changed to:', editingDateIndex);
   }, [editingDateIndex]);
+
+  // Check if user is member of exactly one meepleUp and redirect to logistics tab
+  useEffect(() => {
+    // Don't check if we've already checked or if still loading
+    if (hasCheckedRedirect || eventsLoading) {
+      return;
+    }
+
+    // Clear any pending timeout
+    if (redirectTimeoutRef.current) {
+      clearTimeout(redirectTimeoutRef.current);
+      redirectTimeoutRef.current = null;
+    }
+
+    if (!user) {
+      setHasCheckedRedirect(true);
+      return;
+    }
+
+    const userId = user.uid || user.id;
+    if (!userId) {
+      setHasCheckedRedirect(true);
+      return;
+    }
+
+    // Get all events where user is a member
+    // getUserEvents doesn't take parameters - it uses user from context
+    const userEvents = getUserEvents();
+    console.log('[Onboarding] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
+    
+    // Filter to only active events (not archived)
+    const activeEvents = userEvents.filter(event => event.isActive !== false);
+    console.log('[Onboarding] Active events:', activeEvents.length);
+
+    // If user is a member of exactly one active meepleUp, redirect to its logistics tab
+    if (activeEvents.length === 1) {
+      const eventId = activeEvents[0].id;
+      console.log('[Onboarding] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
+      setHasCheckedRedirect(true);
+      navigation.navigate('EventHub', { eventId });
+      return;
+    }
+
+    // If we have events but not exactly one, we're done checking
+    if (activeEvents.length !== 1 && (userEvents.length > 0 || events.length > 0)) {
+      console.log('[Onboarding] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+      setHasCheckedRedirect(true);
+      return;
+    }
+
+    // If events haven't loaded yet, wait a bit for Firestore sync
+    if (activeEvents.length === 0 && events.length === 0 && !eventsLoading) {
+      console.log('[Onboarding] Waiting for Firestore sync...');
+      redirectTimeoutRef.current = setTimeout(() => {
+        const delayedUserEvents = getUserEvents();
+        const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive !== false);
+        console.log('[Onboarding] Delayed check - active events:', delayedActiveEvents.length);
+        
+        if (delayedActiveEvents.length === 1) {
+          const eventId = delayedActiveEvents[0].id;
+          console.log('[Onboarding] ✓ Redirecting to event after Firestore sync:', eventId);
+          setHasCheckedRedirect(true);
+          navigation.navigate('EventHub', { eventId });
+        } else {
+          console.log('[Onboarding] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+          setHasCheckedRedirect(true);
+        }
+        redirectTimeoutRef.current = null;
+      }, 2000); // Wait 2 seconds for Firestore to sync
+
+      return () => {
+        if (redirectTimeoutRef.current) {
+          clearTimeout(redirectTimeoutRef.current);
+          redirectTimeoutRef.current = null;
+        }
+      };
+    }
+  }, [user, getUserEvents, eventsLoading, events, navigation, hasCheckedRedirect]);
 
   const handleModeChange = (nextMode) => {
     setError('');
@@ -334,7 +415,8 @@ const Onboarding = () => {
   let userEvents = [];
   try {
     if (userIdentifier && getUserEvents) {
-      const events = getUserEvents(userIdentifier);
+      // getUserEvents doesn't take parameters - it uses user from context
+      const events = getUserEvents();
       userEvents = Array.isArray(events) ? events : [];
     }
   } catch (error) {
@@ -560,6 +642,68 @@ const Onboarding = () => {
               </View>
             )}
           </View>
+
+          {/* Archived MeepleUps Section */}
+          {(() => {
+            const userIdentifier = user?.uid || user?.id;
+            const archivedEvents = userIdentifier ? getUserArchivedEvents() : [];
+            const organizerArchivedEvents = archivedEvents.filter(event => event.organizerId === userIdentifier);
+            
+            if (organizerArchivedEvents.length > 0) {
+              return (
+                <View style={styles.eventsSection}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      // Toggle showing archived events
+                      setShowArchivedEvents(!showArchivedEvents);
+                    }}
+                    style={styles.archivedHeader}
+                  >
+                    <Text style={styles.archivedHeaderText}>
+                      📦 Archived MeepleUps ({organizerArchivedEvents.length})
+                    </Text>
+                    <MaterialIcons 
+                      name={showArchivedEvents ? "expand-less" : "expand-more"} 
+                      size={24} 
+                      color={theme.colors.textSecondary} 
+                    />
+                  </TouchableOpacity>
+                  
+                  {showArchivedEvents && organizerArchivedEvents.map((event) => {
+                    if (!event || !event.id) return null;
+                    const organizer = organizerData[event.id] || {};
+                    const eventMemberData = memberData[event.id] || {};
+                    
+                    const memberAvatars = {};
+                    const memberNames = {};
+                    Object.keys(eventMemberData).forEach((userId) => {
+                      memberAvatars[userId] = eventMemberData[userId]?.avatarUrl || null;
+                      memberNames[userId] = eventMemberData[userId]?.name || 'Unknown';
+                    });
+                    
+                    return (
+                      <EventCard
+                        key={event.id}
+                        event={event}
+                        onPress={() => navigation.navigate('EventHub', {
+                          eventId: event.id,
+                        })}
+                        isOrganizer={true}
+                        style={[styles.eventCard, styles.archivedCard]}
+                        memberAvatars={memberAvatars}
+                        memberNames={memberNames}
+                        onMemberPress={(userId, userName, avatarUrl) => {
+                          setSelectedUserForProfile({ userId, userName, avatarUrl });
+                        }}
+                        navigation={navigation}
+                      />
+                    );
+                  })}
+                </View>
+              );
+            }
+            return null;
+          })()}
           
           {/* Join an existing MeepleUp Section */}
           <View style={styles.joinSection}>
@@ -1895,6 +2039,27 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: 'auto',
     paddingHorizontal: theme.spacing.xl,
+  },
+  archivedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    backgroundColor: theme.colors.woodLight,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+  },
+  archivedHeaderText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
+  },
+  archivedCard: {
+    opacity: 0.7,
+    borderColor: theme.colors.woodMedium,
   },
   joinTitle: {
     fontSize: theme.typography.fontSize['2xl'],

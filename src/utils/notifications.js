@@ -300,7 +300,8 @@ export const notifyDiscussionActivity = async (groupId, excludeUserId, notificat
         continue;
       }
 
-      const frequency = preferences.discussionFrequency || 'all';
+      // Handle null preferences gracefully - use optional chaining
+      const frequency = preferences?.discussionFrequency || 'all';
       
       // Check frequency settings
       if (frequency === 'responses') {
@@ -758,6 +759,73 @@ const sendDirectMessageEmail = async (recipientId, senderName, messagePreview, g
     }
   } catch (error) {
     console.error('Error in sendDirectMessageEmail:', error);
+  }
+};
+
+/**
+ * Send email notification for RSVP update
+ * @param {string} memberId - User ID receiving the notification
+ * @param {string} organizerName - Name of organizer who updated RSVP
+ * @param {string} newStatus - New RSVP status
+ * @param {string} dateStr - Formatted date string
+ * @param {string} groupId - MeepleUp ID
+ * @param {string} groupName - MeepleUp name
+ * @returns {Promise<void>}
+ */
+export const sendRSVPUpdateEmail = async (memberId, organizerName, newStatus, dateStr, groupId, groupName) => {
+  if (!memberId || !db) {
+    return;
+  }
+
+  try {
+    const memberDoc = await db.collection('users').doc(memberId).get();
+    if (!memberDoc.exists) {
+      console.warn(`Cannot send email: user ${memberId} not found`);
+      return;
+    }
+
+    const memberData = memberDoc.data();
+    const memberEmail = memberData.email;
+    
+    if (!memberEmail) {
+      console.warn(`Cannot send email: user ${memberId} has no email`);
+      return;
+    }
+
+    const statusText = newStatus === 'going' ? 'Going' : newStatus === 'not-going' ? 'Can\'t Make It' : newStatus;
+    const meepleUpName = groupName || 'your MeepleUp';
+    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
+    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendRSVPUpdateEmail`;
+    
+    try {
+      const response = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: memberEmail,
+          subject: `RSVP Updated: ${organizerName} updated your RSVP status`,
+          organizerName: organizerName,
+          newStatus: statusText,
+          dateStr: dateStr,
+          meepleUpName: meepleUpName,
+          groupId: groupId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Email service returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`RSVP update email sent to ${memberEmail}`, result);
+    } catch (error) {
+      console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
+    }
+  } catch (error) {
+    console.error('Error in sendRSVPUpdateEmail:', error);
   }
 };
 

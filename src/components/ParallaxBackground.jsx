@@ -75,6 +75,7 @@ const ParallaxBackground = ({ children, enabled = true }) => {
   const usedSegmentsRef = useRef(new Set());
   const spawnIntervalRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const [animationEnabled, setAnimationEnabled] = useState(enabled);
   
   const getViewportSize = () => {
     if (containerRef.current) {
@@ -99,7 +100,7 @@ const ParallaxBackground = ({ children, enabled = true }) => {
   };
   
   const spawnMeeple = () => {
-    if (!enabled || !containerRef.current) return;
+    if (!animationEnabled || !containerRef.current) return;
     
     const { width, height } = getViewportSize();
     if (width === 0 || height === 0) return;
@@ -142,9 +143,26 @@ const ParallaxBackground = ({ children, enabled = true }) => {
     setParticles(prev => prev.filter(p => p.id !== id));
   };
   
-  // Animation loop using requestAnimationFrame
+  // Disable animation after 7 seconds
   useEffect(() => {
     if (!enabled) {
+      setAnimationEnabled(false);
+      return;
+    }
+    
+    setAnimationEnabled(true);
+    const timer = setTimeout(() => {
+      setAnimationEnabled(false);
+    }, 30000); // 30 seconds
+    
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [enabled]);
+  
+  // Animation loop using requestAnimationFrame
+  useEffect(() => {
+    if (!animationEnabled) {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -194,10 +212,10 @@ const ParallaxBackground = ({ children, enabled = true }) => {
         animationFrameRef.current = null;
       }
     };
-  }, [enabled]);
+  }, [animationEnabled]);
   
   useEffect(() => {
-    if (!enabled) {
+    if (!animationEnabled) {
       if (spawnIntervalRef.current) {
         clearInterval(spawnIntervalRef.current);
         spawnIntervalRef.current = null;
@@ -227,12 +245,12 @@ const ParallaxBackground = ({ children, enabled = true }) => {
       }
       window.removeEventListener('resize', handleResize);
     };
-  }, [enabled]);
+  }, [animationEnabled]);
   
   return (
     <div ref={containerRef} className="parallax-background">
       {/* Background layers */}
-      {enabled && (
+      {animationEnabled && (
         <div className="parallax-background-layers">
           {particles.map(particle => {
             // Calculate rotation with subtle animation

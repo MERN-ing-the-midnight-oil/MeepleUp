@@ -1153,16 +1153,61 @@ export const EventsProvider = ({ children }) => {
   );
 
   const archiveEvent = useCallback(
-    async (eventId) => {
+    async (eventId, organizerUserId) => {
       if (!db) return;
       try {
+        const event = getEventById(eventId);
+        if (!event) {
+          throw new Error('Event not found');
+        }
+
         const groupRef = db.collection('gamingGroups').doc(eventId);
         await groupRef.update({
           isActive: false,
           deletedAt: firebase.firestore.Timestamp.now(),
-                updatedAt: firebase.firestore.Timestamp.now(),
-              });
-      setEvents((prev) =>
+          updatedAt: firebase.firestore.Timestamp.now(),
+        });
+
+        // Send a message to all members about the archive
+        try {
+          const organizerName = user?.name || user?.email || 'The organizer';
+          const archiveMessage = `${organizerName} has archived this MeepleUp. It can be restored from the archived MeepleUps section.`;
+          
+          const postsRef = groupRef.collection('posts');
+          await postsRef.add({
+            userId: organizerUserId || user?.uid || user?.id || 'system',
+            userName: organizerName,
+            userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
+            content: archiveMessage,
+            photoUrl: null,
+            likeCount: 0,
+            commentCount: 0,
+            createdAt: firebase.firestore.Timestamp.now(),
+            updatedAt: firebase.firestore.Timestamp.now(),
+            edited: false,
+            deleted: false,
+            pinned: false,
+            isSystemMessage: true, // Mark as system message
+          });
+
+          // Notify members about the archive
+          try {
+            const { notifyDiscussionActivity } = await import('../utils/notifications');
+            await notifyDiscussionActivity(eventId, organizerUserId || user?.uid || user?.id, {
+              type: 'meepleup_archived',
+              fromUserName: organizerName,
+              message: `${organizerName} archived this MeepleUp`,
+            });
+          } catch (notifError) {
+            console.warn('[EventsContext] Error sending archive notification:', notifError);
+            // Don't fail the archive if notification fails
+          }
+        } catch (messageError) {
+          console.warn('[EventsContext] Error posting archive message:', messageError);
+          // Don't fail the archive if message posting fails
+        }
+
+        setEvents((prev) =>
           prev.map((event) =>
             event.id === eventId
               ? { ...event, isActive: false, deletedAt: new Date().toISOString() }
@@ -1174,7 +1219,7 @@ export const EventsProvider = ({ children }) => {
         throw error;
       }
     },
-    [db],
+    [db, getEventById, user],
   );
 
   const addJoinCode = useCallback(
@@ -1283,6 +1328,76 @@ export const EventsProvider = ({ children }) => {
     [getEventById, updateEvent],
   );
 
+  const unarchiveEvent = useCallback(
+    async (eventId, organizerUserId) => {
+      if (!db) return;
+      try {
+        const event = getEventById(eventId);
+        if (!event) {
+          throw new Error('Event not found');
+        }
+
+        const groupRef = db.collection('gamingGroups').doc(eventId);
+        await groupRef.update({
+          isActive: true,
+          deletedAt: null,
+          updatedAt: firebase.firestore.Timestamp.now(),
+        });
+
+        // Send a message to all members about the unarchive
+        try {
+          const organizerName = user?.name || user?.email || 'The organizer';
+          const unarchiveMessage = `${organizerName} has restored this MeepleUp.`;
+          
+          const postsRef = groupRef.collection('posts');
+          await postsRef.add({
+            userId: organizerUserId || user?.uid || user?.id || 'system',
+            userName: organizerName,
+            userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
+            content: unarchiveMessage,
+            photoUrl: null,
+            likeCount: 0,
+            commentCount: 0,
+            createdAt: firebase.firestore.Timestamp.now(),
+            updatedAt: firebase.firestore.Timestamp.now(),
+            edited: false,
+            deleted: false,
+            pinned: false,
+            isSystemMessage: true, // Mark as system message
+          });
+
+          // Notify members about the unarchive
+          try {
+            const { notifyDiscussionActivity } = await import('../utils/notifications');
+            await notifyDiscussionActivity(eventId, organizerUserId || user?.uid || user?.id, {
+              type: 'meepleup_unarchived',
+              fromUserName: organizerName,
+              message: `${organizerName} restored this MeepleUp`,
+            });
+          } catch (notifError) {
+            console.warn('[EventsContext] Error sending unarchive notification:', notifError);
+            // Don't fail the unarchive if notification fails
+          }
+        } catch (messageError) {
+          console.warn('[EventsContext] Error posting unarchive message:', messageError);
+          // Don't fail the unarchive if message posting fails
+        }
+
+        setEvents((prev) =>
+          prev.map((event) =>
+            event.id === eventId
+              ? { ...event, isActive: true, deletedAt: null }
+              : event
+          )
+        );
+      } catch (error) {
+        console.error('[EventsContext] Error unarchiving event:', error);
+        throw error;
+      }
+    },
+    [db, getEventById, user],
+  );
+
   const getUserArchivedEvents = useCallback(() => {
     if (!user) return [];
     const userId = user.uid || user.id;
@@ -1308,6 +1423,7 @@ export const EventsProvider = ({ children }) => {
       updateMemberRSVP,
       updateEventSchedule,
       archiveEvent,
+      unarchiveEvent,
       addJoinCode,
       deleteJoinCode,
       updateMemberRole,
@@ -1332,6 +1448,7 @@ export const EventsProvider = ({ children }) => {
       updateMemberRSVP,
       updateEventSchedule,
       archiveEvent,
+      unarchiveEvent,
       addJoinCode,
       deleteJoinCode,
       updateMemberRole,

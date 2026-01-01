@@ -739,8 +739,14 @@ const CollectionScreen = () => {
     userIdentifier: userIdentifier ? 'present' : 'missing'
   });
 
-  // Show loading spinner while collections are initializing or loading
-  if (!initialised || loading) {
+  // Show loading spinner only if:
+  // 1. Collections haven't initialized yet, OR
+  // 2. We're loading AND there's no cached data for this user
+  // This allows cached games to show immediately while Firestore syncs in background
+  const hasCachedGames = userIdentifier && (collections[userIdentifier]?.length > 0);
+  const shouldShowLoading = !initialised || (loading && !hasCachedGames);
+  
+  if (shouldShowLoading) {
     return (
       <View style={styles.container}>
         <LoadingSpinner />
