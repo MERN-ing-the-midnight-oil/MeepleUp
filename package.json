@@ -10,7 +10,9 @@
     "web": "expo start --web",
     "build:ios:local": "eas build --platform ios --profile preview --local",
     "build:ios:preview": "eas build --platform ios --profile preview --local",
-    "build:ios:production": "eas build --platform ios --profile production --local"
+    "build:ios:production": "eas build --platform ios --profile production --local",
+    "build:ios:store": "eas build --platform ios --profile production",
+    "submit:ios": "eas submit --platform ios --profile production"
   },
   "keywords": [
     "react-native",

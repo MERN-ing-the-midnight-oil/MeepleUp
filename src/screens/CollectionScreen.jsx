@@ -1,23 +1,19 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, Alert, Image, useWindowDimensions, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, Image, useWindowDimensions, ScrollView, ActivityIndicator } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Button from '../components/common/Button';
-import Input from '../components/common/Input';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import ClaudeGameIdentifier from '../components/ClaudeGameIdentifier';
 import TextListGameIdentifier from '../components/TextListGameIdentifier';
-import GameCard from '../components/GameCard';
+import GameCollectionView from '../components/GameCollectionView';
 import BGGImport from '../components/BGGImport';
 import PoweredByBGG from '../components/PoweredByBGG';
 import { getGameDetails } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
-import { getColumnCount } from '../utils/responsive';
-// Note: BarcodeScanner has been archived (see src/archive/barcode-scanner/)
-// BGGImport will need to be converted separately if needed
 
-// All game categories in order
+// All game categories in order (for legacy code - GameCollectionView now handles this)
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
 
 const CollectionScreen = () => {
@@ -29,20 +25,28 @@ const CollectionScreen = () => {
   const [activeView, setActiveView] = useState('menu'); // 'menu', 'import'
   const [sortBy, setSortBy] = useState('category'); // 'rating', 'category', 'title'
   const [categorySortPreference, setCategorySortPreference] = useState({}); // { 'Strategy': 'rating' | 'title', ... }
+  const [selectedCategory, setSelectedCategory] = useState(null); // null = all categories, or specific category name
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [showTextListModal, setShowTextListModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState(''); // Title search query
+  const [categoriesDetermined, setCategoriesDetermined] = useState(false); // Track if we've determined categories
   
   // Refs to maintain scroll position when sort changes
   const flatListRef = useRef(null);
   const scrollViewRef = useRef(null);
   const scrollPositionRef = useRef(0);
+  const inventoryHeaderRef = useRef(null);
+  const inventoryHeaderY = useRef(0);
   
   // Handler to change sort while preserving scroll position
   const handleSortChange = useCallback((newSortBy) => {
     // Update sort - scroll position is already tracked in scrollPositionRef via onScroll
     setSortBy(newSortBy);
+    // Reset selected category when switching away from category view
+    if (newSortBy !== 'category') {
+      setSelectedCategory(null);
+    }
   }, []);
   
   // Restore scroll position after sort changes
@@ -88,6 +92,35 @@ const CollectionScreen = () => {
     if (offsetY >= 0) {
       scrollPositionRef.current = offsetY;
     }
+  }, []);
+
+  // Scroll to inventory section after import
+  const scrollToInventory = useCallback(() => {
+    // Wait a bit for the UI to update with new games
+    setTimeout(() => {
+      // For ScrollView (category view), use the stored Y position
+      if (scrollViewRef.current && inventoryHeaderY.current > 0) {
+        const scrollOffset = Math.max(0, inventoryHeaderY.current - 50); // 50px offset for visibility
+        scrollViewRef.current.scrollTo({ 
+          y: scrollOffset, 
+          animated: true 
+        });
+      }
+      
+      // For FlatList, the header is always visible, but we can scroll to show the first games
+      // The inventory header Y position is relative to the ListHeaderComponent
+      // We'll scroll by that amount to ensure the inventory section is visible
+      if (flatListRef.current && inventoryHeaderY.current > 0) {
+        // For FlatList, scroll to show the inventory header area
+        // Since header is always visible, we scroll by the header's internal position
+        // to ensure the games list below is visible
+        const scrollOffset = Math.max(0, inventoryHeaderY.current);
+        flatListRef.current.scrollToOffset({ 
+          offset: scrollOffset, 
+          animated: true 
+        });
+      }
+    }, 500); // Small delay to ensure games are rendered
   }, []);
   
   // Always use 3 columns to match "propose a game" layout
@@ -143,15 +176,34 @@ const CollectionScreen = () => {
       // Check if already in cache
       if (bggDataCache[gameId]) {
         enrichedGameIdsRef.current.add(gameId);
-        return bggDataCache[gameId];
+        const cached = bggDataCache[gameId];
+        if (__DEV__) {
+          console.log(`[CollectionScreen] Using cached BGG data for ${gameId}:`, {
+            hasThumbnail: !!cached.thumbnail,
+            thumbnail: cached.thumbnail ? cached.thumbnail.substring(0, 50) + '...' : null,
+          });
+        }
+        return cached;
       }
 
       const bggData = await getGameDetails(gameId);
       if (bggData) {
+        if (__DEV__) {
+          console.log(`[CollectionScreen] Enriched game ${gameId} (${game.title || 'unknown'}):`, {
+            hasThumbnail: !!bggData.thumbnail,
+            thumbnail: bggData.thumbnail ? bggData.thumbnail.substring(0, 50) + '...' : null,
+            hasImage: !!bggData.image,
+            keys: Object.keys(bggData),
+          });
+        }
         // Update cache
         setBggDataCache(prev => ({ ...prev, [gameId]: bggData }));
         enrichedGameIdsRef.current.add(gameId);
         return bggData;
+      } else {
+        if (__DEV__) {
+          console.warn(`[CollectionScreen] ⚠️ No BGG data returned for game ${gameId} (${game.title || 'unknown'})`);
+        }
       }
     } catch (error) {
       console.error(`[CollectionScreen] Error enriching game ${gameId}:`, error);
@@ -182,29 +234,31 @@ const CollectionScreen = () => {
         // Fallback to title if ratings are same or unavailable
         return (a.title || '').localeCompare(b.title || '');
       } else if (sortBy === 'category') {
-        const aId = a.bggId || a.id;
-        const bId = b.bggId || b.id;
-        const aBgg = aId ? bggDataCache[aId] : null;
-        const bBgg = bId ? bggDataCache[bId] : null;
-        const getCategory = (bgg) => {
-          if (!bgg) return 'Other';
-          return bgg.strategyGamesRank ? 'Strategy' :
-                 bgg.familyGamesRank ? 'Family' :
-                 bgg.partyGamesRank ? 'Party' :
-                 bgg.wargamesRank ? 'War' :
-                 bgg.thematicRank ? 'Thematic' :
-                 bgg.abstractsRank ? 'Abstract' :
-                 bgg.childrensGamesRank ? 'Children' :
-                 bgg.cgsRank ? 'CCG' : 'Other';
+        // Games should already have category rank fields when stored
+        // Check game object first, then fall back to bggDataCache (for thumbnails only)
+        const aHasCategoryRanks = a.strategyGamesRank !== undefined || a.familyGamesRank !== undefined || a.partyGamesRank !== undefined;
+        const bHasCategoryRanks = b.strategyGamesRank !== undefined || b.familyGamesRank !== undefined || b.partyGamesRank !== undefined;
+        const aEffective = aHasCategoryRanks ? a : (a.bggId ? bggDataCache[a.bggId] : null);
+        const bEffective = bHasCategoryRanks ? b : (b.bggId ? bggDataCache[b.bggId] : null);
+        const getCategory = (data) => {
+          if (!data) return 'Other';
+          return data.strategyGamesRank ? 'Strategy' :
+                 data.familyGamesRank ? 'Family' :
+                 data.partyGamesRank ? 'Party' :
+                 data.wargamesRank ? 'War' :
+                 data.thematicRank ? 'Thematic' :
+                 data.abstractsRank ? 'Abstract' :
+                 data.childrensGamesRank ? 'Children' :
+                 data.cgsRank ? 'CCG' : 'Other';
         };
-        const catA = getCategory(aBgg);
-        const catB = getCategory(bBgg);
+        const catA = getCategory(aEffective);
+        const catB = getCategory(bEffective);
         if (catA !== catB) {
           return catA.localeCompare(catB);
         }
         // Within same category, sort by rating
-        const aRating = aBgg?.average ? getStarRating(aBgg.average) : 0;
-        const bRating = bBgg?.average ? getStarRating(bBgg.average) : 0;
+        const aRating = aEffective?.average ? getStarRating(aEffective.average) : (a.bggRating ? getStarRating(a.bggRating) : 0);
+        const bRating = bEffective?.average ? getStarRating(bEffective.average) : (b.bggRating ? getStarRating(b.bggRating) : 0);
         if (aRating !== bRating) {
           return bRating - aRating;
         }
@@ -216,26 +270,39 @@ const CollectionScreen = () => {
     return sorted;
   }, [rawCollection, sortBy, bggDataCache]);
 
-  // Enrich games with BGG data from cache
+  // Enrich games with BGG data from cache (for thumbnails/images)
+  // Categories come from game object directly (games are stored with category rank fields)
+  // bggDataCache is only used for thumbnails/images, not for categories
   const enrichedGames = useMemo(() => {
     return sortedGames.map(game => {
       const gameId = game.bggId || game.id;
       const bggData = gameId ? bggDataCache[gameId] : null;
       
-      if (bggData) {
-        const rating = bggData.average ? getStarRating(bggData.average) : 0;
-        const primaryCategory = bggData.strategyGamesRank ? 'Strategy' :
-                              bggData.familyGamesRank ? 'Family' :
-                              bggData.partyGamesRank ? 'Party' :
-                              bggData.wargamesRank ? 'War' :
-                              bggData.thematicRank ? 'Thematic' :
-                              bggData.abstractsRank ? 'Abstract' :
-                              bggData.childrensGamesRank ? 'Children' :
-                              bggData.cgsRank ? 'CCG' : 'Other';
+      // Helper to get category from rank fields (check game object first, then bggData)
+      const getCategoryFromRanks = (data) => {
+        if (!data) return 'Other';
+        return data.strategyGamesRank ? 'Strategy' :
+               data.familyGamesRank ? 'Family' :
+               data.partyGamesRank ? 'Party' :
+               data.wargamesRank ? 'War' :
+               data.thematicRank ? 'Thematic' :
+               data.abstractsRank ? 'Abstract' :
+               data.childrensGamesRank ? 'Children' :
+               data.cgsRank ? 'CCG' : 'Other';
+      };
+      
+      // For categories: use game object first (games are stored with category ranks)
+      // For thumbnails/images: use bggData from cache if available
+      const hasCategoryRanks = game.strategyGamesRank !== undefined || game.familyGamesRank !== undefined || game.partyGamesRank !== undefined;
+      const effectiveBggData = hasCategoryRanks ? game : (bggData || null);
+      
+      if (effectiveBggData) {
+        const rating = effectiveBggData.average ? getStarRating(effectiveBggData.average) : (game.bggRating ? getStarRating(game.bggRating) : 0);
+        const primaryCategory = getCategoryFromRanks(effectiveBggData);
         
         return {
           ...game,
-          _bggData: bggData,
+          _bggData: bggData || effectiveBggData, // Store bggData if available, otherwise store game data
           _rating: rating,
           _primaryCategory: primaryCategory,
         };
@@ -328,33 +395,99 @@ const CollectionScreen = () => {
     }
   }, [sortedGames, enrichGamesBatch]);
 
-  // Initial enrichment: Only enrich what's visible + one page ahead
-  // Conservative approach: Be gentle on BGG API, only enrich what user needs to see
+  // Check if we have category data - games should already have category rank fields when stored
+  const hasCategoryData = useMemo(() => {
+    if (sortBy !== 'category' || sortedGames.length === 0) return true;
+    
+    // Check if games have category rank fields (they should be stored with games from import)
+    const gamesWithCategories = sortedGames.filter(game => 
+      game.strategyGamesRank !== undefined || 
+      game.familyGamesRank !== undefined || 
+      game.partyGamesRank !== undefined ||
+      game.wargamesRank !== undefined ||
+      game.thematicRank !== undefined ||
+      game.abstractsRank !== undefined ||
+      game.childrensGamesRank !== undefined ||
+      game.cgsRank !== undefined
+    );
+    
+    // If at least 10% of games have category data, we can determine categories
+    return gamesWithCategories.length >= Math.min(10, sortedGames.length * 0.1);
+  }, [sortedGames, sortBy]);
+
+  // Determine categories immediately - games should already have category rank fields
+  useEffect(() => {
+    if (sortedGames.length === 0) {
+      setCategoriesDetermined(false);
+      return;
+    }
+
+    // If we're in category view, check if we have category data
+    if (sortBy === 'category' && selectedCategory === null) {
+      // Games should already have category rank fields when stored
+      // Mark as determined immediately if we have category data
+      setCategoriesDetermined(hasCategoryData);
+      return;
+    }
+
+    // For non-category view, mark as determined
+    if (sortBy !== 'category') {
+      setCategoriesDetermined(true);
+    }
+  }, [sortedGames, sortBy, selectedCategory, hasCategoryData]);
+
+  // Enrich games for thumbnails (not for category determination - games already have categories)
   useEffect(() => {
     if (sortedGames.length === 0) return;
-    
-    // Only enrich first page (what's visible) + one page ahead
-    // With 3 columns and ~6 rows = ~18 items per page
-    // Enrich 2 pages worth = ~36 games initially
-    const itemsPerPage = 18; // Conservative: 3 cols × 6 rows
-    const initialEnrichCount = itemsPerPage * 2; // 2 pages = visible + next page
-    
-    // Delay initial enrichment to avoid conflicts with import process
-    const enrichmentDelay = 2000; // 2 second delay to be safe
-    
-    const enrichmentTimer = setTimeout(() => {
+
+    // For category view with selected category, enrich games in that category
+    if (sortBy === 'category' && selectedCategory !== null && gamesByCategory) {
+      const categoryGames = gamesByCategory[selectedCategory] || [];
+      if (categoryGames.length === 0) return;
+
+      // Enrich first page of games for thumbnails
+      const itemsPerPage = 18; // 3 cols × 6 rows
+      const gamesToEnrich = categoryGames.slice(0, itemsPerPage);
+      const gameIdsToEnrich = gamesToEnrich
+        .map(g => g.bggId || g.id)
+        .filter(id => id && !enrichedGameIdsRef.current.has(id));
+
+      if (gameIdsToEnrich.length > 0) {
+        // Small delay to avoid conflicts
+        const enrichmentTimer = setTimeout(() => {
+          enrichGamesBatch(gameIdsToEnrich);
+        }, 500);
+
+        return () => clearTimeout(enrichmentTimer);
+      }
+    } else if (sortBy !== 'category') {
+      // For non-category views (rating/title), enrich first page for thumbnails
+      const itemsPerPage = 18; // 3 cols × 6 rows
+      const initialEnrichCount = itemsPerPage * 2; // 2 pages
       const gamesToEnrich = sortedGames.slice(0, initialEnrichCount);
       const gameIdsToEnrich = gamesToEnrich
         .map(g => g.bggId || g.id)
         .filter(id => id && !enrichedGameIdsRef.current.has(id));
 
       if (gameIdsToEnrich.length > 0) {
-        enrichGamesBatch(gameIdsToEnrich);
-      }
-    }, enrichmentDelay);
+        // Delay to avoid conflicts with import process
+        const enrichmentTimer = setTimeout(() => {
+          enrichGamesBatch(gameIdsToEnrich);
+        }, 2000);
 
-    return () => clearTimeout(enrichmentTimer);
-  }, [sortedGames, enrichGamesBatch]); // Removed sortBy dependency - enrich same amount regardless
+        return () => clearTimeout(enrichmentTimer);
+      }
+    }
+  }, [sortedGames, sortBy, selectedCategory, gamesByCategory, enrichGamesBatch]);
+
+  // Reset categoriesDetermined when sortBy changes to category
+  useEffect(() => {
+    if (sortBy === 'category') {
+      setCategoriesDetermined(false);
+    } else {
+      setCategoriesDetermined(true);
+    }
+  }, [sortBy]);
 
   // Group games by category when sortBy is 'category'
   const gamesByCategory = useMemo(() => {
@@ -483,8 +616,27 @@ const CollectionScreen = () => {
     );
   }, [userIdentifier, removeGameFromCollection]);
 
+  // Memoize header component to prevent re-renders
+  const headerComponent = useMemo(() => {
+    console.log('[CollectionScreen] Creating headerComponent with useMemo', { showMenu, sortedCollectionLength: sortedCollection.length });
+    if (!showMenu) return null;
+    return renderHeader();
+  }, [showMenu, sortedCollection.length, width]);
+
   const renderGameCard = useCallback(({ item }) => {
-    console.log('[CollectionScreen] renderGameCard called for:', item.title || item.id, 'has_bggData:', !!item._bggData);
+    const hasBggData = !!item._bggData;
+    const hasThumbnail = !!(item._bggData?.thumbnail || item.bggThumbnail || item.thumbnail);
+    console.log('[CollectionScreen] renderGameCard called for:', item.title || item.id, 'has_bggData:', hasBggData, 'hasThumbnail:', hasThumbnail, 'bggId:', item.bggId);
+    if (hasBggData && !hasThumbnail) {
+      console.log('[CollectionScreen] ⚠️ Game has BGG data but no thumbnail:', {
+        title: item.title,
+        bggId: item.bggId,
+        bggDataKeys: item._bggData ? Object.keys(item._bggData) : [],
+        hasThumbnailInBggData: !!item._bggData?.thumbnail,
+        thumbnailValue: item._bggData?.thumbnail ? item._bggData.thumbnail.substring(0, 50) + '...' : null,
+        hasThumbnailInGame: !!(item.bggThumbnail || item.thumbnail),
+      });
+    }
     try {
       // Calculate card width for FlatList - account for padding and gaps
       const containerPadding = theme.spacing.md;
@@ -546,8 +698,64 @@ const CollectionScreen = () => {
     );
   }, [categorySortPreference]);
 
-  // Render games grouped by category
+  // Render category filter buttons
+  const renderCategoryButtons = useCallback(() => {
+    // Calculate counts for each category
+    const categoryCounts = {};
+    [...ALL_CATEGORIES, 'Uncategorized'].forEach(cat => {
+      categoryCounts[cat] = (gamesByCategory[cat] || []).length;
+    });
+
+    return (
+      <View style={styles.categoryButtonsContainer}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryButtonsScrollContent}
+        >
+          {[...ALL_CATEGORIES, 'Uncategorized'].map((category) => {
+            const count = categoryCounts[category];
+            if (count === 0) return null; // Don't show categories with 0 games
+            return (
+              <Pressable
+                key={category}
+                style={[styles.categoryButton, selectedCategory === category && styles.categoryButtonActive]}
+                onPress={() => setSelectedCategory(category)}
+              >
+                <Text style={[styles.categoryButtonText, selectedCategory === category && styles.categoryButtonTextActive]}>
+                  {category} ({count})
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }, [gamesByCategory, selectedCategory]);
+
+  // Render games grouped by category (filtered by selectedCategory)
   const renderGamesByCategory = useCallback(() => {
+    // Show loading state while determining categories
+    if (!categoriesDetermined && sortBy === 'category') {
+      return (
+        <ScrollView 
+          ref={scrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={styles.categoryContent}
+          showsVerticalScrollIndicator={true}
+        >
+          {renderHeader()}
+          <View style={styles.emptyCollection}>
+            <Text style={styles.emptyTitle}>Loading categories...</Text>
+            <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />
+            <Text style={styles.emptyText}>
+              Organizing your games into categories. This may take a moment.
+            </Text>
+          </View>
+        </ScrollView>
+      );
+    }
+
     return (
       <ScrollView 
         ref={scrollViewRef}
@@ -558,32 +766,44 @@ const CollectionScreen = () => {
         scrollEventThrottle={16}
       >
         {renderHeader()}
+        {renderCategoryButtons()}
 
-        {[...ALL_CATEGORIES, 'Uncategorized'].map((category) => {
-          const games = gamesByCategory[category] || [];
-          return (
-            <View key={category} style={styles.categorySection}>
-              {renderCategoryHeader(category, games.length)}
-              {games.length > 0 ? (
-                <View style={styles.categoryGamesGrid}>
-                  {games.map((game, index) => (
-                    <View 
-                      key={game.id || `game-${index}`} 
-                      style={styles.gameCardWrapper}
-                    >
-                      {renderGameCard({ item: game })}
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.emptyCategoryText}>No games in this category</Text>
-              )}
-            </View>
-          );
-        })}
+        {selectedCategory === null ? (
+          // No category selected - show empty state prompting user to select a category
+          <View style={styles.emptyCollection}>
+            <Text style={styles.emptyTitle}>Select a category to view games</Text>
+            <Text style={styles.emptyText}>
+              Choose a category from the buttons above to load and view your games.
+            </Text>
+          </View>
+        ) : (
+          // Show games for selected category
+          (() => {
+            const games = gamesByCategory[selectedCategory] || [];
+            return (
+              <View style={styles.categorySection}>
+                {renderCategoryHeader(selectedCategory, games.length)}
+                {games.length > 0 ? (
+                  <View style={styles.categoryGamesGrid}>
+                    {games.map((game, index) => (
+                      <View 
+                        key={`${game.id || game.bggId || 'game'}-${index}`} 
+                        style={styles.gameCardWrapper}
+                      >
+                        {renderGameCard({ item: game })}
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.emptyCategoryText}>No games in this category</Text>
+                )}
+              </View>
+            );
+          })()
+        )}
       </ScrollView>
     );
-  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, cardWidthPercent, searchQuery, filteredGames]);
+  }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, renderCategoryButtons, selectedCategory, categoriesDetermined, sortBy]);
 
   // Show menu when no specific view is active
   const showMenu = activeView === 'menu';
@@ -615,7 +835,7 @@ const CollectionScreen = () => {
         <Text style={styles.menuOptionIcon}>📝</Text>
         <View style={styles.menuOptionText}>
           <Text style={styles.menuOptionTitle}>Type or paste your game list</Text>
-          <Text style={styles.menuOptionDescription}>List your games in pretty much any format. You can even write things like "I have all the Settlers expansions except for the one with the Fishermen".</Text>
+          <Text style={styles.menuOptionDescription}>List your games in pretty much any format. You can even write informal statements like "I have all the Settlers expansions except for the one with the Fishermen".</Text>
         </View>
         <Text style={styles.menuOptionArrow}>→</Text>
       </View>
@@ -669,62 +889,12 @@ const CollectionScreen = () => {
           </Pressable>
         </View>
 
-        {sortedCollection.length > 0 && (
-          <View style={styles.inventoryHeader}>
-            <Text style={styles.inventoryTitle}>Your Games Inventory:</Text>
-            <View style={styles.searchContainer}>
-              <Input
-                placeholder="Search by title..."
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                style={styles.searchInput}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            <View style={styles.sortRow}>
-              <Text style={styles.sortLabel}>Sort by:</Text>
-              <View style={styles.sortButtons}>
-                <Pressable
-                  style={[styles.sortButton, sortBy === 'rating' && styles.sortButtonActive]}
-                  onPress={() => handleSortChange('rating')}
-                >
-                  <Text style={[styles.sortButtonText, sortBy === 'rating' && styles.sortButtonTextActive]}>
-                    ⭐ Rating
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.sortButton, sortBy === 'category' && styles.sortButtonActive]}
-                  onPress={() => handleSortChange('category')}
-                >
-                  <Text style={[styles.sortButtonText, sortBy === 'category' && styles.sortButtonTextActive]}>
-                    🏷️ Category
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
-                  onPress={() => handleSortChange('title')}
-                >
-                  <Text style={[styles.sortButtonText, sortBy === 'title' && styles.sortButtonTextActive]}>
-                    A-Z
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-            {searchQuery.trim() && (
-              <Text style={styles.searchResultCount}>
-                {sortedCollection.length} game{sortedCollection.length !== 1 ? 's' : ''} found
-              </Text>
-            )}
-          </View>
-        )}
+        {/* Inventory title will be shown by GameCollectionView */}
 
-        {sortedCollection.length === 0 && (
+        {sortedCollection.length === 0 && loading && (
           <View style={styles.emptyCollection}>
-            <Text style={styles.emptyTitle}>No games yet</Text>
-            <Text style={styles.emptyText}>
-              Add games to your collection by using AI inventory or importing from BoardGameGeek.
-            </Text>
+            <Text style={styles.emptyTitle}>Loading your games...</Text>
+            <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />
           </View>
         )}
       </>
@@ -757,63 +927,26 @@ const CollectionScreen = () => {
   return (
     <View style={styles.container}>
       {showMenu && sortedCollection.length > 0 ? (
-        sortBy === 'category' ? (
-          renderGamesByCategory()
-        ) : (
-          (() => {
-            console.log('[CollectionScreen] Rendering FlatList with', sortedCollection.length, 'items');
-            return (
-              <FlatList
-                ref={flatListRef}
-                data={sortedCollection}
-                keyExtractor={(item) => {
-                  const key = item.id;
-                  if (!key) {
-                    console.warn('[CollectionScreen] GameCard missing id:', item);
-                  }
-                  return key || `game-${Math.random()}`;
-                }}
-                renderItem={(props) => {
-                  console.log('[CollectionScreen] FlatList renderItem called for index:', props.index);
-                  try {
-                    return renderGameCard(props);
-                  } catch (error) {
-                    console.error('[CollectionScreen] Error in renderItem:', error);
-                    return null;
-                  }
-                }}
-                numColumns={numColumns}
-                columnWrapperStyle={numColumns > 1 ? styles.row : undefined}
-                contentContainerStyle={styles.listContainer}
-                ListHeaderComponent={() => {
-                  console.log('[CollectionScreen] Rendering ListHeaderComponent');
-                  return renderHeader();
-                }}
-                ListHeaderComponentStyle={styles.headerContainer}
-                scrollEnabled={true}
-                showsVerticalScrollIndicator={true}
-                removeClippedSubviews={true}
-                maxToRenderPerBatch={10}
-                updateCellsBatchingPeriod={50}
-                initialNumToRender={5}
-                windowSize={10}
-                onScroll={handleScroll}
-                scrollEventThrottle={16}
-                onViewableItemsChanged={handleViewableItemsChanged}
-                viewabilityConfig={{
-                  itemVisiblePercentThreshold: 50,
-                  minimumViewTime: 100,
-                }}
-                onLayout={() => {
-                  console.log('[CollectionScreen] FlatList onLayout called');
-                }}
-                onContentSizeChange={(width, height) => {
-                  console.log('[CollectionScreen] FlatList content size changed:', width, 'x', height);
-                }}
-              />
-            );
-          })()
-        )
+        (() => {
+          console.log('[CollectionScreen] Rendering GameCollectionView', {
+            rawCollectionLength: rawCollection.length,
+            sortedCollectionLength: sortedCollection.length,
+            hasHeaderComponent: !!headerComponent,
+          });
+          return (
+            <GameCollectionView
+              games={rawCollection}
+              onGameDelete={handleDeleteGame}
+              usePagination={false}
+              defaultSortBy="category"
+              availableSorts={['rating', 'category', 'title']}
+              showSearch={true}
+              showSortOptions={true}
+              headerTitle="Your Games Inventory:"
+              headerComponent={headerComponent}
+            />
+          );
+        })()
       ) : (
         (() => {
           console.log('[CollectionScreen] Rendering ScrollView (no games or not menu)');
@@ -865,12 +998,10 @@ const CollectionScreen = () => {
                     </Pressable>
                   </View>
 
-              {sortedCollection.length === 0 && (
+              {sortedCollection.length === 0 && loading && (
                 <View style={styles.emptyCollection}>
-                  <Text style={styles.emptyTitle}>No games yet</Text>
-                  <Text style={styles.emptyText}>
-                    Add games to your collection by using AI inventory or importing from BoardGameGeek.
-                  </Text>
+                  <Text style={styles.emptyTitle}>Loading your games...</Text>
+                  <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />
                 </View>
               )}
             </>
@@ -897,6 +1028,8 @@ const CollectionScreen = () => {
                     // Games will automatically appear in the inventory section
                     if (count > 0) {
                       setActiveView('menu');
+                      // Scroll to inventory after import completes
+                      scrollToInventory();
                     }
                   }}
                 />
@@ -912,7 +1045,11 @@ const CollectionScreen = () => {
       <ClaudeGameIdentifier 
         onAddToCollection={handleAddToCollection}
         onRemoveFromCollection={handleRemoveFromCollection}
-        onDone={handleDoneIdentifying}
+        onDone={() => {
+          handleDoneIdentifying();
+          // Scroll to inventory after import completes
+          scrollToInventory();
+        }}
         showCameraModal={showCameraModal}
         showResultsModal={showResultsModal}
         onCameraModalClose={handleCameraModalClose}
@@ -925,6 +1062,8 @@ const CollectionScreen = () => {
         onRemoveFromCollection={handleRemoveFromCollection}
         onDone={() => {
           setShowTextListModal(false);
+          // Scroll to inventory after import completes
+          scrollToInventory();
         }}
         showModal={showTextListModal}
         onModalClose={() => setShowTextListModal(false)}
@@ -1299,6 +1438,40 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     paddingHorizontal: theme.spacing.xl,
     paddingVertical: theme.spacing.md,
+  },
+  categoryButtonsContainer: {
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceColor,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.woodMedium,
+    marginBottom: theme.spacing.md,
+  },
+  categoryButtonsScrollContent: {
+    paddingHorizontal: theme.spacing.sm,
+    gap: theme.spacing.sm,
+  },
+  categoryButton: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.woodLight,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    marginRight: theme.spacing.sm,
+  },
+  categoryButtonActive: {
+    backgroundColor: theme.colors.meepleRed,
+    borderColor: theme.colors.meepleRed,
+  },
+  categoryButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.medium,
+    color: theme.colors.textPrimary,
+  },
+  categoryButtonTextActive: {
+    color: '#fff',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
 });
 

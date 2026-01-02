@@ -35,7 +35,7 @@ const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   
   if (loading) {
-    return <div className="container"><div className="spinner" /></div>;
+    return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
   
   return isAuthenticated ? children : <Navigate to="/" replace />;
@@ -46,7 +46,7 @@ const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   
   if (loading) {
-    return <div className="container"><div className="spinner" /></div>;
+    return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
   
   return !isAuthenticated ? children : <Navigate to="/events" replace />;
@@ -164,13 +164,13 @@ const SmartEventsRedirect = () => {
   // Show loading spinner while loading events or checking
   if (loading || (!hasFinishedChecking && !hasRedirected && user)) {
     console.log('⏳ [SmartEventsRedirect] Showing loading spinner');
-    return <div className="container"><div className="spinner" /></div>;
+    return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
 
   // If we redirected, show a brief loading state while navigation happens
   if (hasRedirected) {
     console.log('✅ [SmartEventsRedirect] Redirected, showing loading spinner');
-    return <div className="container"><div className="spinner" /></div>;
+    return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
 
   // Otherwise, show the events screen
@@ -182,77 +182,79 @@ const AppContent = () => {
   return (
     <Router>
       <WebNavigation />
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <PublicRoute>
-              <ParallaxBackground>
-                <Onboarding />
-              </ParallaxBackground>
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/auth"
-          element={
-            <PublicRoute>
-              <ParallaxBackground>
-                <AuthWrapper />
-              </ParallaxBackground>
-            </PublicRoute>
-          }
-        />
-        <Route
-          path="/events"
-          element={
-            <ProtectedRoute>
-              <SmartEventsRedirect />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/event/:eventId"
-          element={
-            <ProtectedRoute>
-              <EventHub />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/event/:eventId/browse/:dateIndex"
-          element={
-            <ProtectedRoute>
-              <BrowseAndProposeScreen />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/collection"
-          element={
-            <ProtectedRoute>
-              <CollectionScreen />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <ProfileScreen />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/subscription"
-          element={
-            <ProtectedRoute>
-              <SubscriptionScreen />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<Navigate to="/events" replace />} />
-      </Routes>
+      <main role="main">
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <PublicRoute>
+                <ParallaxBackground>
+                  <Onboarding />
+                </ParallaxBackground>
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/auth"
+            element={
+              <PublicRoute>
+                <ParallaxBackground>
+                  <AuthWrapper />
+                </ParallaxBackground>
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/events"
+            element={
+              <ProtectedRoute>
+                <SmartEventsRedirect />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/event/:eventId"
+            element={
+              <ProtectedRoute>
+                <EventHub />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/event/:eventId/browse/:dateIndex"
+            element={
+              <ProtectedRoute>
+                <BrowseAndProposeScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/collection"
+            element={
+              <ProtectedRoute>
+                <CollectionScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfileScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/subscription"
+            element={
+              <ProtectedRoute>
+                <SubscriptionScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/events" replace />} />
+        </Routes>
+      </main>
     </Router>
   );
 };

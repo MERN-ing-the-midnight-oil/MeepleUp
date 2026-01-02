@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: theme.spacing.lg,
-    paddingTop: theme.spacing['2xl'],
+    paddingTop: 8,
   },
   title: {
     fontSize: theme.typography.fontSize.h1,

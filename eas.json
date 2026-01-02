@@ -22,6 +22,7 @@
       }
     },
     "production": {
+      "distribution": "store",
       "ios": {
         "buildConfiguration": "Release",
         "simulator": false
@@ -32,7 +33,12 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "rhyssmoker",
+        "appleTeamId": "5C646HCA5F"
+      }
+    }
   }
 }
 

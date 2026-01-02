@@ -39,20 +39,30 @@ async function rateLimitAPI(isBulkOperation = false) {
  * @param {Response} response - The HTTP response
  * @param {Function} retryFn - Function to retry the request
  * @param {number} retryCount - Current retry attempt (starts at 0)
- * @param {number} maxRetries - Maximum number of retries (default: 3)
+ * @param {number} maxRetries - Maximum number of retries (default: 2, reduced to fail faster)
  * @returns {Promise<Response>} The response after retries
  */
-async function handle429WithRetry(response, retryFn, retryCount = 0, maxRetries = 3) {
+async function handle429WithRetry(response, retryFn, retryCount = 0, maxRetries = 2) {
   if (response.status === 429 && retryCount < maxRetries) {
-    // Exponential backoff: 5s, 10s, 20s
+    // Exponential backoff: 5s, 10s (reduced from 3 retries to 2 to fail faster)
     const backoffMs = 5000 * Math.pow(2, retryCount);
     if (__DEV__) {
       console.log(`[BGG API] Rate limited (429), waiting ${backoffMs}ms before retry ${retryCount + 1}/${maxRetries}`);
     }
     await new Promise(resolve => setTimeout(resolve, backoffMs));
-    const retryResponse = await retryFn();
-    return handle429WithRetry(retryResponse, retryFn, retryCount + 1, maxRetries);
+    try {
+      const retryResponse = await retryFn();
+      return handle429WithRetry(retryResponse, retryFn, retryCount + 1, maxRetries);
+    } catch (error) {
+      // If retry fails, return the original response to avoid infinite loops
+      if (__DEV__) {
+        console.warn(`[BGG API] Retry failed:`, error);
+      }
+      return response;
+    }
   }
+  // If we've exhausted retries or status is not 429, return the response
+  // This allows the calling code to handle the error appropriately
   return response;
 }
 
@@ -301,6 +311,13 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
         if (__DEV__) {
           console.warn(`[BGG API] Batch fetch failed with status ${response.status} after retries`);
         }
+        // If we're being rate-limited heavily (429), add extra delay before next batch
+        if (response.status === 429) {
+          if (__DEV__) {
+            console.log(`[BGG API] Rate limited, adding extra 10s delay before next batch`);
+          }
+          await new Promise(resolve => setTimeout(resolve, 10000));
+        }
         // If still failing after retries, skip this batch and continue
         continue;
       }
@@ -457,6 +474,12 @@ export async function fetchBGGGameDetails(gameId) {
       // If we still have errors after all fallbacks and retries, log and return null
       if (__DEV__) {
         console.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
+      }
+      // For 429 errors specifically, log a more helpful message
+      if (response.status === 429) {
+        if (__DEV__) {
+          console.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
+        }
       }
       // Don't throw - return null so the app can continue
       return null;

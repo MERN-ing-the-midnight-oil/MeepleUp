@@ -4,6 +4,16 @@ import { useAuth } from './AuthContext';
 import { wordList1, wordList2, wordList3 } from '../utils/wordlist';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import {
+  getMeepleupProduct,
+  purchaseMeepleupCreation,
+  verifyMeepleupPurchaseReceipt,
+  acknowledgeMeepleupPurchase,
+  hasPurchasedMeepleupCreation,
+  setupMeepleupPurchaseListener,
+  initializePurchases,
+} from '../services/meepleupPurchaseService';
+import { initializePurchases as initIAP } from '../services/subscriptionService';
 
 const EventsContext = createContext();
 
@@ -406,7 +416,18 @@ export const EventsProvider = ({ children }) => {
   }, [events, initialised]);
 
   const createEvent = useCallback(
-    async (eventData = {}) => {
+    async (eventData = {}, skipPurchaseCheck = false) => {
+      // If skipPurchaseCheck is false, we need to verify purchase first
+      if (!skipPurchaseCheck) {
+        const userId = user?.uid || user?.id;
+        if (userId) {
+          const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
+          if (!purchaseStatus.hasPurchase) {
+            throw new Error('PURCHASE_REQUIRED');
+          }
+        }
+      }
+
       const organizerId = eventData.organizerId || user?.uid || user?.id || null;
       const initialCode = eventData.joinCode || generateJoinCode();
       const normalizedInitialCode = initialCode.trim().toLowerCase().replace(/[\s-]+/g, ' ');
@@ -520,6 +541,89 @@ export const EventsProvider = ({ children }) => {
       return baseEvent;
     },
     [user],
+  );
+
+  // Initialize IAP and set up purchase listener
+  useEffect(() => {
+    if (!user) return;
+
+    let purchaseUnsubscribe = null;
+
+    const setupIAP = async () => {
+      try {
+        // Initialize IAP (can use subscription service's init since it's the same connection)
+        await initIAP();
+        
+        // Set up purchase listener for meepleup creation
+        purchaseUnsubscribe = setupMeepleupPurchaseListener(async (update) => {
+          if (update.type === 'purchase' && !update.acknowledged) {
+            const userId = user?.uid || user?.id;
+            if (!userId) return;
+
+            try {
+              // Acknowledge the purchase
+              await acknowledgeMeepleupPurchase(update.purchase);
+              
+              // Verify the purchase with backend
+              const verification = await verifyMeepleupPurchaseReceipt(update.purchase, userId);
+              
+              if (verification.success && verification.verified) {
+                console.log('[EventsContext] Meepleup creation purchase verified successfully');
+                // Purchase is now recorded, user can create meepleups
+              } else {
+                console.warn('[EventsContext] Meepleup creation purchase verification failed:', verification.error);
+              }
+            } catch (error) {
+              console.error('[EventsContext] Error processing meepleup purchase:', error);
+            }
+          }
+        });
+      } catch (error) {
+        console.error('[EventsContext] Error setting up IAP:', error);
+      }
+    };
+
+    setupIAP();
+
+    return () => {
+      if (purchaseUnsubscribe) {
+        purchaseUnsubscribe();
+      }
+    };
+  }, [user]);
+
+  /**
+   * Create event with purchase check and flow
+   * This is the main function UI should call - it handles purchase flow automatically
+   */
+  const createEventWithPurchaseCheck = useCallback(
+    async (eventData = {}) => {
+      const userId = user?.uid || user?.id;
+      if (!userId) {
+        throw new Error('User must be authenticated to create a meepleup');
+      }
+
+      // Check if user has already purchased meepleup creation
+      const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
+      
+      if (!purchaseStatus.hasPurchase) {
+        // User needs to purchase - return special error to trigger purchase flow in UI
+        return {
+          requiresPurchase: true,
+          error: 'PURCHASE_REQUIRED',
+        };
+      }
+
+      // User has purchase, proceed with event creation
+      try {
+        const event = await createEvent(eventData, true); // Skip purchase check since we already verified
+        return { success: true, event };
+      } catch (error) {
+        console.error('[createEventWithPurchaseCheck] Error creating event:', error);
+        return { success: false, error: error.message };
+      }
+    },
+    [user, createEvent],
   );
 
   const joinEventWithCode = useCallback(
@@ -912,6 +1016,78 @@ export const EventsProvider = ({ children }) => {
         }
     },
     [user],
+  );
+
+  const removeMember = useCallback(
+    async (eventId, memberUserId) => {
+      if (!user || !db) return;
+
+      const currentUserId = user.uid || user.id;
+      const event = getEventById(eventId);
+      
+      if (!event) {
+        throw new Error('Event not found');
+      }
+
+      // Check if current user is organizer or co-organizer
+      const isOrganizer = event.organizerId === currentUserId;
+      const currentUserMember = event.members.find((m) => m.userId === currentUserId);
+      const isCoOrganizer = currentUserMember?.role === MEMBER_ROLES.ORGANIZER;
+      
+      if (!isOrganizer && !isCoOrganizer) {
+        throw new Error('Only organizers can remove members');
+      }
+
+      // Prevent removing the organizer
+      if (memberUserId === event.organizerId) {
+        throw new Error('Cannot remove the organizer');
+      }
+
+      // Prevent removing yourself (use leaveEvent instead)
+      if (memberUserId === currentUserId) {
+        throw new Error('Use leave event to remove yourself');
+      }
+
+      try {
+        const groupRef = db.collection('gamingGroups').doc(eventId);
+        const membersRef = groupRef.collection('members').doc(memberUserId);
+        
+        // Remove member document (this is allowed by security rules for organizers)
+        await membersRef.delete();
+
+        // Update memberIds array in group document if it exists
+        // Note: We don't update the user's groupIds because security rules only allow
+        // users to update their own documents. The member will lose access because
+        // they're no longer in the members subcollection, and their groupIds will
+        // be cleaned up when they next sync or can be handled by a Cloud Function.
+        const groupDoc = await groupRef.get();
+        const groupData = groupDoc.data();
+        if (groupData?.memberIds && Array.isArray(groupData.memberIds) && groupData.memberIds.includes(memberUserId)) {
+          await groupRef.update({
+            memberIds: firebase.firestore.FieldValue.arrayRemove(memberUserId),
+            memberCount: firebase.firestore.FieldValue.increment(-1),
+            updatedAt: firebase.firestore.Timestamp.now(),
+          });
+        }
+
+        // Update local events state
+        setEvents((prev) =>
+          prev.map((e) =>
+            e.id === eventId
+              ? {
+                  ...e,
+                  members: e.members.filter((m) => m.userId !== memberUserId),
+                  lastUpdatedAt: new Date().toISOString(),
+                }
+              : e
+          )
+        );
+      } catch (error) {
+        console.error('[EventsContext] Error removing member:', error);
+        throw error;
+      }
+    },
+    [user, db, getEventById],
   );
 
   const getMembershipStatus = useCallback(
@@ -1413,10 +1589,12 @@ export const EventsProvider = ({ children }) => {
       events,
       loading,
       createEvent,
+      createEventWithPurchaseCheck,
       joinEventWithCode,
       getEventById,
       getUserEvents,
       leaveEvent,
+      removeMember,
       getMembershipStatus,
       membershipStatus: MEMBERSHIP_STATUS,
       updateEvent,
@@ -1439,10 +1617,12 @@ export const EventsProvider = ({ children }) => {
       events,
       loading,
       createEvent,
+      createEventWithPurchaseCheck,
       joinEventWithCode,
       getEventById,
       getUserEvents,
       leaveEvent,
+      removeMember,
       getMembershipStatus,
       updateEvent,
       updateMemberRSVP,

@@ -451,12 +451,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
  * Get detailed game information by BGG ID
  * Priority: Firebase Firestore -> BGG API (only if game not found in Firestore)
  */
-export const getGameDetails = async (gameId) => {
+export const getGameDetails = async (gameId, source = 'unknown') => {
   try {
-    if (__DEV__) {
-      console.log('[Game Details] Fetching game:', gameId);
-    }
-
     let gameData = null;
 
     // Try Firebase Firestore first
@@ -465,9 +461,6 @@ export const getGameDetails = async (gameId) => {
       const firestoreGame = await getFirestoreGame(gameId);
       
       if (firestoreGame) {
-        if (__DEV__) {
-          console.log(`[Firestore] Found game: ${firestoreGame.name}`);
-        }
         // Format to match BGG API response format
         gameData = {
           id: firestoreGame.id,
@@ -500,6 +493,102 @@ export const getGameDetails = async (gameId) => {
           publisher: firestoreGame.publisher || null,
           averageWeight: firestoreGame.averageWeight || firestoreGame.complexity || null,
         };
+        
+        // Check if Firestore game is missing CRITICAL BGG data (thumbnails, images, descriptions)
+        // Only fetch from BGG API if critical display fields are missing
+        // Optional fields like designers, mechanics, categories, publishers are nice-to-have but not required
+        const isMissingData = !gameData.thumbnail || 
+                              !gameData.image || 
+                              !gameData.description;
+        
+        if (gameData && isMissingData) {
+          if (__DEV__) {
+            console.warn(`⚠️ [Game Details] BGG API CALL - Missing data for: ${gameData.name} (${gameId}, Source: ${source})`);
+          }
+          try {
+            const { fetchBGGGameDetails } = await import('../services/bggApi');
+            const bggData = await fetchBGGGameDetails(gameId);
+            
+            if (bggData) {
+              // Merge BGG API data into gameData, prioritizing BGG API data for missing fields
+              // This ensures we get the full "thing" object data including large images
+              gameData = {
+                ...gameData,
+                // Always use BGG API data if available (it's more complete and up-to-date)
+                thumbnail: bggData.thumbnail || gameData.thumbnail,
+                image: bggData.image || gameData.image, // Large image for details view
+                description: bggData.description || gameData.description,
+                yearPublished: bggData.yearPublished || gameData.yearPublished,
+                minPlayers: bggData.minPlayers || gameData.minPlayers,
+                maxPlayers: bggData.maxPlayers || gameData.maxPlayers,
+                playingTime: bggData.playingTime || gameData.playingTime,
+                minPlayTime: bggData.minPlayTime || gameData.minPlayTime,
+                maxPlayTime: bggData.maxPlayTime || gameData.maxPlayTime,
+                minAge: bggData.minAge || gameData.minAge,
+                // Ratings (use BGG API as it's more current)
+                average: bggData.average || gameData.average,
+                bayesAverage: bggData.bayesAverage || gameData.bayesAverage,
+                usersRated: bggData.usersRated || gameData.usersRated,
+                rank: bggData.rank || gameData.rank,
+                // Category ranks
+                strategyGamesRank: bggData.strategyGamesRank || gameData.strategyGamesRank,
+                familyGamesRank: bggData.familyGamesRank || gameData.familyGamesRank,
+                partyGamesRank: bggData.partyGamesRank || gameData.partyGamesRank,
+                abstractsRank: bggData.abstractsRank || gameData.abstractsRank,
+                thematicRank: bggData.thematicRank || gameData.thematicRank,
+                wargamesRank: bggData.wargamesRank || gameData.wargamesRank,
+                childrensGamesRank: bggData.childrensGamesRank || gameData.childrensGamesRank,
+                cgsRank: bggData.cgsRank || gameData.cgsRank,
+                // Additional BGG data fields
+                mechanics: bggData.mechanics || gameData.mechanics,
+                categories: bggData.categories || gameData.categories,
+                designers: bggData.designers || gameData.designers,
+                publishers: bggData.publishers || gameData.publishers,
+                publisher: bggData.publisher || gameData.publisher,
+                artists: bggData.artists || gameData.artists,
+                complexity: bggData.complexity || gameData.complexity,
+                averageWeight: bggData.averageWeight || bggData.complexity || gameData.averageWeight,
+                ownedCount: bggData.ownedCount || gameData.ownedCount,
+                bestPlayerCount: bggData.bestPlayerCount || gameData.bestPlayerCount,
+                languageDependence: bggData.languageDependence || gameData.languageDependence,
+                suggestedPlayerAge: bggData.suggestedPlayerAge || gameData.suggestedPlayerAge,
+                alternateNames: bggData.alternateNames || gameData.alternateNames,
+                dimensions: bggData.dimensions || gameData.dimensions,
+                weight: bggData.weight || gameData.weight,
+              };
+              
+              if (__DEV__) {
+                console.log(`[Game Details] Updated game data from BGG API "thing" object for: ${gameData.name}`, {
+                  hasThumbnail: !!gameData.thumbnail,
+                  hasImage: !!gameData.image,
+                  hasDescription: !!gameData.description,
+                  hasMechanics: !!gameData.mechanics,
+                  hasCategories: !!gameData.categories,
+                  hasDesigners: !!gameData.designers,
+                  hasPublishers: !!gameData.publishers,
+                });
+              }
+              
+              // Update Firestore with the complete BGG data (non-blocking)
+              try {
+                const { updateGameWithBGGData } = await import('../services/gameDatabase');
+                updateGameWithBGGData(gameId, bggData).catch(err => {
+                  if (__DEV__) {
+                    console.warn('[Game Details] Failed to update Firestore with BGG data:', err);
+                  }
+                });
+              } catch (cacheError) {
+                if (__DEV__) {
+                  console.warn('[Game Details] Error updating Firestore with BGG data:', cacheError);
+                }
+              }
+            }
+          } catch (bggError) {
+            if (__DEV__) {
+              console.warn('[Game Details] Failed to fetch BGG "thing" object:', bggError);
+            }
+          }
+        }
       }
     } catch (firestoreError) {
       if (__DEV__) {
@@ -724,6 +813,24 @@ export const fetchBGGCollection = async (username, options = {}) => {
         }
         await new Promise(resolve => setTimeout(resolve, retryDelay));
         retries++;
+      } else if (response.status === 429) {
+        // Rate limit exceeded - wait longer before retrying
+        retries++;
+        const rateLimitDelay = 60000; // 60 seconds for rate limits
+        if (__DEV__) {
+          console.log(`[BGG Collection] Rate limit exceeded (429). Waiting ${rateLimitDelay}ms before retry ${retries}/${maxRetries}...`);
+        }
+        
+        // If we've exhausted retries, throw error
+        if (retries >= maxRetries) {
+          throw new Error(
+            'Rate limit exceeded. BGG is limiting API requests. Please wait a few minutes and try again.\n\n' +
+            'Tip: If you have a large collection, the import may take longer. Try again in 5-10 minutes.'
+          );
+        }
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
       } else if (response.status === 401) {
         // If we have a token and got 401, try without token
         if (token) {
@@ -741,6 +848,25 @@ export const fetchBGGCollection = async (username, options = {}) => {
             }
             await new Promise(resolve => setTimeout(resolve, retryDelay));
             retries++;
+            continue;
+          } else if (responseNoAuth.status === 429) {
+            // Rate limit on retry without token - wait longer
+            retries++;
+            const rateLimitDelay = 60000;
+            if (__DEV__) {
+              console.log(`[BGG Collection] Rate limit exceeded (429) on retry. Waiting ${rateLimitDelay}ms before retry ${retries}/${maxRetries}...`);
+            }
+            
+            // If we've exhausted retries, throw error
+            if (retries >= maxRetries) {
+              throw new Error(
+                'Rate limit exceeded. BGG is limiting API requests. Please wait a few minutes and try again.\n\n' +
+                'Tip: If you have a large collection, the import may take longer. Try again in 5-10 minutes.'
+              );
+            }
+            
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
             continue;
           }
         }
@@ -769,12 +895,21 @@ export const fetchBGGCollection = async (username, options = {}) => {
       const errorMessage = errorMatch[1] ? errorMatch[1].trim() : 'Error fetching collection from BGG';
       
       // Check for specific error cases and provide helpful messages
-      if (errorMessage.toLowerCase().includes('invalid username')) {
+      const lowerErrorMessage = errorMessage.toLowerCase();
+      
+      if (lowerErrorMessage.includes('invalid username')) {
         throw new Error(`Invalid username: "${username.trim()}". Please check the username and try again.`);
       }
       
+      // Check for rate limit errors
+      if (lowerErrorMessage.includes('rate limit') || lowerErrorMessage.includes('rate limit exceeded')) {
+        throw new Error(
+          'Rate limit exceeded. BGG is limiting API requests. Please wait a few minutes and try again.\n\n' +
+          'Tip: If you have a large collection, the import may take longer. Try again in 5-10 minutes.'
+        );
+      }
+      
       // Check for privacy/access related errors
-      const lowerErrorMessage = errorMessage.toLowerCase();
       if (lowerErrorMessage.includes('private') || 
           lowerErrorMessage.includes('not available') ||
           lowerErrorMessage.includes('access denied') ||

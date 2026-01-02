@@ -34,7 +34,7 @@ const getDateKey = (eventDate) => {
 };
 
 /**
- * Logistics Card Version 2 - Built from scratch with basic React Native components
+ * Upcoming events - Built from scratch with basic React Native components
  * No dependencies on Modal.jsx or Input.jsx
  */
 const LogisticsCardV2 = ({ 
@@ -127,7 +127,7 @@ const LogisticsCardV2 = ({
   return (
     <View style={{ marginTop: 24, paddingHorizontal: 16 }}>
       <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: theme.colors.textPrimary }}>
-        Logistics Card Version 2
+        Upcoming events
       </Text>
       {futureEvents.map((ed, index) => {
         const date = safeParseDate(ed.date);
@@ -694,7 +694,10 @@ const LogisticsCardV2 = ({
                                     }}
                                     resizeMode="cover"
                                     onError={(error) => {
-                                      console.log('Avatar load error for', member.userId, error);
+                                      // Reduced logging - only log in dev mode and suppress repeated errors
+                                      if (__DEV__) {
+                                        // Silently handle avatar load errors - they're expected for missing avatars
+                                      }
                                     }}
                                   />
                                 ) : (
@@ -804,7 +807,10 @@ const LogisticsCardV2 = ({
                             }}
                             onPress={(e) => {
                               e.stopPropagation();
-                              handleRSVP('going', date, null);
+                              if (e && e.preventDefault) {
+                                e.preventDefault();
+                              }
+                              handleRSVP('going', date, e);
                               setOpenRSVPDropdown(null);
                             }}
                           >
@@ -819,7 +825,10 @@ const LogisticsCardV2 = ({
                             }}
                             onPress={(e) => {
                               e.stopPropagation();
-                              handleRSVP('not-going', date, null);
+                              if (e && e.preventDefault) {
+                                e.preventDefault();
+                              }
+                              handleRSVP('not-going', date, e);
                               setOpenRSVPDropdown(null);
                             }}
                           >
@@ -852,28 +861,6 @@ const LogisticsCardV2 = ({
                   <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.textPrimary }}>
                     📢 Announcements
                   </Text>
-                  {isOrganizerOrCoOrganizer && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        // Focus on the input field by clearing any existing input and ensuring it's visible
-                        setInputs(prev => ({
-                          ...prev,
-                          [index]: ''
-                        }));
-                      }}
-                      style={{
-                        backgroundColor: theme.colors.meepleRed,
-                        paddingVertical: 6,
-                        paddingHorizontal: 12,
-                        borderRadius: 4,
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '600' }}>
-                        ➕ Create Announcement
-                      </Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
                 
                 {/* Display existing announcements for this date */}
@@ -1222,7 +1209,7 @@ const LogisticsCardV2 = ({
                   activeOpacity={0.7}
                 >
                   <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
-                    {saving[index] ? 'Posting...' : '+Add'}
+                    {saving[index] ? 'Posting...' : 'Make announcement'}
                   </Text>
                 </TouchableOpacity>
               </>
@@ -1230,38 +1217,54 @@ const LogisticsCardV2 = ({
               </View>
               
               {/* Gameplan Button */}
-              
-              {/* Gameplan Button */}
               <View style={{ marginTop: 12 }}>
-                <TouchableOpacity
-                  onPress={(e) => {
-                    if (e && e.stopPropagation) {
-                      e.stopPropagation();
-                    }
-                    const currentEventId = eventId;
-                    const dateIndex = originalIndex;
-                    if (Platform.OS === 'web' && navigate && currentEventId) {
-                      navigate(`/event/${currentEventId}/browse/${dateIndex}`);
-                    } else if (navigation?.navigate && currentEventId) {
-                      navigation.navigate('BrowseAndPropose', { 
-                        eventId: currentEventId, 
-                        dateIndex: dateIndex 
-                      });
-                    }
-                  }}
-                  style={{
-                    backgroundColor: theme.colors.meepleRed,
-                    paddingVertical: 12,
-                    paddingHorizontal: 24,
-                    borderRadius: 4,
-                    alignItems: 'center',
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
-                    🎲 Gameplan for {gameplanDateStr}
-                  </Text>
-                </TouchableOpacity>
+                {dateRSVP === 'going' ? (
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      if (e && e.stopPropagation) {
+                        e.stopPropagation();
+                      }
+                      const currentEventId = eventId;
+                      const dateIndex = originalIndex;
+                      if (Platform.OS === 'web' && navigate && currentEventId) {
+                        navigate(`/event/${currentEventId}/browse/${dateIndex}`);
+                      } else if (navigation?.navigate && currentEventId) {
+                        navigation.navigate('BrowseAndPropose', { 
+                          eventId: currentEventId, 
+                          dateIndex: dateIndex 
+                        });
+                      }
+                    }}
+                    style={{
+                      backgroundColor: theme.colors.meepleRed,
+                      paddingVertical: 12,
+                      paddingHorizontal: 24,
+                      borderRadius: 4,
+                      alignItems: 'center',
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
+                      🎲 Gameplan for {gameplanDateStr}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View
+                    style={{
+                      backgroundColor: '#f5f5f5',
+                      paddingVertical: 12,
+                      paddingHorizontal: 24,
+                      borderRadius: 4,
+                      alignItems: 'center',
+                      borderWidth: 1,
+                      borderColor: '#d4c5b0',
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.textSecondary, fontSize: 14, textAlign: 'center' }}>
+                      RSVP "going" to participate in the gameplan
+                    </Text>
+                  </View>
+                )}
               </View>
             </LinearGradient>
           </TouchableOpacity>

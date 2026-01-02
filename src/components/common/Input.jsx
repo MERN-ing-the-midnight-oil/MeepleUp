@@ -24,21 +24,14 @@ const Input = React.forwardRef(({
   const [isFocused, setIsFocused] = useState(false);
 
   const handleFocus = (e) => {
-    console.log('[Input Component] handleFocus called, value:', JSON.stringify(value));
     setIsFocused(true);
     onFocus?.(e);
   };
 
   const handleBlur = (e) => {
-    console.log('[Input Component] handleBlur called, value:', JSON.stringify(value));
     setIsFocused(false);
     onBlur?.(e);
   };
-  
-  // Log when component renders
-  React.useEffect(() => {
-    console.log('[Input Component] Rendered, value:', JSON.stringify(value), 'isFocused:', isFocused);
-  });
 
   return (
     <TextInput

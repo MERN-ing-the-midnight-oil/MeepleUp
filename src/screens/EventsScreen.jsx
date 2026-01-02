@@ -645,7 +645,7 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: theme.spacing.xl,
-    paddingTop: 40,
+    paddingTop: 8,
   },
   title: {
     fontSize: theme.typography.fontSize.h1,

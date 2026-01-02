@@ -285,6 +285,45 @@ body {
 
   .logo-section {
     order: 1;
+    position: relative;
+    transition: all 0.1s ease-out;
+  }
+
+  .logo-section.scrolled {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 1rem;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    width: auto;
+  }
+
+  .app-icon-container {
+    transition: all 0.1s ease-out;
+  }
+
+  .app-icon-container.shrunk {
+    flex-shrink: 0;
+  }
+
+  .app-icon {
+    transition: width 0.1s ease-out, height 0.1s ease-out;
+  }
+
+  .bgg-badge {
+    transition: all 0.1s ease-out;
+  }
+
+  .bgg-badge.frozen {
+    flex-shrink: 0;
   }
 
   .content-section {
@@ -346,6 +385,11 @@ body {
   .app-icon {
     width: 180px;
     height: 180px;
+  }
+
+  .logo-section.scrolled {
+    top: 0.5rem;
+    padding: 0.5rem;
   }
 
   .brand-name {

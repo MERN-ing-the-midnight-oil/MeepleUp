@@ -198,19 +198,56 @@ const BGGImport = ({ onImportComplete }) => {
             
             // Format game data for MeepleUp collection
             // Use batch-fetched data if available, otherwise use cached, otherwise use basic game data from BGG collection
+            // Include ALL BGG data fields including category ranks
             const gameData = {
               id: `bgg_${game.bggId}`,
               bggId: game.bggId,
-              title: gameDetails?.name || cached?.name || game.name || 'Unknown Game',
+              // Basic game info
+              name: gameDetails?.name || cached?.name || game.name || 'Unknown Game',
+              title: gameDetails?.name || cached?.name || game.name || 'Unknown Game', // Keep title for compatibility
               description: gameDetails?.description || cached?.description || '',
-              // Use thumbnail/image from batch data, cached data, or BGG collection data
               thumbnail: gameDetails?.thumbnail || cached?.thumbnail || game.thumbnail || null,
               image: gameDetails?.image || cached?.image || game.image || game.thumbnail || null,
               yearPublished: gameDetails?.yearPublished || cached?.yearPublished || game.yearPublished,
+              // Player info
               minPlayers: gameDetails?.minPlayers || cached?.minPlayers,
               maxPlayers: gameDetails?.maxPlayers || cached?.maxPlayers,
               playingTime: gameDetails?.playingTime || cached?.playingTime,
+              minPlayTime: gameDetails?.minPlayTime || cached?.minPlayTime,
+              maxPlayTime: gameDetails?.maxPlayTime || cached?.maxPlayTime,
+              minAge: gameDetails?.minAge || cached?.minAge,
+              // Ratings
+              average: gameDetails?.average || cached?.average || game.rating,
               bggRating: gameDetails?.average || gameDetails?.averageRating || cached?.average || game.rating,
+              bayesAverage: gameDetails?.bayesAverage || cached?.bayesAverage,
+              usersRated: gameDetails?.usersRated || cached?.usersRated,
+              rank: gameDetails?.rank || cached?.rank,
+              // Category ranks - CRITICAL for proper categorization
+              strategyGamesRank: gameDetails?.strategyGamesRank || cached?.strategyGamesRank || '',
+              familyGamesRank: gameDetails?.familyGamesRank || cached?.familyGamesRank || '',
+              partyGamesRank: gameDetails?.partyGamesRank || cached?.partyGamesRank || '',
+              abstractsRank: gameDetails?.abstractsRank || cached?.abstractsRank || '',
+              thematicRank: gameDetails?.thematicRank || cached?.thematicRank || '',
+              wargamesRank: gameDetails?.wargamesRank || cached?.wargamesRank || '',
+              childrensGamesRank: gameDetails?.childrensGamesRank || cached?.childrensGamesRank || '',
+              cgsRank: gameDetails?.cgsRank || cached?.cgsRank || '',
+              // Additional BGG data
+              mechanics: gameDetails?.mechanics || cached?.mechanics || null,
+              categories: gameDetails?.categories || cached?.categories || null,
+              designers: gameDetails?.designers || cached?.designers || null,
+              publishers: gameDetails?.publishers || cached?.publishers || null,
+              publisher: gameDetails?.publisher || cached?.publisher || null,
+              artists: gameDetails?.artists || cached?.artists || null,
+              complexity: gameDetails?.complexity || cached?.complexity || null,
+              averageWeight: gameDetails?.averageWeight || cached?.averageWeight || null,
+              ownedCount: gameDetails?.ownedCount || cached?.ownedCount || null,
+              bestPlayerCount: gameDetails?.bestPlayerCount || cached?.bestPlayerCount || null,
+              languageDependence: gameDetails?.languageDependence || cached?.languageDependence || null,
+              suggestedPlayerAge: gameDetails?.suggestedPlayerAge || cached?.suggestedPlayerAge || null,
+              alternateNames: gameDetails?.alternateNames || cached?.alternateNames || null,
+              dimensions: gameDetails?.dimensions || cached?.dimensions || null,
+              weight: gameDetails?.weight || cached?.weight || null,
+              // User-specific data
               userRating: game.rating,
               numplays: game.numplays,
               addedAt: new Date().toISOString(),

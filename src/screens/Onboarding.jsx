@@ -17,12 +17,13 @@ import PoweredByBGG from '../components/PoweredByBGG';
 import JoinForm from '../components/JoinForm';
 import EventCard from '../components/EventCard';
 import UserProfileModal from '../components/UserProfileModal';
+import MeepleupPurchaseModal from '../components/MeepleupPurchaseModal';
 
 const Onboarding = () => {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const { user, updateUser } = useAuth();
-  const { joinEventWithCode, createEvent, getUserEvents, leaveEvent, getEventById, getUserArchivedEvents, loading: eventsLoading, events } = useEvents();
+  const { joinEventWithCode, createEvent, createEventWithPurchaseCheck, getUserEvents, leaveEvent, getEventById, getUserArchivedEvents, loading: eventsLoading, events } = useEvents();
   const [hasCheckedRedirect, setHasCheckedRedirect] = useState(false);
   const redirectTimeoutRef = useRef(null);
   const [joinCodeWord1, setJoinCodeWord1] = useState('');
@@ -51,6 +52,8 @@ const Onboarding = () => {
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [pendingEventData, setPendingEventData] = useState(null); // Store event data when purchase is required
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const selectedDatesRef = useRef(selectedDates);
@@ -96,10 +99,7 @@ const Onboarding = () => {
     }
   }, [selectedDates.length]);
   
-  // Debug: Log when editingDateIndex changes
-  useEffect(() => {
-    console.log('[Onboarding] editingDateIndex changed to:', editingDateIndex);
-  }, [editingDateIndex]);
+  // Reduced logging - removed editingDateIndex change log
 
   // Check if user is member of exactly one meepleUp and redirect to logistics tab
   useEffect(() => {
@@ -128,16 +128,14 @@ const Onboarding = () => {
     // Get all events where user is a member
     // getUserEvents doesn't take parameters - it uses user from context
     const userEvents = getUserEvents();
-    console.log('[Onboarding] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
+    // Reduced logging - removed redirect check logs
     
     // Filter to only active events (not archived)
     const activeEvents = userEvents.filter(event => event.isActive !== false);
-    console.log('[Onboarding] Active events:', activeEvents.length);
 
     // If user is a member of exactly one active meepleUp, redirect to its logistics tab
     if (activeEvents.length === 1) {
       const eventId = activeEvents[0].id;
-      console.log('[Onboarding] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
       setHasCheckedRedirect(true);
       navigation.navigate('EventHub', { eventId });
       return;
@@ -375,7 +373,24 @@ const Onboarding = () => {
         eventData.usualEndTime = usualEndTime.toISOString();
       }
 
-      const newEvent = await createEvent(eventData);
+      // Use createEventWithPurchaseCheck to handle purchase flow
+      const result = await createEventWithPurchaseCheck(eventData);
+
+      if (result.requiresPurchase) {
+        // Purchase required - show purchase modal
+        setPendingEventData(eventData);
+        setShowPurchaseModal(true);
+        setLoading(false);
+        return;
+      }
+
+      if (!result.success) {
+        setError(result.error || 'Failed to create MeepleUp. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      const newEvent = result.event;
 
       setEventName('');
       setEventLocation('');
@@ -1546,6 +1561,62 @@ const Onboarding = () => {
         avatarUrl={selectedUserForProfile.avatarUrl}
       />
     )}
+
+    {/* MeepleUp Purchase Modal */}
+    <MeepleupPurchaseModal
+      visible={showPurchaseModal}
+      onClose={() => {
+        setShowPurchaseModal(false);
+        setPendingEventData(null);
+      }}
+      onPurchaseComplete={async () => {
+        setShowPurchaseModal(false);
+        // Retry creating the event after purchase
+        if (pendingEventData) {
+          setLoading(true);
+          try {
+            const result = await createEventWithPurchaseCheck(pendingEventData);
+            if (result.success) {
+              const newEvent = result.event;
+              setEventName('');
+              setEventLocation('');
+              setEventAddress('');
+              setSelectedDates([]);
+              setUsualStartTime(null);
+              setUsualEndTime(null);
+              setEventDescription('');
+              setRsvpRequired(true);
+              setMemberLimit('');
+              setShowCalendarModal(false);
+              setError('');
+              setPendingEventData(null);
+
+              Alert.alert(
+                'MeepleUp Created',
+                'Your MeepleUp has been created successfully!',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => navigation.replace('EventHub', {
+                      eventId: newEvent.id,
+                      joinCode: newEvent.joinCode,
+                    }),
+                  },
+                ],
+              );
+            } else {
+              setError(result.error || 'Failed to create MeepleUp. Please try again.');
+            }
+          } catch (err) {
+            setError('Failed to create MeepleUp. Please try again.');
+            console.error(err);
+          } finally {
+            setLoading(false);
+          }
+        }
+      }}
+      userId={user?.uid || user?.id}
+    />
 
     {/* Join Success Modal */}
     <Modal

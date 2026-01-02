@@ -595,6 +595,112 @@ export async function getGameById(gameId) {
 }
 
 /**
+ * Batch fetch multiple games from Firestore games collection by BGG IDs
+ * @param {Array<string|number>} gameIds - Array of BGG game IDs
+ * @returns {Promise<Map<string, Object>>} Map of gameId -> game object (only includes found games)
+ */
+export async function batchGetGamesById(gameIds) {
+  if (!gameIds || !Array.isArray(gameIds) || gameIds.length === 0) {
+    return new Map();
+  }
+
+  if (!db) {
+    if (__DEV__) {
+      console.warn('[Game Database] Firestore db not initialized, cannot batch fetch games');
+    }
+    return new Map();
+  }
+
+  try {
+    const gamesRef = db.collection(GAMES_COLLECTION);
+    const gameMap = new Map();
+    
+    // Firestore compat API: Use Promise.all with individual gets
+    // Process in smaller batches to avoid overwhelming Firestore
+    const BATCH_SIZE = 20;
+    
+    for (let i = 0; i < gameIds.length; i += BATCH_SIZE) {
+      const batch = gameIds.slice(i, i + BATCH_SIZE);
+      
+      try {
+        // Use Promise.all to fetch all games in batch concurrently
+        const docPromises = batch.map(async (gameId) => {
+          try {
+            const docRef = gamesRef.doc(gameId.toString());
+            const doc = await docRef.get();
+            return doc;
+          } catch (err) {
+            console.warn(`[Game Database] Error fetching game ${gameId}:`, err);
+            return null;
+          }
+        });
+        
+        const docs = await Promise.all(docPromises);
+        let fetchedCount = 0;
+        
+        docs.forEach(doc => {
+          if (doc && doc.exists) {
+            const game = doc.data();
+            const gameId = game.id || doc.id;
+            
+            gameMap.set(gameId.toString(), {
+              id: gameId,
+              name: game.name,
+              yearPublished: game.yearPublished || '',
+              rank: game.rank || '0',
+              average: game.average || '',
+              bayesAverage: game.bayesAverage || '',
+              usersRated: game.usersRated || '',
+              thumbnail: game.thumbnail || null,
+              image: game.image || null,
+              minPlayers: game.minPlayers || null,
+              maxPlayers: game.maxPlayers || null,
+              playingTime: game.playingTime || null,
+              minAge: game.minAge || null,
+              description: game.description || null,
+              abstractsRank: game.abstractsRank || '',
+              cgsRank: game.cgsRank || '',
+              childrensGamesRank: game.childrensGamesRank || '',
+              familyGamesRank: game.familyGamesRank || '',
+              partyGamesRank: game.partyGamesRank || '',
+              strategyGamesRank: game.strategyGamesRank || '',
+              thematicRank: game.thematicRank || '',
+              wargamesRank: game.wargamesRank || '',
+              // BGG data fields for recommendations
+              mechanics: game.mechanics || null,
+              categories: game.categories || null,
+              publishers: game.publishers || null,
+              publisher: game.publisher || null,
+              averageWeight: game.averageWeight || null,
+              complexity: game.complexity || null,
+            });
+            fetchedCount++;
+          }
+        });
+        
+        // Reduced logging - only log every 5th batch or final batch
+        if (__DEV__ && (Math.floor(i / BATCH_SIZE) + 1) % 5 === 0 || i + BATCH_SIZE >= gameIds.length) {
+          console.log(`[Game Database] Batch fetched ${fetchedCount}/${batch.length} games (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
+        }
+      } catch (batchError) {
+        console.error(`[Game Database] Error in batch fetch (batch ${Math.floor(i / BATCH_SIZE) + 1}):`, batchError);
+        // Continue with next batch even if one fails
+      }
+    }
+    
+    // Reduced logging - only log summary if incomplete or in dev mode with significant batch
+    if (__DEV__ && (gameMap.size < gameIds.length * 0.9 || gameIds.length > 50)) {
+      console.log(`[Game Database] Batch fetch complete: ${gameMap.size}/${gameIds.length} games found`);
+    }
+    
+    return gameMap;
+  } catch (error) {
+    console.error('[Game Database] Error in batchGetGamesById:', error);
+    return new Map();
+  }
+}
+
+/**
  * Update game document in Firestore with BGG API data
  * This caches BGG data (thumbnails, images, descriptions, etc.) to reduce API calls
  * @param {string} gameId - BGG game ID

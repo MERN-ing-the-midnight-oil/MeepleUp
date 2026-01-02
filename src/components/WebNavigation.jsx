@@ -28,32 +28,34 @@ const WebNavigation = () => {
   ];
 
   return (
-    <nav className="navigation">
+    <nav className="navigation" role="navigation" aria-label="Main navigation">
       <div className="nav-content">
-        <div className="nav-links">
+        <ul className="nav-links">
           {navItems.map((item) => (
-            <button
-              key={item.path}
-              onClick={() => handleNavigate(item.path)}
-              className={`nav-link ${isActive(item.path) ? 'nav-link-active' : ''}`}
-            >
-              <span className="nav-link-content">
-                {item.name}
-                {item.showGear && (
-                  <>
-                    {' / '}
-                    <span className="gear-icon-wrapper">
-                      <GearIcon
-                        size={isActive(item.path) ? 18 : 14}
-                        color={isActive(item.path) ? 'var(--meeple-red)' : 'var(--text-secondary)'}
-                      />
-                    </span>
-                  </>
-                )}
-              </span>
-            </button>
+            <li key={item.path}>
+              <button
+                onClick={() => handleNavigate(item.path)}
+                className={`nav-link ${isActive(item.path) ? 'nav-link-active' : ''}`}
+                aria-current={isActive(item.path) ? 'page' : undefined}
+              >
+                <span className="nav-link-content">
+                  {item.name}
+                  {item.showGear && (
+                    <>
+                      {' / '}
+                      <span className="gear-icon-wrapper" aria-hidden="true">
+                        <GearIcon
+                          size={isActive(item.path) ? 18 : 14}
+                          color={isActive(item.path) ? 'var(--meeple-red)' : 'var(--text-secondary)'}
+                        />
+                      </span>
+                    </>
+                  )}
+                </span>
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       </div>
     </nav>
   );

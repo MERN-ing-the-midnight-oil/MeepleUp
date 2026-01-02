@@ -241,18 +241,38 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   const thumbnail = useMemo(() => {
     // First try stored thumbnail
     if (game.bggThumbnail || game.thumbnail) {
-      return game.bggThumbnail || game.thumbnail;
+      const result = game.bggThumbnail || game.thumbnail;
+      if (__DEV__) {
+        console.log('[GameCard] Using thumbnail from game object for:', game.title || game.id);
+      }
+      return result;
     }
     // Then try from preloadedBggData
     if (preloadedBggData?.thumbnail) {
+      if (__DEV__) {
+        console.log('[GameCard] Using thumbnail from preloadedBggData for:', game.title || game.id);
+      }
       return preloadedBggData.thumbnail;
     }
     // Then try thumbnailUrl (from initialization)
     if (thumbnailUrl) {
+      if (__DEV__) {
+        console.log('[GameCard] Using thumbnail from thumbnailUrl for:', game.title || game.id);
+      }
       return thumbnailUrl;
     }
+    if (__DEV__) {
+      console.log('[GameCard] ⚠️ No thumbnail found for:', game.title || game.id, {
+        hasBggThumbnail: !!game.bggThumbnail,
+        hasThumbnail: !!game.thumbnail,
+        hasPreloadedBggData: !!preloadedBggData,
+        hasThumbnailInPreloaded: !!preloadedBggData?.thumbnail,
+        hasThumbnailUrl: !!thumbnailUrl,
+        preloadedBggDataKeys: preloadedBggData ? Object.keys(preloadedBggData) : [],
+      });
+    }
     return null;
-  }, [game.bggThumbnail, game.thumbnail, preloadedBggData?.thumbnail, thumbnailUrl]);
+  }, [game.bggThumbnail, game.thumbnail, preloadedBggData?.thumbnail, thumbnailUrl, game.title, game.id]);
 
   const title = useMemo(
     () => (typeof game.title === 'string' && game.title.length > 0 ? game.title : 'Unknown Game'),

@@ -609,6 +609,198 @@ exports.sendRSVPUpdateEmail = functions.https.onRequest(async (req, res) => {
 });
 
 /**
+ * Cloud Function: Verify MeepleUp Purchase
+ * Called from the client app after a one-time purchase for creating a meepleup
+ */
+exports.verifyMeepleupPurchase = functions.https.onCall(async (data, context) => {
+  // Verify user is authenticated
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "User must be authenticated");
+  }
+
+  const {platform, productId, transactionId, transactionReceipt, userId} = data;
+
+  if (!platform || !productId || !transactionReceipt || !userId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required parameters: platform, productId, transactionReceipt, userId",
+    );
+  }
+
+  // Verify userId matches authenticated user
+  if (userId !== context.auth.uid) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "User ID does not match authenticated user",
+    );
+  }
+
+  try {
+    let verificationResult;
+
+    if (platform === "ios") {
+      // Verify iOS receipt for one-time purchase
+      verificationResult = await verifyIOSOneTimePurchase(transactionReceipt, productId);
+    } else if (platform === "android") {
+      // Verify Android one-time purchase
+      const packageName = process.env.ANDROID_PACKAGE_NAME || "com.meepleup.app";
+      verificationResult = await verifyAndroidOneTimePurchase(
+          packageName,
+          productId,
+          transactionReceipt,
+      );
+    } else {
+      throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Invalid platform. Must be \"ios\" or \"android\"",
+      );
+    }
+
+    if (!verificationResult.verified) {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Purchase verification failed",
+      );
+    }
+
+    // Store purchase record for audit trail
+    await db.collection("meepleupPurchases").add({
+      userId,
+      productId: verificationResult.productId,
+      transactionId: verificationResult.transactionId,
+      platform,
+      verified: true,
+      purchasedAt: admin.firestore.Timestamp.fromDate(verificationResult.purchasedAt || new Date()),
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+
+    return {
+      success: true,
+      purchase: {
+        productId: verificationResult.productId,
+        transactionId: verificationResult.transactionId,
+        platform,
+        verified: true,
+        purchasedAt: verificationResult.purchasedAt,
+      },
+    };
+  } catch (error) {
+    console.error("Error in verifyMeepleupPurchase:", error);
+    throw new functions.https.HttpsError(
+        "internal",
+        `Purchase verification failed: ${error.message}`,
+    );
+  }
+});
+
+/**
+ * Verify iOS one-time purchase receipt with Apple App Store
+ */
+async function verifyIOSOneTimePurchase(receiptData, productId) {
+  // For production, use: https://buy.itunes.apple.com/verifyReceipt
+  // For sandbox, use: https://sandbox.itunes.apple.com/verifyReceipt
+  const verifyURL = process.env.NODE_ENV === "production" ?
+    "https://buy.itunes.apple.com/verifyReceipt" :
+    "https://sandbox.itunes.apple.com/verifyReceipt";
+
+  const sharedSecret = process.env.APPLE_SHARED_SECRET; // Set in Firebase Functions config
+
+  try {
+    const response = await fetch(verifyURL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        "receipt-data": receiptData,
+        "password": sharedSecret,
+        "exclude-old-transactions": false, // Include all transactions for one-time purchases
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.status !== 0) {
+      // Status codes: https://developer.apple.com/documentation/appstorereceipts/status
+      throw new Error(`Apple verification failed with status: ${data.status}`);
+    }
+
+    // Find the purchase for the specific product
+    const receiptInfo = data.receipt?.in_app || [];
+    const purchase = receiptInfo
+        .filter((item) => item.product_id === productId)
+        .sort((a, b) => parseInt(b.purchase_date_ms) - parseInt(a.purchase_date_ms))[0];
+
+    if (!purchase) {
+      throw new Error("No purchase found for product");
+    }
+
+    const purchasedDate = new Date(parseInt(purchase.purchase_date_ms));
+
+    return {
+      verified: true,
+      productId: purchase.product_id,
+      transactionId: purchase.transaction_id,
+      originalTransactionId: purchase.original_transaction_id,
+      purchasedAt: purchasedDate,
+    };
+  } catch (error) {
+    console.error("Error verifying iOS one-time purchase:", error);
+    throw error;
+  }
+}
+
+/**
+ * Verify Android one-time purchase with Google Play Billing
+ */
+async function verifyAndroidOneTimePurchase(packageName, productId, purchaseToken) {
+  const {google} = require("googleapis");
+
+  // Initialize Google Play Developer API
+  const auth = new google.auth.GoogleAuth({
+    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || "./google-service-account.json",
+    scopes: ["https://www.googleapis.com/auth/androidpublisher"],
+  });
+
+  const androidpublisher = google.androidpublisher({
+    version: "v3",
+    auth,
+  });
+
+  try {
+    const response = await androidpublisher.purchases.products.get({
+      packageName,
+      productId,
+      token: purchaseToken,
+    });
+
+    const purchase = response.data;
+
+    // Check purchase state
+    // 0 = Purchased, 1 = Canceled
+    const isPurchased = purchase.purchaseState === 0;
+    
+    if (!isPurchased) {
+      throw new Error("Purchase was canceled or refunded");
+    }
+
+    const purchasedDate = purchase.purchaseTimeMillis ?
+      new Date(parseInt(purchase.purchaseTimeMillis)) :
+      new Date();
+
+    return {
+      verified: true,
+      productId: productId,
+      transactionId: purchase.orderId,
+      purchasedAt: purchasedDate,
+    };
+  } catch (error) {
+    console.error("Error verifying Android one-time purchase:", error);
+    throw error;
+  }
+}
+
+/**
  * HTTP Function: Send Direct Message Email
  * Called when a user sends a direct message
  */

@@ -13,6 +13,7 @@ import {
   FlatList,
   Pressable,
   Modal as RNModal,
+  ActivityIndicator,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -46,6 +47,7 @@ import GearIcon from '../components/GearIcon';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { LinearGradient } from 'expo-linear-gradient';
 import LogisticsCardV2 from '../components/LogisticsCardV2';
+import storage from '../utils/storage';
 
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -148,6 +150,7 @@ const EventHub = () => {
     updateContactRequest,
     contactStatus,
     leaveEvent,
+    removeMember,
     archiveEvent,
     updateMemberRSVP,
     updateEventSchedule,
@@ -163,6 +166,7 @@ const EventHub = () => {
   const [activeTab, setActiveTab] = useState(getInitialTab);
   const [addCodeBusy, setAddCodeBusy] = useState(false);
   const [deletingCodes, setDeletingCodes] = useState(new Set()); // Track which codes are being deleted
+  const [removingMembers, setRemovingMembers] = useState(new Set()); // Track which members are being removed
   const [scheduleForm, setScheduleForm] = useState({
     selectedDates: [], // Array of { date: Date, startTime: Date, endTime: Date, location: string, address: string, note: string }
     usualStartTime: null, // Optional - no default
@@ -191,11 +195,13 @@ const EventHub = () => {
   const dateEntryPositions = useRef({}); // Map of index to Y position
   const scrollPositionRef = useRef(0); // Track scroll position to prevent jumps
   const isUpdatingRSVPRef = useRef(false); // Track if RSVP update is in progress to prevent modal from closing
+  const [rsvpUpdateCounter, setRsvpUpdateCounter] = useState(0); // Counter to trigger scroll restoration on RSVP updates
   const messageRefs = useRef({}); // Map of message ID to ref for scrolling to announcements
   const discussionScrollViewRef = useRef(null); // Ref to the discussion ScrollView
   const [memberNames, setMemberNames] = useState({});
   const [memberRSVPs, setMemberRSVPs] = useState({}); // { [userId]: { [dateKey]: status } }
   const [memberAvatars, setMemberAvatars] = useState({});
+  const [loadingMemberData, setLoadingMemberData] = useState(true); // Track loading state for member data
   const memberDataFetchInProgressRef = useRef(false); // Prevent concurrent fetches
   const [pinnedNotes, setPinnedNotes] = useState('');
   const [showEditPinnedNotes, setShowEditPinnedNotes] = useState(false);
@@ -314,12 +320,12 @@ const EventHub = () => {
     console.log('[ANNOUNCEMENT] announcementForm.content changed to:', JSON.stringify(announcementForm.content), 'length:', announcementForm.content.length);
   }, [announcementForm.content]);
   
-  // Log when component re-renders
-  useEffect(() => {
-    console.log('[ANNOUNCEMENT] EventHub component rendered/re-rendered');
-    console.log('[ANNOUNCEMENT] announcementForm.content:', JSON.stringify(announcementForm.content));
-    console.log('[ANNOUNCEMENT] showAnnouncementModal:', showAnnouncementModal);
-  });
+  // Log when component re-renders (disabled to prevent excessive logging)
+  // useEffect(() => {
+  //   console.log('[ANNOUNCEMENT] EventHub component rendered/re-rendered');
+  //   console.log('[ANNOUNCEMENT] announcementForm.content:', JSON.stringify(announcementForm.content));
+  //   console.log('[ANNOUNCEMENT] showAnnouncementModal:', showAnnouncementModal);
+  // });
 
   // Render announcement modal content - NO memoization, just like DiscussionTab
   // DiscussionTab recalculates on every keystroke but Input maintains focus naturally
@@ -528,16 +534,7 @@ const EventHub = () => {
   
   useEffect(() => {
     if (eventRef.current !== event) {
-      console.log('[EventHub] ⚠️  Event object reference changed - this will cause re-render');
-      console.log('[EventHub] Event reference change details:', {
-        eventId: event?.id,
-        eventDatesCount: event?.eventDates?.length,
-        previousEventDatesCount: eventRef.current?.eventDates?.length,
-        lastUpdatedAt: event?.lastUpdatedAt,
-        previousLastUpdatedAt: eventRef.current?.lastUpdatedAt,
-        currentScheduleFormDatesCount: scheduleFormRef.current?.selectedDates?.length,
-      });
-      
+      // Reduced logging - removed event reference change logs
       // Check if scheduleForm should be preserved (if eventDates haven't actually changed)
       const eventDatesChanged = 
         event?.eventDates?.length !== eventRef.current?.eventDates?.length ||
@@ -545,8 +542,7 @@ const EventHub = () => {
         JSON.stringify(eventRef.current?.eventDates?.map(ed => ed.date));
       
       if (!eventDatesChanged && scheduleFormRef.current?.selectedDates?.length > 0) {
-        console.log('[EventHub] ⚠️  Event updated but eventDates unchanged - scheduleForm should be preserved');
-        console.log('[EventHub] Current scheduleForm has', scheduleFormRef.current.selectedDates.length, 'dates');
+        // Reduced logging - removed event update preservation logs
       }
       
       eventRef.current = event;
@@ -645,9 +641,10 @@ const EventHub = () => {
     return { futureEvents: future, pastEvents: past };
   }, [event?.eventDates, event?.scheduledFor, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
 
-  // Convert futureEvents to calendar format for CalendarDatePicker
+  // Convert all events (future + past) to calendar format for CalendarDatePicker
   const calendarDates = useMemo(() => {
-    return futureEvents.map((ed) => {
+    const allEvents = [...futureEvents, ...pastEvents];
+    return allEvents.map((ed) => {
       const date = safeParseDate(ed.date);
       const startTime = safeParseDate(ed.startTime);
       const endTime = safeParseDate(ed.endTime);
@@ -668,7 +665,7 @@ const EventHub = () => {
         note: ed.note || '',
       };
     }).filter(Boolean);
-  }, [futureEvents, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
+  }, [futureEvents, pastEvents, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
 
   // Initialize date detail form when selectedDateDetail changes
   useEffect(() => {
@@ -715,7 +712,7 @@ const EventHub = () => {
       const defaultEndTime = new Date(new Date().setHours(22, 0, 0, 0));
       
       if (event.eventDates && Array.isArray(event.eventDates)) {
-        console.log('[EventHub] Using event.eventDates array format, count:', event.eventDates.length);
+        // Reduced logging - removed format log
         // New format: array of dates with times and locations
         selectedDates = event.eventDates.map(ed => {
           const date = safeParseDate(ed.date);
@@ -730,16 +727,9 @@ const EventHub = () => {
             note: ed.note || '',
           };
         });
-        console.log('[EventHub] Parsed selectedDates from eventDates:', {
-          count: selectedDates.length,
-          dates: selectedDates.map(d => ({
-            date: d.date.toISOString(),
-            startTime: d.startTime.toISOString(),
-            endTime: d.endTime.toISOString(),
-          })),
-        });
+        // Reduced logging - removed parsed dates log
       } else if (event.scheduledFor) {
-        console.log('[EventHub] Using legacy scheduledFor format');
+        // Reduced logging - removed legacy format log
         // Old format: single date string
         try {
           const date = safeParseDate(event.scheduledFor);
@@ -752,25 +742,16 @@ const EventHub = () => {
               address: event.address || event.exactLocation || '',
               note: '',
             }];
-            console.log('[EventHub] Parsed selectedDates from scheduledFor:', {
-              count: selectedDates.length,
-              date: selectedDates[0].date.toISOString(),
-            });
+            // Reduced logging - removed parsed scheduledFor log
           }
         } catch (e) {
           console.error('[EventHub] Error parsing scheduledFor:', e);
         }
       } else {
-        console.log('[EventHub] No eventDates or scheduledFor found - initializing with empty array');
+        // Reduced logging - removed empty array log
       }
       
-      console.log('[EventHub] Setting scheduleForm state with:', {
-        selectedDatesCount: selectedDates.length,
-        usualStartTime: event.usualStartTime ? new Date(event.usualStartTime).toISOString() : 'null',
-        usualEndTime: event.usualEndTime ? new Date(event.usualEndTime).toISOString() : 'null',
-        location: event.location || event.generalLocation || '',
-        address: event.address || event.exactLocation || '',
-      });
+      // Reduced logging - removed scheduleForm state log
       
       setScheduleForm({
         selectedDates,
@@ -793,24 +774,20 @@ const EventHub = () => {
         address: event.address || event.exactLocation || '',
       });
       
-      console.log('[EventHub] ✅ scheduleForm initialization complete');
-    } else {
-      if (!event) {
-        console.log('[EventHub] No event object - skipping scheduleForm initialization');
-      } else if (!event.id) {
-        console.log('[EventHub] Event has no id - skipping scheduleForm initialization');
-      } else {
-        console.log('[EventHub] Event already initialized - skipping to prevent reset');
-      }
+      // Reduced logging - removed initialization complete log
     }
-    console.log('[EventHub] ========== scheduleForm INITIALIZATION useEffect COMPLETE ==========');
+    // Reduced logging - removed initialization complete log
   }, [event?.id]); // Only depend on event.id, not the entire event object
 
   // GamesTab-specific logic removed - will be rebuilt
 
   // Fetch member names, RSVP data, and avatars from Firestore
   useEffect(() => {
-    if (!memberIdsKey || !db || !event?.id) return;
+    if (!memberIdsKey || !db || !event?.id) {
+      // If we can't fetch (missing dependencies), mark as not loading
+      setLoadingMemberData(false);
+      return;
+    }
 
     // Prevent concurrent fetches
     if (memberDataFetchInProgressRef.current) {
@@ -820,12 +797,8 @@ const EventHub = () => {
 
     const fetchMemberData = async () => {
       memberDataFetchInProgressRef.current = true;
-      console.log('[EventHub] fetchMemberData starting', {
-        memberCount: members.length,
-        eventId: event?.id,
-        currentUserId: user?.uid || user?.id,
-        isAuthenticated: !!user,
-      });
+      setLoadingMemberData(true);
+      // Reduced logging - removed verbose fetchMemberData start log
       
       const names = {};
       const rsvps = {};
@@ -834,7 +807,7 @@ const EventHub = () => {
       for (const member of members) {
         if (!member.userId || names[member.userId]) continue;
         
-        console.log(`[EventHub] Processing member: ${member.userId}`);
+        // Reduced logging - removed per-member processing log
         
         // First check if this is the current user - use Auth context data
         if (user && member.userId === (user.uid || user.id)) {
@@ -872,51 +845,34 @@ const EventHub = () => {
           
           // Get from members subcollection (has denormalized userName and rsvpStatus)
           if (event.id) {
-            console.log(`[EventHub] Fetching member document: gamingGroups/${event.id}/members/${member.userId}`);
+            // Reduced logging - removed member document fetch log
             try {
               const memberDoc = await db.collection('gamingGroups').doc(event.id)
                 .collection('members').doc(member.userId).get();
               
-              console.log(`[EventHub] Member document fetch result for ${member.userId}:`, {
-                exists: memberDoc.exists,
-                hasData: !!memberDoc.data(),
-              });
+              // Reduced logging - removed member document fetch result log
               
               if (memberDoc.exists) {
                 const memberData = memberDoc.data();
-                console.log(`[EventHub] Member document data for ${member.userId}:`, {
-                  hasUserName: !!memberData.userName,
-                  hasUserAvatarUrl: !!memberData.userAvatarUrl,
-                  hasRsvpStatus: !!memberData.rsvpStatus,
-                  hasRsvpStatuses: !!memberData.rsvpStatuses,
-                  userName: memberData.userName,
-                  userAvatarUrl: memberData.userAvatarUrl ? memberData.userAvatarUrl.substring(0, 50) + '...' : null,
-                });
+                // Reduced logging - removed verbose member document data logs
                 
                 if (memberData.userName) {
                   names[member.userId] = memberData.userName;
-                  console.log(`[EventHub] Set name from member doc for ${member.userId}: ${memberData.userName}`);
                 }
                 // Support both old format (rsvpStatus) and new format (rsvpStatuses)
                 if (memberData.rsvpStatuses && typeof memberData.rsvpStatuses === 'object' && memberData.rsvpStatuses.constructor === Object) {
                   // Normal format: object with date keys
                   rsvps[member.userId] = memberData.rsvpStatuses;
-                  console.log(`[EventHub] Set RSVP statuses for ${member.userId}:`, memberData.rsvpStatuses);
                 } else if (memberData.rsvpStatus && typeof memberData.rsvpStatus === 'string') {
                   // Backward compatibility: convert single status to date-specific
                   rsvps[member.userId] = { default: memberData.rsvpStatus };
-                  console.log(`[EventHub] Set RSVP status (legacy) for ${member.userId}: ${memberData.rsvpStatus}`);
                 } else {
                   // No valid RSVP data found
                   rsvps[member.userId] = {};
-                  console.log(`[EventHub] No valid RSVP data for ${member.userId}, setting empty object`);
                 }
                 if (memberData.userAvatarUrl && memberData.userAvatarUrl.trim() !== '') {
                   avatars[member.userId] = memberData.userAvatarUrl;
                   avatarFound = true;
-                  console.log(`[EventHub] Found avatar in member doc for ${member.userId}`);
-                } else {
-                  console.log(`[EventHub] No avatar URL in member doc for ${member.userId}`);
                 }
               } else {
                 console.warn(`[EventHub] Member document does not exist for ${member.userId} in group ${event.id}`);
@@ -1024,7 +980,7 @@ const EventHub = () => {
               }
             }
           } else {
-            console.log(`[EventHub] Skipping users collection fetch for ${member.userId} - already have name and avatar`);
+            // Reduced logging - removed skip log
           }
         } catch (error) {
           console.error(`Error fetching data for user ${member.userId}:`, error);
@@ -1033,18 +989,7 @@ const EventHub = () => {
         }
       }
       
-      console.log('[EventHub] fetchMemberData complete', {
-        namesCount: Object.keys(names).length,
-        rsvpsCount: Object.keys(rsvps).length,
-        avatarsCount: Object.keys(avatars).length,
-        userIds: Object.keys(names),
-        names: names,
-        avatars: Object.keys(avatars).reduce((acc, userId) => {
-          acc[userId] = avatars[userId] ? `found (${avatars[userId].substring(0, 30)}...)` : 'not found';
-          return acc;
-        }, {}),
-        rsvps: rsvps,
-      });
+      // Reduced logging - removed verbose fetchMemberData complete log
       // Only update memberNames if it actually changed
       setMemberNames(prev => {
         const safePrev = prev || {};
@@ -1068,7 +1013,7 @@ const EventHub = () => {
         if (prevKey === newKey) {
           return safePrev; // No change, return previous object
         }
-        console.log('[EventHub] memberRSVPs updated, total count:', Object.keys(updated).length);
+        // Reduced logging - removed memberRSVPs update log
         return updated;
       });
       
@@ -1085,11 +1030,13 @@ const EventHub = () => {
       });
       
       memberDataFetchInProgressRef.current = false; // Release lock
+      setLoadingMemberData(false); // Mark loading as complete
     };
 
     fetchMemberData().catch((error) => {
       console.error('[EventHub] Error in fetchMemberData:', error);
       memberDataFetchInProgressRef.current = false; // Ensure lock is released even on error
+      setLoadingMemberData(false); // Mark loading as complete even on error
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memberIdsKey, event?.id, user?.uid, user?.id]);
@@ -1098,14 +1045,14 @@ const EventHub = () => {
   useEffect(() => {
     if (!event?.id || !db || !members.length) return;
 
-    console.log('[EventHub] Setting up members RSVP listener for event:', event.id);
+    // Reduced logging - removed RSVP listener setup log
 
     const membersRef = db.collection('gamingGroups').doc(event.id).collection('members');
     
     // Set up real-time listener for all member documents
     const unsubscribe = membersRef.onSnapshot(
       (snapshot) => {
-        console.log('[EventHub] Members RSVP snapshot received, size:', snapshot.size);
+        // Reduced logging - removed RSVP snapshot log
         
         const rsvps = {};
         snapshot.forEach((doc) => {
@@ -1115,11 +1062,11 @@ const EventHub = () => {
           // Process RSVP data for this member
           if (memberData.rsvpStatuses && typeof memberData.rsvpStatuses === 'object' && memberData.rsvpStatuses.constructor === Object) {
             rsvps[memberUserId] = memberData.rsvpStatuses;
-            console.log(`[EventHub] Updated RSVP statuses for ${memberUserId}:`, Object.keys(memberData.rsvpStatuses).length, 'dates');
+            // Reduced logging - removed per-member RSVP update log
           } else if (memberData.rsvpStatus && typeof memberData.rsvpStatus === 'string') {
             // Backward compatibility: convert single status to date-specific
             rsvps[memberUserId] = { default: memberData.rsvpStatus };
-            console.log(`[EventHub] Updated RSVP status (legacy) for ${memberUserId}: ${memberData.rsvpStatus}`);
+            // Reduced logging - removed legacy RSVP update log
           } else {
             rsvps[memberUserId] = {};
           }
@@ -1131,7 +1078,7 @@ const EventHub = () => {
           Object.keys(rsvps).forEach(userId => {
             updated[userId] = rsvps[userId];
           });
-          console.log('[EventHub] Updated memberRSVPs from listener, total members:', Object.keys(updated).length);
+          // Reduced logging - removed memberRSVPs update log
           return updated;
         });
       },
@@ -1141,7 +1088,7 @@ const EventHub = () => {
     );
 
     return () => {
-      console.log('[EventHub] Cleaning up members RSVP listener');
+      // Reduced logging - removed cleanup log
       unsubscribe();
     };
   }, [event?.id, db, members.length]);
@@ -1245,6 +1192,9 @@ const EventHub = () => {
       return; // No change, exit early to prevent unnecessary updates
     }
 
+    // Set flag before state updates to ensure useLayoutEffect can detect it
+    isUpdatingRSVPRef.current = true;
+
     // Optimistically update local state immediately
     setMemberRSVPs(prev => {
       const userRSVPs = prev[userId] || {};
@@ -1258,20 +1208,10 @@ const EventHub = () => {
       };
     });
 
-    // Restore scroll position after React has painted the update
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (scheduleScrollRef.current && savedScroll > 0) {
-          scheduleScrollRef.current.scrollTo({
-            y: savedScroll,
-            animated: false,
-          });
-        }
-      });
-    });
+    // Increment counter to trigger useLayoutEffect for scroll restoration
+    setRsvpUpdateCounter(prev => prev + 1);
 
     // Update context asynchronously
-    isUpdatingRSVPRef.current = true;
     try {
       await updateMemberRSVP(event.id, userId, status, eventDate);
     } catch (error) {
@@ -1869,6 +1809,22 @@ const EventHub = () => {
     }
   }, [scheduleForm.selectedDates.length]);
 
+  // useLayoutEffect to preserve scroll position when RSVP updates occur
+  // This runs synchronously before browser paint, preventing visible jumps
+  useLayoutEffect(() => {
+    // Only restore scroll if we're in the middle of an RSVP update
+    if (isUpdatingRSVPRef.current && rsvpUpdateCounter > 0) {
+      const savedScroll = scrollPositionRef.current;
+      if (scheduleScrollRef.current && savedScroll > 0) {
+        // Restore synchronously before paint to prevent visible jump
+        scheduleScrollRef.current.scrollTo({
+          y: savedScroll,
+          animated: false,
+        });
+      }
+    }
+  }, [rsvpUpdateCounter]);
+
   const handleTimeChange = (event, date, type, dateIndex) => {
     if (Platform.OS === 'android') {
       setShowTimePicker({ type: null, dateIndex: null });
@@ -1992,6 +1948,55 @@ const EventHub = () => {
         console.error('Error sharing invite:', error);
       }
     }
+  };
+
+  const handleRemoveMember = async (memberUserId, memberName) => {
+    if (!event?.id) return;
+
+    // Prevent removing the organizer
+    if (memberUserId === event.organizerId) {
+      Alert.alert('Cannot remove', 'The organizer cannot be removed from the MeepleUp.');
+      return;
+    }
+
+    // Prevent removing yourself
+    const currentUserId = user?.uid || user?.id;
+    if (memberUserId === currentUserId) {
+      Alert.alert('Cannot remove', 'Please use "Leave MeepleUp" to remove yourself.');
+      return;
+    }
+
+    Alert.alert(
+      'Remove member?',
+      `Remove ${memberName || 'this member'} from "${event.name}"? They will no longer have access to this MeepleUp.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setRemovingMembers((prev) => new Set(prev).add(memberUserId));
+              await removeMember(event.id, memberUserId);
+              Alert.alert('Success', `${memberName || 'Member'} has been removed from the MeepleUp.`);
+            } catch (error) {
+              console.error('Error removing member:', error);
+              Alert.alert(
+                'Error',
+                error.message || 'Failed to remove member. Please try again.',
+              );
+            } finally {
+              setRemovingMembers((prev) => {
+                const next = new Set(prev);
+                next.delete(memberUserId);
+                return next;
+              });
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   const handleDeleteJoinCode = (codeToDelete) => {
@@ -2348,6 +2353,136 @@ const EventHub = () => {
     }
   };
 
+  // Handler for calendar date changes (add/remove dates via long press)
+  const handleCalendarDatesChange = useCallback(async (newSelectedDates) => {
+    if (!isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers and co-organizers can add or remove dates.');
+      return;
+    }
+
+    try {
+      const currentEventDates = event?.eventDates || [];
+      const oldLength = currentEventDates.length;
+      
+      // Convert CalendarDatePicker format to eventDates format
+      const updatedEventDates = newSelectedDates.map((dateObj) => {
+        const date = dateObj.date instanceof Date ? dateObj.date : new Date(dateObj.date);
+        const startTime = dateObj.startTime instanceof Date ? dateObj.startTime : new Date(dateObj.startTime);
+        const endTime = dateObj.endTime instanceof Date ? dateObj.endTime : new Date(dateObj.endTime);
+        const dateKey = getDateKey(date);
+        
+        // Get existing date data if it exists (to preserve location, address, note)
+        const existingEventDate = currentEventDates.find(ed => {
+          const edDate = safeParseDate(ed.date);
+          return edDate && getDateKey(edDate) === dateKey;
+        });
+        
+        return {
+          date: date.toISOString(),
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString(),
+          location: existingEventDate?.location || existingEventDate?.generalLocation || event?.location || event?.generalLocation || '',
+          address: existingEventDate?.address || existingEventDate?.exactLocation || event?.address || event?.exactLocation || '',
+          note: existingEventDate?.note || '',
+        };
+      });
+
+      await updateEventSchedule(event.id, {
+        eventDates: updatedEventDates,
+      });
+
+      // Create a Tabletalk message about the date change
+      if (db && event?.id) {
+        try {
+          const postsRef = db.collection('gamingGroups').doc(event.id).collection('posts');
+          const userName = user?.name || user?.email || 'The host';
+          const newLength = updatedEventDates.length;
+          
+          let messageContent = '';
+          if (newLength > oldLength) {
+            // Date was added - find which date was added
+            const addedDate = updatedEventDates.find(ed => {
+              const edDate = safeParseDate(ed.date);
+              return !currentEventDates.some(ced => {
+                const cedDate = safeParseDate(ced.date);
+                return cedDate && edDate && getDateKey(cedDate) === getDateKey(edDate);
+              });
+            });
+            
+            if (addedDate) {
+              const date = safeParseDate(addedDate.date);
+              const dateStr = formatDate(date.toISOString());
+              messageContent = `${userName} added a new event date: ${dateStr}`;
+            } else {
+              messageContent = `${userName} added a new event date.`;
+            }
+          } else if (newLength < oldLength) {
+            // Date was removed - find which date was removed
+            const removedDate = currentEventDates.find(ced => {
+              const cedDate = safeParseDate(ced.date);
+              return !updatedEventDates.some(ed => {
+                const edDate = safeParseDate(ed.date);
+                return edDate && cedDate && getDateKey(edDate) === getDateKey(cedDate);
+              });
+            });
+            
+            if (removedDate) {
+              const date = safeParseDate(removedDate.date);
+              const dateStr = formatDate(date.toISOString());
+              messageContent = `${userName} removed the event date: ${dateStr}`;
+            } else {
+              messageContent = `${userName} removed an event date.`;
+            }
+          }
+          
+          if (messageContent) {
+            const postData = {
+              userId,
+              userName,
+              userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
+              content: messageContent,
+              photoUrl: null,
+              likeCount: 0,
+              commentCount: 0,
+              createdAt: firebase.firestore.Timestamp.now(),
+              updatedAt: firebase.firestore.Timestamp.now(),
+              edited: false,
+              deleted: false,
+              pinned: false,
+            };
+            
+            await postsRef.add(postData);
+            
+            // Notify members about the date change
+            try {
+              await notifyDiscussionActivity(event.id, userId, {
+                type: 'new_post',
+                fromUserName: userName,
+                message: messageContent,
+              });
+            } catch (notifError) {
+              console.error('Error sending date change notification:', notifError);
+            }
+          }
+        } catch (postError) {
+          console.error('Error creating Tabletalk message for date change:', postError);
+          // Don't fail the whole operation if post creation fails
+        }
+      }
+
+      // Show feedback for add/remove
+      const newLength = updatedEventDates.length;
+      if (newLength > oldLength) {
+        Alert.alert('Success', 'Date added successfully.');
+      } else if (newLength < oldLength) {
+        Alert.alert('Success', 'Date removed successfully.');
+      }
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to update dates. Please try again.');
+      console.error(error);
+    }
+  }, [isOrganizerOrCoOrganizer, event, updateEventSchedule, db, userId, user]);
+
   // Helper to schedule delayed notification for announcement edits
   const scheduleAnnouncementNotification = useCallback((announcementId, isNew = false) => {
     // Clear any existing timer for this announcement
@@ -2618,6 +2753,20 @@ const EventHub = () => {
       );
     }
     
+    // Show spinner while member data is loading
+    const isLoading = loadingMemberData;
+    
+    if (isLoading) {
+      return (
+        <View style={[styles.tabContent, { justifyContent: 'center', alignItems: 'center', flex: 1 }]}>
+          <ActivityIndicator size="large" color={theme.colors.meepleRed} />
+          <Text style={{ marginTop: 16, color: theme.colors.textSecondary }}>
+            Loading logistics...
+          </Text>
+        </View>
+      );
+    }
+    
     return (
       <>
       <ScrollView 
@@ -2668,6 +2817,61 @@ const EventHub = () => {
                   </View>
                 );
               })}
+            </View>
+          </View>
+        )}
+
+        {/* Manage Members Section - Only for Organizers */}
+        {isOrganizerOrCoOrganizer && event?.members && event.members.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>👥 Manage Members</Text>
+            </View>
+            <View style={styles.membersListContainer}>
+              {event.members
+                .filter((member) => {
+                  // Don't show the organizer in the list (they can't be removed)
+                  return member.userId !== event.organizerId;
+                })
+                .map((member) => {
+                  const memberName = memberNames[member.userId] || member.userName || 'Unknown Member';
+                  const memberAvatar = memberAvatars[member.userId] || member.userAvatarUrl || null;
+                  const isRemoving = removingMembers.has(member.userId);
+                  
+                  return (
+                    <View key={member.userId} style={styles.memberRow}>
+                      <View style={styles.memberInfo}>
+                        {memberAvatar ? (
+                          <Image source={{ uri: memberAvatar }} style={styles.memberAvatar} />
+                        ) : (
+                          <View style={styles.memberAvatarPlaceholder}>
+                            <Text style={styles.memberAvatarText}>
+                              {memberName.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                        <View style={styles.memberDetails}>
+                          <Text style={styles.memberName}>{memberName}</Text>
+                          {member.role === memberRoles?.ORGANIZER && (
+                            <Text style={styles.memberRole}>Co-organizer</Text>
+                          )}
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.removeMemberButton, isRemoving && styles.removeMemberButtonDisabled]}
+                        onPress={() => handleRemoveMember(member.userId, memberName)}
+                        disabled={isRemoving}
+                      >
+                        <Text style={[styles.removeMemberText, isRemoving && styles.removeMemberTextDisabled]}>
+                          {isRemoving ? 'Removing...' : 'Remove'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              {event.members.filter((m) => m.userId !== event.organizerId).length === 0 && (
+                <Text style={styles.emptyMembersText}>No other members to manage</Text>
+              )}
             </View>
           </View>
         )}
@@ -2871,7 +3075,7 @@ const EventHub = () => {
 
         {/* Old Date Cards Section - REMOVED - Using LogisticsCardV2 instead */}
           
-          {/* Logistics Card Version 2 - Separate component */}
+          {/* Upcoming events - Separate component */}
           <LogisticsCardV2
             futureEvents={futureEvents}
             eventId={event?.id}
@@ -2965,11 +3169,758 @@ const EventHub = () => {
           })}
         </ScrollView>
       </Modal>
+
+      {/* Calendar View Modal */}
+      <Modal
+        isOpen={showCalendarModal}
+        onClose={() => setShowCalendarModal(false)}
+        title="📅 Calendar View"
+      >
+        <View style={styles.calendarModalContent}>
+          <CalendarDatePicker
+            selectedDates={calendarDates}
+            onDatesChange={handleCalendarDatesChange}
+            usualStartTime={event?.usualStartTime ? new Date(event.usualStartTime) : null}
+            usualEndTime={event?.usualEndTime ? new Date(event.usualEndTime) : null}
+            readOnly={!isOrganizerOrCoOrganizer}
+            onDatePress={(dateIndex, dateInfo) => {
+              // Find the corresponding date in calendarDates by matching the date
+              const dateKey = getDateKey(dateInfo.date);
+              const calendarDate = calendarDates.find(cd => {
+                const cdDate = cd.date instanceof Date ? cd.date : new Date(cd.date);
+                return getDateKey(cdDate) === dateKey;
+              });
+              
+              if (calendarDate && calendarDate.originalIndex !== undefined) {
+                const eventDateObj = event?.eventDates?.[calendarDate.originalIndex];
+                if (eventDateObj) {
+                  setSelectedDateDetail({
+                    date: dateInfo.date,
+                    startTime: dateInfo.startTime,
+                    endTime: dateInfo.endTime,
+                    location: eventDateObj.location || eventDateObj.generalLocation || event?.location || event?.generalLocation || '',
+                    address: eventDateObj.address || eventDateObj.exactLocation || event?.address || event?.exactLocation || '',
+                    note: eventDateObj.note || '',
+                    index: calendarDate.originalIndex,
+                    isEditScheduleContext: false,
+                  });
+                  setShowDateDetailModal(true);
+                }
+              }
+            }}
+            memberRSVPs={memberRSVPs}
+            currentUserId={userId}
+          />
+        </View>
+      </Modal>
     </>
   );
 };
 
-  return <EventTab />;
+  // Find the next chronological event date where user has RSVP'd "going"
+  const findNextGoingDateIndex = () => {
+    if (!event?.eventDates || !userId || !memberRSVPs[userId]) {
+      return null; // Return null if no RSVP data, so we can handle it appropriately
+    }
+
+    const userRSVPs = memberRSVPs[userId];
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    // Create array of dates with their indices, sorted chronologically
+    const datesWithIndices = event.eventDates
+      .map((eventDate, index) => {
+        const date = safeParseDate(eventDate.date);
+        if (!date || isNaN(date.getTime())) return null;
+        const dateKey = getDateKey(date);
+        const rsvpStatus = userRSVPs[dateKey];
+        return { index, date, dateKey, rsvpStatus };
+      })
+      .filter(item => item !== null && item.date >= now) // Only future dates
+      .sort((a, b) => a.date.getTime() - b.date.getTime()); // Sort chronologically
+
+    // Find the first date where user RSVP'd "going"
+    const goingDate = datesWithIndices.find(item => item.rsvpStatus === 'going');
+    
+    return goingDate ? goingDate.index : null; // Return the index, or null if no going date found
+  };
+
+  // Navigate to BrowseAndProposeScreen for full game planning functionality
+  const handleNavigateToGameplan = () => {
+    const dateIndex = findNextGoingDateIndex();
+    
+    // If no date found where user RSVP'd "going", don't navigate
+    if (dateIndex === null) {
+      // Just show the GamesTab instead
+      setActiveTab(TABS.GAMES);
+      return;
+    }
+    
+    if (Platform.OS === 'web') {
+      if (navigate) {
+        navigate(`/event/${eventId}/browse/${dateIndex}`);
+      } else if (typeof window !== 'undefined') {
+        window.location.href = `/event/${eventId}/browse/${dateIndex}`;
+      }
+    } else {
+      if (navigation) {
+        navigation.navigate('BrowseAndPropose', { eventId, dateIndex });
+      }
+    }
+  };
+
+  // GamesTab component - shows proposed games and game planning
+  const GamesTab = () => {
+    const [showGameplanMessage, setShowGameplanMessage] = useState(true);
+
+    // Load dismissal state from storage on mount
+    useEffect(() => {
+      const loadDismissalState = async () => {
+        try {
+          const dismissed = await storage.getItem('gameplan_message_dismissed');
+          if (dismissed === 'true') {
+            setShowGameplanMessage(false);
+          }
+        } catch (error) {
+          console.error('Error loading gameplan message dismissal state:', error);
+        }
+      };
+      loadDismissalState();
+    }, []);
+
+    if (!event) {
+      return (
+        <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
+          <View style={styles.section}>
+            <Text>Loading event...</Text>
+          </View>
+        </ScrollView>
+      );
+    }
+
+    // Navigate to BrowseAndProposeScreen for full game planning functionality
+    const handleNavigateToGameplanLocal = () => {
+      const dateIndex = findNextGoingDateIndex();
+      
+      if (dateIndex === null) {
+        // If no date found where user RSVP'd "going", just show a message
+        Alert.alert(
+          'No Upcoming Dates',
+          'You need to RSVP "Going" to at least one upcoming event date to access the gameplan.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      if (Platform.OS === 'web') {
+        if (navigate) {
+          navigate(`/event/${eventId}/browse/${dateIndex}`);
+        } else if (typeof window !== 'undefined') {
+          window.location.href = `/event/${eventId}/browse/${dateIndex}`;
+        }
+      } else {
+        if (navigation) {
+          navigation.navigate('BrowseAndPropose', { eventId, dateIndex });
+        }
+      }
+    };
+
+    // Handle "Got it" button click - dismiss the message if first time, otherwise navigate
+    const handleGotIt = async () => {
+      if (showGameplanMessage) {
+        // First time - dismiss the message
+        try {
+          await storage.setItem('gameplan_message_dismissed', 'true');
+          setShowGameplanMessage(false);
+        } catch (error) {
+          console.error('Error saving gameplan message dismissal state:', error);
+          // Still hide the message even if storage fails
+          setShowGameplanMessage(false);
+        }
+      } else {
+        // Already dismissed - navigate to gameplan
+        handleNavigateToGameplanLocal();
+      }
+    };
+
+    return (
+      <ScrollView style={styles.tabContent} contentContainerStyle={styles.tabContentContainer}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Gameplan</Text>
+          <Text style={styles.sectionCopy}>
+            Plan which games to play at your event. Browse collections, propose games, and see what others are bringing.
+          </Text>
+          <Button
+            label="Got it."
+            onPress={handleGotIt}
+            style={styles.planningGamesLink}
+            textStyle={styles.planningGamesLinkText}
+          />
+        </View>
+      </ScrollView>
+    );
+  };
+
+  // DiscussionTab component - shows posts, announcements, and messages
+  const DiscussionTab = () => {
+    const [posts, setPosts] = useState([]);
+    const [loadingPosts, setLoadingPosts] = useState(true);
+    const [newPostContent, setNewPostContent] = useState('');
+    const [newPostPhoto, setNewPostPhoto] = useState(null); // { uri: string, uploading: boolean }
+    const [creatingPost, setCreatingPost] = useState(false);
+
+    // Fetch posts from Firestore
+    useEffect(() => {
+      if (!event?.id || !db) {
+        setLoadingPosts(false);
+        return;
+      }
+
+      setLoadingPosts(true);
+      const postsRef = db.collection('gamingGroups').doc(event.id).collection('posts')
+        .orderBy('createdAt', 'desc')
+        .limit(50);
+
+      const unsubscribe = postsRef.onSnapshot(
+        (snapshot) => {
+          const postsData = snapshot.docs
+            .map(doc => ({
+              id: doc.id,
+              ...doc.data(),
+            }))
+            .filter(post => post.deleted !== true); // Filter out deleted posts (but include posts without deleted field)
+          setPosts(postsData);
+          setLoadingPosts(false);
+        },
+        (error) => {
+          console.error('Error fetching posts:', error);
+          setLoadingPosts(false);
+        }
+      );
+
+      return () => unsubscribe();
+    }, [event?.id, db]);
+
+    // Fetch comments for all posts
+    // Use a ref to track which posts we've subscribed to, and only subscribe to new ones
+    const subscribedPostIdsRef = useRef(new Set());
+    const unsubscribeRefsRef = useRef({}); // { postId: unsubscribe function }
+    
+    useEffect(() => {
+      if (!event?.id || !db || posts.length === 0) {
+        // Clean up all subscriptions if event/db is not available
+        Object.values(unsubscribeRefsRef.current).forEach(unsubscribe => unsubscribe());
+        unsubscribeRefsRef.current = {};
+        subscribedPostIdsRef.current.clear();
+        return;
+      }
+
+      const currentPostIds = new Set(posts.map(p => p.id));
+      
+      // Unsubscribe from posts that no longer exist
+      subscribedPostIdsRef.current.forEach(postId => {
+        if (!currentPostIds.has(postId)) {
+          if (unsubscribeRefsRef.current[postId]) {
+            unsubscribeRefsRef.current[postId]();
+            delete unsubscribeRefsRef.current[postId];
+          }
+          subscribedPostIdsRef.current.delete(postId);
+        }
+      });
+      
+      // Subscribe to new posts
+      posts.forEach(post => {
+        if (!subscribedPostIdsRef.current.has(post.id)) {
+          const commentsRef = db.collection('gamingGroups').doc(event.id)
+            .collection('posts').doc(post.id)
+            .collection('comments')
+            .orderBy('createdAt', 'asc');
+
+          const unsubscribe = commentsRef.onSnapshot(
+            (snapshot) => {
+              const commentsData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+              })).filter(comment => comment.deleted !== true);
+
+              setCommentsByPost(prev => ({
+                ...prev,
+                [post.id]: commentsData,
+              }));
+            },
+            (error) => {
+              console.error(`Error fetching comments for post ${post.id}:`, error);
+            }
+          );
+          
+          unsubscribeRefsRef.current[post.id] = unsubscribe;
+          subscribedPostIdsRef.current.add(post.id);
+        }
+      });
+
+      // Cleanup function
+      return () => {
+        Object.values(unsubscribeRefsRef.current).forEach(unsubscribe => unsubscribe());
+        unsubscribeRefsRef.current = {};
+        subscribedPostIdsRef.current.clear();
+      };
+    }, [event?.id, db, posts.map(p => p.id).sort().join(',')]);
+
+    // Create new post (thread)
+    const handleCreatePost = async () => {
+      if (!newPostContent.trim() && !newPostPhoto?.uri) {
+        Alert.alert('Error', 'Please add text or a photo to your post.');
+        return;
+      }
+
+      if (!event?.id || !db || !userId) return;
+
+      setCreatingPost(true);
+      try {
+        let photoUrl = null;
+        if (newPostPhoto?.uri && !newPostPhoto.uploading) {
+          photoUrl = newPostPhoto.uri;
+        }
+
+        const postsRef = db.collection('gamingGroups').doc(event.id).collection('posts');
+        const postData = {
+          userId,
+          userName: user?.name || user?.email || 'Unknown',
+          userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
+          content: newPostContent.trim() || '',
+          photoUrl: photoUrl,
+          likeCount: 0,
+          commentCount: 0,
+          createdAt: firebase.firestore.Timestamp.now(),
+          updatedAt: firebase.firestore.Timestamp.now(),
+          edited: false,
+          deleted: false,
+          pinned: false,
+        };
+
+        await postsRef.add(postData);
+
+        // Notify members about new post
+        try {
+          await notifyDiscussionActivity(event.id, userId, {
+            type: 'new_post',
+            fromUserName: user?.name || user?.email || 'Unknown',
+            message: `${user?.name || 'A member'} posted in Tabletalk`,
+          });
+        } catch (notifError) {
+          console.error('Error sending post notification:', notifError);
+        }
+
+        // Reset form
+        setNewPostContent('');
+        setNewPostPhoto(null);
+      } catch (error) {
+        console.error('Error creating post:', error);
+        Alert.alert('Error', 'Failed to create post. Please try again.');
+      } finally {
+        setCreatingPost(false);
+      }
+    };
+
+    // Handle reply to post or comment
+    const handleReply = async () => {
+      if (!replyText.trim()) {
+        Alert.alert('Error', 'Please enter a comment.');
+        return;
+      }
+
+      if (!event?.id || !db || !userId || !replyingTo) return;
+
+      try {
+        const commentsRef = db.collection('gamingGroups').doc(event.id)
+          .collection('posts').doc(replyingTo.postId)
+          .collection('comments');
+
+        const commentData = {
+          userId,
+          userName: user?.name || user?.email || 'Unknown',
+          userAvatarUrl: user?.photoURL || user?.avatarUrl || null,
+          content: replyText.trim(),
+          createdAt: firebase.firestore.Timestamp.now(),
+          updatedAt: firebase.firestore.Timestamp.now(),
+          edited: false,
+          deleted: false,
+          parentType: replyingTo.type, // 'post' or 'comment'
+          parentId: replyingTo.id,
+        };
+
+        await commentsRef.add(commentData);
+
+        // Update comment count on the post
+        const postRef = db.collection('gamingGroups').doc(event.id)
+          .collection('posts').doc(replyingTo.postId);
+        const postDoc = await postRef.get();
+        const currentCount = postDoc.data()?.commentCount || 0;
+        await postRef.update({
+          commentCount: currentCount + 1,
+        });
+
+        // Reset reply state
+        setReplyingTo(null);
+        setReplyText('');
+
+        // Notify post author
+        try {
+          const postDoc = await postRef.get();
+          const postData = postDoc.data();
+          if (postData?.userId && postData.userId !== userId) {
+            const preferences = await getUserNotificationPreferences(postData.userId);
+            if (isNotificationEnabled(preferences, 'discussion')) {
+              await createNotification(postData.userId, {
+                type: 'new_comment',
+                groupId: event.id,
+                postId: replyingTo.postId,
+                fromUserId: userId,
+                fromUserName: user?.name || user?.email || 'Unknown',
+                message: `${user?.name || 'Someone'} commented on your post`,
+              });
+            }
+          }
+        } catch (notifError) {
+          console.error('Error sending comment notification:', notifError);
+        }
+      } catch (error) {
+        console.error('Error creating comment:', error);
+        Alert.alert('Error', 'Failed to post comment. Please try again.');
+      }
+    };
+
+    if (!event) {
+      return (
+        <ScrollView 
+          ref={discussionScrollViewRef}
+          style={styles.tabContent} 
+          contentContainerStyle={[styles.tabContentContainer, styles.discussionScrollContent]}
+        >
+          <View style={styles.section}>
+            <Text>Loading event...</Text>
+          </View>
+        </ScrollView>
+      );
+    }
+
+    return (
+      <ScrollView 
+        ref={discussionScrollViewRef}
+        style={styles.tabContent} 
+        contentContainerStyle={[styles.tabContentContainer, styles.discussionScrollContent]}
+      >
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Tabletalk</Text>
+          <Text style={styles.sectionCopy}>
+            Share announcements, discuss plans, and chat with your group.
+          </Text>
+        </View>
+
+        {/* New Post Form */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Create a new post</Text>
+          <Input
+            value={newPostContent}
+            onChangeText={setNewPostContent}
+            placeholder="What's on your mind?"
+            multiline
+            numberOfLines={4}
+            style={{ marginBottom: 12 }}
+          />
+          {newPostPhoto && (
+            <View style={{ marginBottom: 12, position: 'relative' }}>
+              <Image 
+                source={{ uri: newPostPhoto.uri }} 
+                style={{ width: '100%', height: 200, borderRadius: 8 }}
+                resizeMode="cover"
+              />
+              <TouchableOpacity
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  backgroundColor: 'rgba(0,0,0,0.6)',
+                  borderRadius: 15,
+                  width: 30,
+                  height: 30,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+                onPress={() => setNewPostPhoto(null)}
+              >
+                <Text style={{ color: 'white', fontSize: 18 }}>×</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+            <Button
+              label={newPostPhoto ? "📷 Change Photo" : "📷 Add Photo"}
+              onPress={async () => {
+                try {
+                  const photo = await pickAndUploadImage(userId, event.id);
+                  if (photo) {
+                    setNewPostPhoto({ uri: photo, uploading: false });
+                  }
+                } catch (error) {
+                  console.error('Error picking photo:', error);
+                  Alert.alert('Error', 'Failed to pick photo. Please try again.');
+                }
+              }}
+              variant="secondary"
+              style={{ flex: 1 }}
+            />
+            <Button
+              label={creatingPost ? "Posting..." : "Post"}
+              onPress={handleCreatePost}
+              variant="primary"
+              style={{ flex: 1 }}
+              disabled={creatingPost || (!newPostContent.trim() && !newPostPhoto)}
+            />
+          </View>
+        </View>
+
+        {loadingPosts ? (
+          <View style={styles.section}>
+            <Text>Loading messages...</Text>
+          </View>
+        ) : posts.length === 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionCopy}>No messages yet. Be the first to post!</Text>
+          </View>
+        ) : (
+          posts.map((post) => {
+            const postComments = commentsByPost[post.id] || [];
+            const isReplyingToThisPost = replyingTo?.postId === post.id && replyingTo?.type === 'post' && replyingTo?.id === post.id;
+            
+            return (
+              <View key={post.id} style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>{post.userName || 'Unknown'}</Text>
+                  {post.createdAt && (
+                    <Text style={styles.sectionCopy}>
+                      {post.createdAt.toDate ? formatDate(post.createdAt.toDate().toISOString()) : formatDate(post.createdAt)}
+                    </Text>
+                  )}
+                </View>
+                {post.content && (
+                  <Text style={styles.sectionCopy}>{post.content}</Text>
+                )}
+                {post.photoUrl && (
+                  <Image 
+                    source={{ uri: post.photoUrl }} 
+                    style={{ width: '100%', height: 200, borderRadius: 8, marginTop: 8 }}
+                    resizeMode="cover"
+                  />
+                )}
+                {post.isAnnouncement && (
+                  <Text style={[styles.sectionCopy, { color: theme.colors.meepleRed, fontWeight: 'bold', marginTop: 4 }]}>
+                    📢 Announcement
+                  </Text>
+                )}
+                {post.edited && (
+                  <Text style={[styles.sectionCopy, { fontSize: 11, color: theme.colors.textSecondary, fontStyle: 'italic', marginTop: 4 }]}>
+                    (edited)
+                  </Text>
+                )}
+
+                {/* Comments Count and Reply Button */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 16 }}>
+                  {post.commentCount > 0 && (
+                    <Text style={[styles.sectionCopy, { fontSize: 13, color: theme.colors.textSecondary }]}>
+                      {post.commentCount} {post.commentCount === 1 ? 'comment' : 'comments'}
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (isReplyingToThisPost) {
+                        setReplyingTo(null);
+                        setReplyText('');
+                      } else {
+                        setReplyingTo({ type: 'post', id: post.id, postId: post.id });
+                      }
+                    }}
+                    style={{ paddingVertical: 4 }}
+                  >
+                    <Text style={[styles.sectionCopy, { fontSize: 13, color: theme.colors.meepleRed }]}>
+                      {isReplyingToThisPost ? 'Cancel' : 'Reply'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Reply Input */}
+                {isReplyingToThisPost && (
+                  <View style={styles.replyInputContainer}>
+                    <Input
+                      value={replyText}
+                      onChangeText={setReplyText}
+                      placeholder="Write a comment..."
+                      multiline
+                      numberOfLines={3}
+                      style={styles.replyInputField}
+                    />
+                    <View style={styles.replyActions}>
+                      <Button
+                        label="Cancel"
+                        onPress={() => {
+                          setReplyingTo(null);
+                          setReplyText('');
+                        }}
+                        variant="secondary"
+                        style={styles.replyCancelButton}
+                      />
+                      <Button
+                        label="Post"
+                        onPress={handleReply}
+                        variant="primary"
+                        style={styles.replyPostButton}
+                        disabled={!replyText.trim()}
+                      />
+                    </View>
+                  </View>
+                )}
+
+                {/* Comments */}
+                {postComments.length > 0 && (
+                  <View style={styles.commentsSection}>
+                    {postComments.map((comment) => {
+                      const isReplyingToThisComment = replyingTo?.postId === post.id && replyingTo?.type === 'comment' && replyingTo?.id === comment.id;
+                      
+                      return (
+                        <View key={comment.id} style={styles.commentItem}>
+                          <View style={styles.sectionHeader}>
+                            <Text style={[styles.sectionTitle, { fontSize: 14 }]}>{comment.userName || 'Unknown'}</Text>
+                            {comment.createdAt && (
+                              <Text style={[styles.sectionCopy, { fontSize: 11 }]}>
+                                {comment.createdAt.toDate ? formatDate(comment.createdAt.toDate().toISOString()) : formatDate(comment.createdAt)}
+                              </Text>
+                            )}
+                          </View>
+                          <Text style={[styles.sectionCopy, { fontSize: 14 }]}>{comment.content}</Text>
+                          {comment.edited && (
+                            <Text style={[styles.sectionCopy, { fontSize: 10, color: theme.colors.textSecondary, fontStyle: 'italic', marginTop: 2 }]}>
+                              (edited)
+                            </Text>
+                          )}
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (isReplyingToThisComment) {
+                                setReplyingTo(null);
+                                setReplyText('');
+                              } else {
+                                setReplyingTo({ type: 'comment', id: comment.id, postId: post.id });
+                              }
+                            }}
+                            style={{ marginTop: 4 }}
+                          >
+                            <Text style={[styles.sectionCopy, { fontSize: 12, color: theme.colors.meepleRed }]}>
+                              {isReplyingToThisComment ? 'Cancel' : 'Reply'}
+                            </Text>
+                          </TouchableOpacity>
+                          {isReplyingToThisComment && (
+                            <View style={styles.replyInputContainer}>
+                              <Input
+                                value={replyText}
+                                onChangeText={setReplyText}
+                                placeholder={`Reply to ${comment.userName}...`}
+                                multiline
+                                numberOfLines={3}
+                                style={styles.replyInputField}
+                              />
+                              <View style={styles.replyActions}>
+                                <Button
+                                  label="Cancel"
+                                  onPress={() => {
+                                    setReplyingTo(null);
+                                    setReplyText('');
+                                  }}
+                                  variant="secondary"
+                                  style={styles.replyCancelButton}
+                                />
+                                <Button
+                                  label="Post"
+                                  onPress={handleReply}
+                                  variant="primary"
+                                  style={styles.replyPostButton}
+                                  disabled={!replyText.trim()}
+                                />
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
+    );
+  };
+
+  if (!event) {
+    return (
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Loading event...</Text>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView 
+      style={styles.keyboardAvoidingView}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>{event.name || 'Event'}</Text>
+        </View>
+
+        {/* Tab Navigation */}
+        <View style={styles.tabs}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === TABS.EVENT && styles.tabActive]}
+            onPress={() => setActiveTab(TABS.EVENT)}
+          >
+            <Text style={[styles.tabText, activeTab === TABS.EVENT && styles.tabTextActive]}>
+              Logistics
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === TABS.GAMES && styles.tabActive]}
+            onPress={() => handleNavigateToGameplan()}
+          >
+            <Text style={[styles.tabText, activeTab === TABS.GAMES && styles.tabTextActive]}>
+              Gameplan
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === TABS.DISCUSSION && styles.tabActive]}
+            onPress={() => setActiveTab(TABS.DISCUSSION)}
+          >
+            <Text style={[styles.tabText, activeTab === TABS.DISCUSSION && styles.tabTextActive]}>
+              Tabletalk
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Tab Content */}
+        {activeTab === TABS.EVENT && <EventTab />}
+        {activeTab === TABS.GAMES && <GamesTab />}
+        {activeTab === TABS.DISCUSSION && <DiscussionTab />}
+      </View>
+    </KeyboardAvoidingView>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -3362,6 +4313,11 @@ const styles = StyleSheet.create({
     maxHeight: 500,
     padding: theme.spacing.md,
   },
+  calendarModalContent: {
+    flex: 1,
+    minHeight: 500,
+    padding: theme.spacing.md,
+  },
   dateDetailModalContent: {
     padding: theme.spacing.md,
   },
@@ -3442,10 +4398,23 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.woodLight,
   },
+  pastEventCard: {
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.woodLight,
+  },
   pastEventDate: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.xs,
+  },
+  pastEventTime: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textSecondary,
     marginBottom: theme.spacing.xs,
   },
   pastEventLocation: {
@@ -4260,6 +5229,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginLeft: 0,
   },
+  commentItem: {
+    marginTop: 12,
+    marginLeft: 16,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.colors.woodMedium,
+    paddingLeft: 12,
+  },
   replyButton: {
     marginTop: 8,
     alignSelf: 'flex-start',
@@ -4373,6 +5349,8 @@ const styles = StyleSheet.create({
   },
   memberInfo: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   memberName: {
     fontSize: 16,
@@ -4392,11 +5370,53 @@ const styles = StyleSheet.create({
   },
   removeMemberButton: {
     borderColor: '#d45d5d',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'transparent',
+  },
+  removeMemberButtonDisabled: {
+    opacity: 0.5,
   },
   removeMemberText: {
     color: '#d45d5d',
     fontSize: 13,
     fontWeight: '500',
+  },
+  removeMemberTextDisabled: {
+    opacity: 0.5,
+  },
+  membersListContainer: {
+    marginTop: 12,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: theme.colors.woodLight,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  memberDetails: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  memberAvatarText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  emptyMembersText: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 20,
   },
   memberActionButton: {
     marginBottom: 8,

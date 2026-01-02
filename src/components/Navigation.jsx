@@ -36,7 +36,7 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
   // Responsive values
   const paddingTop = getResponsiveValue({ xs: 40, md: 44, lg: 48 }, width);
   const paddingHorizontal = getResponsiveValue({ xs: 20, md: 24, lg: 32 }, width);
-  const paddingBottom = getResponsiveValue({ xs: 12, md: 14, lg: 16 }, width);
+  const paddingBottom = getResponsiveValue({ xs: 2, md: 3, lg: 4 }, width);
   const navLinkPaddingVertical = getResponsiveValue({ xs: 8, md: 10, lg: 12 }, width);
   const navLinkPaddingHorizontal = getResponsiveValue({ xs: 12, md: 16, lg: 20 }, width);
   const navLinkMarginRight = getResponsiveValue({ xs: 4, md: 6, lg: 8 }, width);
