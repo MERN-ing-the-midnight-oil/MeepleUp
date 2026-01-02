@@ -243,6 +243,38 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+/* Legal Links Footer */
+.legal-links-footer {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.legal-links-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.legal-links-nav a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.legal-links-nav a:hover {
+  color: var(--primary-color);
+}
+
+.legal-links-separator {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
 /* Responsive Design */
 @media (max-width: 968px) {
   .content-wrapper {
@@ -294,6 +326,11 @@ body {
 
   .contact-button {
     width: 100%;
+  }
+
+  .legal-links-footer {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
   }
 }
 
