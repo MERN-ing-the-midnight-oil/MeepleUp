@@ -272,6 +272,12 @@ export const setupMeepleupPurchaseListener = (callback) => {
     return () => {}; // Return no-op unsubscribe function
   }
 
+  // Check if InAppPurchases module is available
+  if (!InAppPurchases || typeof InAppPurchases.setPurchaseListener !== 'function') {
+    console.warn('In-app purchases module is not available, returning no-op listener');
+    return () => {}; // Return no-op unsubscribe function
+  }
+
   const productId = getMeepleupProductId();
   
   const subscription = InAppPurchases.setPurchaseListener(({ responseCode, results, errorCode }) => {
@@ -301,7 +307,9 @@ export const setupMeepleupPurchaseListener = (callback) => {
   return () => {
     // Note: expo-in-app-purchases doesn't have an explicit unsubscribe,
     // but we can track the subscription and ignore callbacks
-    subscription.remove?.();
+    if (subscription && typeof subscription.remove === 'function') {
+      subscription.remove();
+    }
   };
 };
 
@@ -325,5 +333,6 @@ export const acknowledgeMeepleupPurchase = async (purchase) => {
     return { success: false, error: error.message };
   }
 };
+
 
 

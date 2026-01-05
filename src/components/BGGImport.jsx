@@ -22,6 +22,11 @@ const BGGImport = ({ onImportComplete }) => {
   const [collection, setCollection] = useState(null);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [importedGames, setImportedGames] = useState([]);
+  const [fetchProgress, setFetchProgress] = useState({ 
+    attempt: 0, 
+    maxAttempts: 30, 
+    estimatedSecondsRemaining: null 
+  });
 
   const handleFetchCollection = async () => {
     if (!bggUsername.trim()) {
@@ -33,6 +38,7 @@ const BGGImport = ({ onImportComplete }) => {
     setError('');
     setCollection(null);
     setImportedGames([]);
+    setFetchProgress({ attempt: 0, maxAttempts: 30, estimatedSecondsRemaining: null });
 
     try {
       // Save username to profile if it changed
@@ -40,16 +46,33 @@ const BGGImport = ({ onImportComplete }) => {
         await updateUser({ bggUsername: bggUsername.trim() });
       }
 
-      const fetchedCollection = await fetchBGGCollection(bggUsername.trim());
+      const fetchedCollection = await fetchBGGCollection(bggUsername.trim(), {
+        onProgress: (attempt, maxAttempts, estimatedSecondsRemaining) => {
+          setFetchProgress({
+            attempt,
+            maxAttempts,
+            estimatedSecondsRemaining: estimatedSecondsRemaining > 0 ? estimatedSecondsRemaining : null,
+          });
+        },
+      });
       
       if (!fetchedCollection || fetchedCollection.length === 0) {
-        setError('No games found in your BGG collection. Make sure your collection is set to public on BoardGameGeek.');
+        setError(
+          'No games found in your BGG collection.\n\n' +
+          'This could mean:\n' +
+          '• You have no games marked as "Owned" in your BGG collection\n' +
+          '• Your collection privacy settings may be restricting access\n' +
+          '• Make sure "Include me in the Gamer Database" is enabled at:\n' +
+          '  https://boardgamegeek.com/settings/privacy'
+        );
         setLoading(false);
+        setFetchProgress({ attempt: 0, maxAttempts: 30, estimatedSecondsRemaining: null });
         return;
       }
 
       setCollection(fetchedCollection);
       setLoading(false);
+      setFetchProgress({ attempt: 0, maxAttempts: 30, estimatedSecondsRemaining: null });
       
       // Automatically start importing after fetching
       // Small delay to let the UI update
@@ -60,6 +83,7 @@ const BGGImport = ({ onImportComplete }) => {
       setError(err.message || 'Failed to fetch collection. Please check your username and try again.');
       console.error('BGG collection fetch error:', err);
       setLoading(false);
+      setFetchProgress({ attempt: 0, maxAttempts: 30, estimatedSecondsRemaining: null });
     }
   };
 
@@ -438,8 +462,15 @@ const BGGImport = ({ onImportComplete }) => {
           <View style={styles.loadingContainer}>
             <LoadingSpinner />
             <Text style={styles.loadingText}>
-              Fetching your BGG collection... This may take a few seconds.
+              {fetchProgress.estimatedSecondsRemaining !== null
+                ? `BGG is processing your collection...\nEstimated time remaining: ${fetchProgress.estimatedSecondsRemaining} second${fetchProgress.estimatedSecondsRemaining !== 1 ? 's' : ''}`
+                : 'Fetching your BGG collection... This may take a few seconds.'}
             </Text>
+            {fetchProgress.attempt > 0 && (
+              <Text style={styles.loadingSubtext}>
+                Attempt {fetchProgress.attempt} of {fetchProgress.maxAttempts}
+              </Text>
+            )}
           </View>
         )}
 
@@ -582,6 +613,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
     color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#999',
     textAlign: 'center',
   },
   collectionPreview: {

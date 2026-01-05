@@ -214,6 +214,7 @@ const EventHub = () => {
   const [editing, setEditing] = useState(null); // { type: 'post' | 'comment', id: string, postId: string, content: string }
   const [editText, setEditText] = useState('');
   const [showPrivateMessaging, setShowPrivateMessaging] = useState(false);
+  const [selectedMemberForMessage, setSelectedMemberForMessage] = useState(null); // { userId, userName, avatarUrl }
   // GamesTab state
   const [selectedGame, setSelectedGame] = useState(null);
   const [selectedGameBggData, setSelectedGameBggData] = useState(null);
@@ -259,6 +260,7 @@ const EventHub = () => {
   const [showPastEventsModal, setShowPastEventsModal] = useState(false);
   // Calendar view modal state
   const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [scrollToDateIndex, setScrollToDateIndex] = useState(null); // Date index to scroll to
   // Announcements state
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState(null); // null for new, or announcement object for editing
@@ -3097,6 +3099,8 @@ const EventHub = () => {
             navigate={navigate}
             setSelectedUserForProfile={setSelectedUserForProfile}
             handleUpdateDateCardField={handleUpdateDateCardField}
+            scrollToDateIndex={scrollToDateIndex}
+            parentScrollRef={scheduleScrollRef}
           />
           
           {(event?.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0) || event?.scheduledFor ? (
@@ -3192,20 +3196,35 @@ const EventHub = () => {
               });
               
               if (calendarDate && calendarDate.originalIndex !== undefined) {
-                const eventDateObj = event?.eventDates?.[calendarDate.originalIndex];
-                if (eventDateObj) {
-                  setSelectedDateDetail({
-                    date: dateInfo.date,
-                    startTime: dateInfo.startTime,
-                    endTime: dateInfo.endTime,
-                    location: eventDateObj.location || eventDateObj.generalLocation || event?.location || event?.generalLocation || '',
-                    address: eventDateObj.address || eventDateObj.exactLocation || event?.address || event?.exactLocation || '',
-                    note: eventDateObj.note || '',
-                    index: calendarDate.originalIndex,
-                    isEditScheduleContext: false,
-                  });
-                  setShowDateDetailModal(true);
-                }
+                // Close the calendar modal
+                setShowCalendarModal(false);
+                
+                // Set the date index to scroll to
+                setScrollToDateIndex(calendarDate.originalIndex);
+                
+                // Scroll to the event card after a short delay to ensure modal is closed
+                setTimeout(() => {
+                  // Find the date card in futureEvents by originalIndex
+                  const futureEventIndex = futureEvents.findIndex(
+                    fe => fe.originalIndex === calendarDate.originalIndex
+                  );
+                  
+                  if (futureEventIndex !== -1 && scheduleScrollRef.current) {
+                    // Estimate scroll position: each card is approximately 300px tall
+                    // Add some padding for headers and spacing
+                    const estimatedCardHeight = 350;
+                    const headerHeight = 200; // Approximate height of content above cards
+                    const scrollY = headerHeight + (futureEventIndex * estimatedCardHeight);
+                    
+                    scheduleScrollRef.current.scrollTo({
+                      y: scrollY,
+                      animated: true,
+                    });
+                  }
+                  
+                  // Clear the scroll target after scrolling
+                  setScrollToDateIndex(null);
+                }, 100);
               }
             }}
             memberRSVPs={memberRSVPs}
@@ -3368,6 +3387,8 @@ const EventHub = () => {
     const [newPostContent, setNewPostContent] = useState('');
     const [newPostPhoto, setNewPostPhoto] = useState(null); // { uri: string, uploading: boolean }
     const [creatingPost, setCreatingPost] = useState(false);
+    const [taggingMember, setTaggingMember] = useState(null); // Member being tagged in post
+    const [taggingMatch, setTaggingMatch] = useState(''); // Text after @ for matching
 
     // Fetch posts from Firestore
     useEffect(() => {
@@ -3389,7 +3410,31 @@ const EventHub = () => {
               ...doc.data(),
             }))
             .filter(post => post.deleted !== true); // Filter out deleted posts (but include posts without deleted field)
-          setPosts(postsData);
+          
+          // Only update posts if data actually changed to prevent re-render loops
+          setPosts(prev => {
+            if (prev.length !== postsData.length) {
+              if (__DEV__) console.log('[Tabletalk] Posts count changed:', prev.length, '->', postsData.length);
+              return postsData;
+            }
+            // Compare by IDs and serialized data to detect changes
+            const prevIds = prev.map(p => p.id).sort().join(',');
+            const newIds = postsData.map(p => p.id).sort().join(',');
+            if (prevIds !== newIds) {
+              if (__DEV__) console.log('[Tabletalk] Posts IDs changed');
+              return postsData;
+            }
+            // Compare data by serializing (for detecting content changes)
+            const prevKey = JSON.stringify(prev.map(p => ({ id: p.id, content: p.content, commentCount: p.commentCount })).sort((a, b) => a.id.localeCompare(b.id)));
+            const newKey = JSON.stringify(postsData.map(p => ({ id: p.id, content: p.content, commentCount: p.commentCount })).sort((a, b) => a.id.localeCompare(b.id)));
+            if (prevKey !== newKey) {
+              if (__DEV__) console.log('[Tabletalk] Posts data changed');
+              return postsData;
+            }
+            // No change, return previous to prevent re-render
+            if (__DEV__) console.log('[Tabletalk] Posts unchanged, skipping update');
+            return prev;
+          });
           setLoadingPosts(false);
         },
         (error) => {
@@ -3443,10 +3488,30 @@ const EventHub = () => {
                 ...doc.data(),
               })).filter(comment => comment.deleted !== true);
 
-              setCommentsByPost(prev => ({
-                ...prev,
-                [post.id]: commentsData,
-              }));
+              // Only update comments if data actually changed to prevent re-render loops
+              setCommentsByPost(prev => {
+                const prevComments = prev[post.id] || [];
+                if (prevComments.length !== commentsData.length) {
+                  if (__DEV__) console.log(`[Tabletalk] Comments count changed for post ${post.id}:`, prevComments.length, '->', commentsData.length);
+                  return {
+                    ...prev,
+                    [post.id]: commentsData,
+                  };
+                }
+                // Compare by serializing comments to detect changes
+                const prevKey = JSON.stringify(prevComments.map(c => ({ id: c.id, content: c.content })).sort((a, b) => a.id.localeCompare(b.id)));
+                const newKey = JSON.stringify(commentsData.map(c => ({ id: c.id, content: c.content })).sort((a, b) => a.id.localeCompare(b.id)));
+                if (prevKey !== newKey) {
+                  if (__DEV__) console.log(`[Tabletalk] Comments data changed for post ${post.id}`);
+                  return {
+                    ...prev,
+                    [post.id]: commentsData,
+                  };
+                }
+                // No change, return previous to prevent re-render
+                if (__DEV__) console.log(`[Tabletalk] Comments unchanged for post ${post.id}, skipping update`);
+                return prev;
+              });
             },
             (error) => {
               console.error(`Error fetching comments for post ${post.id}:`, error);
@@ -3617,17 +3682,138 @@ const EventHub = () => {
           </Text>
         </View>
 
+        {/* Contact List - All MeepleUp Members */}
+        {members && members.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Members</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.contactListContainer}
+            >
+              {members.map((member) => {
+                if (!member.userId) return null;
+                const memberName = memberNames[member.userId] || member.userName || 'Unknown';
+                const memberAvatar = memberAvatars[member.userId] || member.userAvatarUrl || null;
+                const isCurrentUser = (member.userId === (user?.uid || user?.id));
+                
+                if (isCurrentUser) return null; // Don't show current user in contact list
+                
+                return (
+                  <View key={member.userId} style={styles.contactItem}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSelectedUserForProfile({
+                          userId: member.userId,
+                          userName: memberName,
+                          avatarUrl: memberAvatar,
+                        });
+                      }}
+                      style={styles.contactAvatarContainer}
+                    >
+                      {memberAvatar ? (
+                        <Image
+                          source={{ uri: memberAvatar }}
+                          style={styles.contactAvatar}
+                        />
+                      ) : (
+                        <View style={[styles.contactAvatar, styles.contactAvatarPlaceholder]}>
+                          <Text style={styles.contactAvatarText}>
+                            {memberName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    <Text style={styles.contactName} numberOfLines={1}>
+                      {memberName}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSelectedMemberForMessage({
+                          userId: member.userId,
+                          userName: memberName,
+                          avatarUrl: memberAvatar,
+                        });
+                        setShowPrivateMessaging(true);
+                      }}
+                      style={styles.messageButton}
+                    >
+                      <FontAwesome5 name="envelope" size={14} color={theme.colors.meepleRed} />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
         {/* New Post Form */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Create a new post</Text>
-          <Input
-            value={newPostContent}
-            onChangeText={setNewPostContent}
-            placeholder="What's on your mind?"
-            multiline
-            numberOfLines={4}
-            style={{ marginBottom: 12 }}
-          />
+          <View style={{ marginBottom: 12 }}>
+            <Input
+              value={newPostContent}
+              onChangeText={(text) => {
+                setNewPostContent(text);
+                // Handle @mentions/tagging
+                const lastAtIndex = text.lastIndexOf('@');
+                if (lastAtIndex !== -1) {
+                  const afterAt = text.substring(lastAtIndex + 1);
+                  const spaceIndex = afterAt.indexOf(' ');
+                  const newlineIndex = afterAt.indexOf('\n');
+                  let matchEnd = spaceIndex !== -1 && newlineIndex !== -1 
+                    ? Math.min(spaceIndex, newlineIndex)
+                    : spaceIndex !== -1 ? spaceIndex : newlineIndex !== -1 ? newlineIndex : afterAt.length;
+                  const matchText = afterAt.substring(0, matchEnd);
+                  setTaggingMatch(matchText);
+                  
+                  if (matchText.length > 0 && members.length > 0) {
+                    // Find matching member names
+                    const matchingMember = members.find(m => {
+                      if (!m.userId) return false;
+                      const name = (memberNames[m.userId] || m.userName || '').toLowerCase();
+                      return name.startsWith(matchText.toLowerCase());
+                    });
+                    setTaggingMember(matchingMember || null);
+                  } else {
+                    setTaggingMember(null);
+                  }
+                } else {
+                  setTaggingMember(null);
+                  setTaggingMatch('');
+                }
+              }}
+              placeholder="What's on your mind? Type @ to tag a member"
+              multiline
+              numberOfLines={4}
+            />
+            {taggingMember && taggingMatch && (
+              <View style={styles.taggingSuggestion}>
+                <TouchableOpacity
+                  onPress={() => {
+                    const memberName = memberNames[taggingMember.userId] || taggingMember.userName || '';
+                    const lastAtIndex = newPostContent.lastIndexOf('@');
+                    const beforeAt = newPostContent.substring(0, lastAtIndex);
+                    const afterAt = newPostContent.substring(lastAtIndex + 1);
+                    const spaceIndex = afterAt.indexOf(' ');
+                    const newlineIndex = afterAt.indexOf('\n');
+                    let matchEnd = spaceIndex !== -1 && newlineIndex !== -1 
+                      ? Math.min(spaceIndex, newlineIndex)
+                      : spaceIndex !== -1 ? spaceIndex : newlineIndex !== -1 ? newlineIndex : afterAt.length;
+                    const afterMatch = afterAt.substring(matchEnd);
+                    setNewPostContent(`${beforeAt}@${memberName}${afterMatch}`);
+                    setTaggingMember(null);
+                    setTaggingMatch('');
+                  }}
+                  style={styles.taggingSuggestionItem}
+                >
+                  <Text style={styles.taggingSuggestionText}>
+                    @{memberNames[taggingMember.userId] || taggingMember.userName || 'Unknown'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
           {newPostPhoto && (
             <View style={{ marginBottom: 12, position: 'relative' }}>
               <Image 
@@ -3918,6 +4104,26 @@ const EventHub = () => {
         {activeTab === TABS.EVENT && <EventTab />}
         {activeTab === TABS.GAMES && <GamesTab />}
         {activeTab === TABS.DISCUSSION && <DiscussionTab />}
+        
+        {/* Message Modal */}
+        <Modal
+          isOpen={showPrivateMessaging}
+          onClose={() => {
+            setShowPrivateMessaging(false);
+            setSelectedMemberForMessage(null);
+          }}
+          fullScreen={true}
+        >
+          <PrivateMessaging
+            eventId={event?.id}
+            members={members}
+            onBackToTabletalk={() => {
+              setShowPrivateMessaging(false);
+              setSelectedMemberForMessage(null);
+            }}
+            initialOtherUserId={selectedMemberForMessage?.userId}
+          />
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );
@@ -7323,6 +7529,69 @@ const styles = StyleSheet.create({
   },
   proposalLimitEditButton: {
     minWidth: 120,
+  },
+  contactListContainer: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    gap: 16,
+  },
+  contactItem: {
+    alignItems: 'center',
+    minWidth: 70,
+    maxWidth: 80,
+  },
+  contactAvatarContainer: {
+    marginBottom: 6,
+  },
+  contactAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#e0e0e0',
+  },
+  contactAvatarPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: theme.colors.meepleRed || '#d32f2f',
+  },
+  contactAvatarText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  contactName: {
+    fontSize: 12,
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  messageButton: {
+    padding: 6,
+    borderRadius: 15,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 30,
+    minHeight: 30,
+  },
+  taggingSuggestion: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    maxHeight: 150,
+    overflow: 'hidden',
+  },
+  taggingSuggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  taggingSuggestionText: {
+    fontSize: 14,
+    color: theme.colors.meepleRed || '#d32f2f',
+    fontWeight: '500',
   },
 });
 

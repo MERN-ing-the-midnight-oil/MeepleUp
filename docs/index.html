@@ -14,26 +14,27 @@
   <main class="main-container">
     <div class="content-wrapper">
       <!-- Left Side: Logo Section -->
-      <div class="logo-section" id="logoSection">
-        <div class="app-icon-container" id="appIconContainer">
+      <aside class="logo-section" id="logoSection">
+        <figure class="app-icon-container" id="appIconContainer">
           <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
-        </div>
-        <div class="bgg-badge" id="bggBadge">
+        </figure>
+        <figure class="bgg-badge" id="bggBadge">
           <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
-        </div>
-      </div>
+        </figure>
+      </aside>
 
       <!-- Right Side: Content Section -->
-      <div class="content-section">
-        <h1 class="brand-name">MeepleUp</h1>
-        
-        <p class="tagline">Board game night made simple.</p>
+      <section class="content-section">
+        <header>
+          <h1 class="brand-name">MeepleUp</h1>
+          <p class="tagline">Board game night made simple.</p>
+        </header>
 
         <p class="description">
           MeepleUp is event management built specifically for tabletop gamers. Whether you're already hosting regular game nights or thinking about starting one, MeepleUp makes it effortless.
         </p>
 
-        <div class="features-section">
+        <section class="features-section">
           <h2 class="features-heading">Everything you need in one app:</h2>
           <ul class="features-list">
             <li class="feature-item">Calendar and RSVP management</li>
@@ -41,14 +42,14 @@
             <li class="feature-item">Browse your group's collections to plan the perfect game night</li>
             <li class="feature-item">Built-in discussion boards (no separate chat app required)</li>
           </ul>
-        </div>
+        </section>
 
         <p class="value-prop">
           All the features of premium event platforms, tailored for tabletop gaming—at a fraction of the cost.
         </p>
 
         <!-- App Store Badges -->
-        <div class="badges-container">
+        <section class="badges-container">
           <span class="coming-soon-label">COMING SOON:</span>
           <div class="badges-row">
             <a href="#" class="badge-link" aria-label="Download on the App Store">
@@ -58,23 +59,25 @@
               <img src="images/google-play-badge.png" alt="Get it on Google Play" class="app-badge">
             </a>
           </div>
-        </div>
+        </section>
 
         <!-- Contact Email -->
-        <a href="mailto:contact@meepleup.com" class="contact-button">
-          contact@meepleup.com
-        </a>
-
-        <!-- Legal Links Footer -->
-        <footer class="legal-links-footer">
-          <nav class="legal-links-nav">
-            <a href="privacy-policy.html">Privacy Policy</a>
-            <span class="legal-links-separator">•</span>
-            <a href="terms-of-service.html">Terms of Service</a>
-          </nav>
-        </footer>
-      </div>
+        <address>
+          <a href="mailto:contact@meepleup.com" class="contact-button">
+            contact@meepleup.com
+          </a>
+        </address>
+      </section>
     </div>
+    
+    <!-- Legal Links Footer -->
+    <footer class="legal-links-footer">
+      <nav class="legal-links-nav">
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <span class="legal-links-separator">•</span>
+        <a href="terms-of-service.html">Terms of Service</a>
+      </nav>
+    </footer>
   </main>
   <script src="script.js"></script>
 </body>

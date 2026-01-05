@@ -9,6 +9,7 @@ import TextListGameIdentifier from '../components/TextListGameIdentifier';
 import GameCollectionView from '../components/GameCollectionView';
 import BGGImport from '../components/BGGImport';
 import PoweredByBGG from '../components/PoweredByBGG';
+import Modal from '../components/common/Modal';
 import { getGameDetails } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
@@ -29,6 +30,7 @@ const CollectionScreen = () => {
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [showTextListModal, setShowTextListModal] = useState(false);
+  const [showBGGImportModal, setShowBGGImportModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState(''); // Title search query
   const [categoriesDetermined, setCategoriesDetermined] = useState(false); // Track if we've determined categories
   
@@ -616,12 +618,112 @@ const CollectionScreen = () => {
     );
   }, [userIdentifier, removeGameFromCollection]);
 
+  // Show menu when no specific view is active
+  const showMenu = activeView === 'menu';
+
+  // AI Camera Scanner Button - vertical layout with large gamescanner icon
+  const renderInventoryButton = () => (
+    <Pressable
+      style={styles.menuOption}
+      onPress={handleOpenCamera}
+    >
+      <View style={styles.gamescannerButtonContent}>
+        <Image 
+          source={require('../../assets/images/gamescanner.png')}
+          style={[styles.gamescannerIcon, { width: gamescannerIconSize, height: gamescannerIconSize }]}
+          resizeMode="contain"
+        />
+        <Text style={styles.gamescannerButtonTitle}>Import game titles with Image recognition</Text>
+      </View>
+    </Pressable>
+  );
+
+  // Text List Import Button
+  const renderTextListButton = () => (
+    <Pressable
+      style={styles.menuOption}
+      onPress={() => setShowTextListModal(true)}
+    >
+      <View style={styles.menuOptionContent}>
+        <Text style={styles.menuOptionIcon}>📝</Text>
+        <View style={styles.menuOptionText}>
+          <Text style={styles.menuOptionTitle}>Import game titles by typing or pasting them</Text>
+        </View>
+        <Text style={styles.menuOptionArrow}>→</Text>
+      </View>
+    </Pressable>
+  );
+
+  const renderHeader = () => {
+    console.log('[CollectionScreen] renderHeader called');
+    
+    // Calculate logo width to fit screen with comfortable margins (40px on each side)
+    const logoContainerWidth = Math.max(width - 80, 200); // Min 200px, max screen width - 80px margins
+    
+    console.log('[CollectionScreen] renderHeader: rendering header content');
+    return (
+      <>
+        <View style={styles.bggLogoTopContainer}>
+          <PoweredByBGG size="auto" containerWidth={logoContainerWidth} />
+        </View>
+        <View style={styles.menuContainer}>
+          <Text style={styles.menuTitle}>
+            {sortedCollection.length === 0 
+              ? 'Please choose a method to create a games inventory. A games inventory will allow your group members to see what you have in common and discuss what to play at the next get-together.'
+              : 'Add more games to your collection using any of these methods:'}
+          </Text>
+          
+          {renderInventoryButton()}
+
+          <Text style={styles.orDivider}>OR</Text>
+
+          {renderTextListButton()}
+
+          <Text style={styles.orDivider}>OR</Text>
+
+          <Pressable
+            style={styles.menuOption}
+            onPress={() => {
+              if (sortedCollection.length > 0) {
+                setShowBGGImportModal(true);
+              } else {
+                setActiveView('import');
+              }
+            }}
+          >
+            <View style={styles.menuOptionContent}>
+              <Image 
+                source={require('../../assets/images/BGGDownload.png')}
+                style={[styles.menuOptionImageIcon, { width: iconSize, height: iconSize }]}
+                resizeMode="contain"
+              />
+              <View style={styles.menuOptionText}>
+                <Text style={styles.menuOptionTitle}>Import pre-existing BGG collection titles</Text>
+              </View>
+              <Text style={styles.menuOptionArrow}>→</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        {/* Inventory title will be shown by GameCollectionView */}
+
+        {sortedCollection.length === 0 && loading && (
+          <View style={styles.emptyCollection}>
+            <Text style={styles.emptyTitle}>Loading your games...</Text>
+            <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />
+          </View>
+        )}
+      </>
+    );
+  };
+
   // Memoize header component to prevent re-renders
+  // Always show import methods, even when games exist
   const headerComponent = useMemo(() => {
-    console.log('[CollectionScreen] Creating headerComponent with useMemo', { showMenu, sortedCollectionLength: sortedCollection.length });
-    if (!showMenu) return null;
+    console.log('[CollectionScreen] Creating headerComponent with useMemo', { sortedCollectionLength: sortedCollection.length });
+    // Always show the import menu, regardless of showMenu state
     return renderHeader();
-  }, [showMenu, sortedCollection.length, width]);
+  }, [sortedCollection.length, width, iconSize, gamescannerIconSize]);
 
   const renderGameCard = useCallback(({ item }) => {
     const hasBggData = !!item._bggData;
@@ -805,102 +907,6 @@ const CollectionScreen = () => {
     );
   }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, renderCategoryButtons, selectedCategory, categoriesDetermined, sortBy]);
 
-  // Show menu when no specific view is active
-  const showMenu = activeView === 'menu';
-
-  // AI Camera Scanner Button - vertical layout with large gamescanner icon
-  const renderInventoryButton = () => (
-    <Pressable
-      style={styles.menuOption}
-      onPress={handleOpenCamera}
-    >
-      <View style={styles.gamescannerButtonContent}>
-        <Image 
-          source={require('../../assets/images/gamescanner.png')}
-          style={[styles.gamescannerIcon, { width: gamescannerIconSize, height: gamescannerIconSize }]}
-          resizeMode="contain"
-        />
-        <Text style={styles.gamescannerButtonTitle}>Import game titles with Image recognition</Text>
-      </View>
-    </Pressable>
-  );
-
-  // Text List Import Button
-  const renderTextListButton = () => (
-    <Pressable
-      style={styles.menuOption}
-      onPress={() => setShowTextListModal(true)}
-    >
-      <View style={styles.menuOptionContent}>
-        <Text style={styles.menuOptionIcon}>📝</Text>
-        <View style={styles.menuOptionText}>
-          <Text style={styles.menuOptionTitle}>Type or paste your game list</Text>
-          <Text style={styles.menuOptionDescription}>List your games in pretty much any format. You can even write informal statements like "I have all the Settlers expansions except for the one with the Fishermen".</Text>
-        </View>
-        <Text style={styles.menuOptionArrow}>→</Text>
-      </View>
-    </Pressable>
-  );
-
-  const renderHeader = () => {
-    console.log('[CollectionScreen] renderHeader called, showMenu:', showMenu);
-    if (!showMenu) {
-      console.log('[CollectionScreen] renderHeader: showMenu is false, returning null');
-      return null;
-    }
-    
-    // Calculate logo width to fit screen with comfortable margins (40px on each side)
-    const logoContainerWidth = Math.max(width - 80, 200); // Min 200px, max screen width - 80px margins
-    
-    console.log('[CollectionScreen] renderHeader: rendering header content');
-    return (
-      <>
-        <View style={styles.bggLogoTopContainer}>
-          <PoweredByBGG size="auto" containerWidth={logoContainerWidth} />
-        </View>
-        <View style={styles.menuContainer}>
-          <Text style={styles.menuTitle}>
-            Please choose a method to create a games inventory. A games inventory will allow your group members to see what you have in common and discuss what to play at the next get-together.
-          </Text>
-          
-          {renderInventoryButton()}
-
-          <Text style={styles.orDivider}>OR</Text>
-
-          {renderTextListButton()}
-
-          <Text style={styles.orDivider}>OR</Text>
-
-          <Pressable
-            style={styles.menuOption}
-            onPress={() => setActiveView('import')}
-          >
-            <View style={styles.menuOptionContent}>
-              <Image 
-                source={require('../../assets/images/BGGDownload.png')}
-                style={[styles.menuOptionImageIcon, { width: iconSize, height: iconSize }]}
-                resizeMode="contain"
-              />
-              <View style={styles.menuOptionText}>
-                <Text style={styles.menuOptionTitle}>Import pre-existing BGG collection titles</Text>
-              </View>
-              <Text style={styles.menuOptionArrow}>→</Text>
-            </View>
-          </Pressable>
-        </View>
-
-        {/* Inventory title will be shown by GameCollectionView */}
-
-        {sortedCollection.length === 0 && loading && (
-          <View style={styles.emptyCollection}>
-            <Text style={styles.emptyTitle}>Loading your games...</Text>
-            <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />
-          </View>
-        )}
-      </>
-    );
-  };
-
   console.log('[CollectionScreen] Render state:', {
     showMenu,
     activeView,
@@ -942,7 +948,7 @@ const CollectionScreen = () => {
               availableSorts={['rating', 'category', 'title']}
               showSearch={true}
               showSortOptions={true}
-              headerTitle="Your Games Inventory:"
+              headerTitle={`Your Games Inventory: ${rawCollection.length.toLocaleString()} games`}
               headerComponent={headerComponent}
             />
           );
@@ -982,7 +988,13 @@ const CollectionScreen = () => {
 
                     <Pressable
                       style={styles.menuOption}
-                      onPress={() => setActiveView('import')}
+                      onPress={() => {
+                        if (sortedCollection.length > 0) {
+                          setShowBGGImportModal(true);
+                        } else {
+                          setActiveView('import');
+                        }
+                      }}
                     >
                       <View style={styles.menuOptionContent}>
                         <Image 
@@ -1068,6 +1080,24 @@ const CollectionScreen = () => {
         showModal={showTextListModal}
         onModalClose={() => setShowTextListModal(false)}
       />
+
+      {/* BGG Import Modal - accessible even when games exist */}
+      <Modal
+        isOpen={showBGGImportModal}
+        onClose={() => setShowBGGImportModal(false)}
+        title="Import from BGG"
+      >
+        <BGGImport
+          onImportComplete={(count) => {
+            console.log('[CollectionScreen] BGGImport onImportComplete, count:', count);
+            if (count > 0) {
+              setShowBGGImportModal(false);
+              // Scroll to inventory after import completes
+              scrollToInventory();
+            }
+          }}
+        />
+      </Modal>
     </View>
   );
 };

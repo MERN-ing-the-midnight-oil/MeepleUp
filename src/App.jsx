@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { EventsProvider, useEvents } from './context/EventsContext';
-import { CollectionsProvider } from './context/CollectionsContext';
+import { CollectionsProvider, useCollections } from './context/CollectionsContext';
 import { AvailabilityProvider } from './context/AvailabilityContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { SubscriptionProvider } from './context/SubscriptionProvider';
@@ -53,9 +53,11 @@ const PublicRoute = ({ children }) => {
 };
 
 // Smart redirect component that checks if user is member of exactly one meepleUp
+// Also redirects to collection if user has no games
 const SmartEventsRedirect = () => {
   const { user } = useAuth();
   const { getUserEvents, loading, events } = useEvents();
+  const { getUserCollection, initialised: collectionsInitialised, loading: collectionsLoading } = useCollections();
   const navigate = useNavigate();
   const [hasRedirected, setHasRedirected] = useState(false);
   const [hasFinishedChecking, setHasFinishedChecking] = useState(false);
@@ -72,7 +74,9 @@ const SmartEventsRedirect = () => {
       loading, 
       hasUser: !!user, 
       eventsCount: events.length,
-      userId: user?.uid || user?.id 
+      userId: user?.uid || user?.id,
+      collectionsInitialised,
+      collectionsLoading
     });
     
     // Don't check again if we've already redirected
@@ -85,6 +89,12 @@ const SmartEventsRedirect = () => {
     if (checkTimeoutRef.current) {
       clearTimeout(checkTimeoutRef.current);
       checkTimeoutRef.current = null;
+    }
+
+    // Wait for collections to initialize before checking
+    if (!collectionsInitialised || collectionsLoading) {
+      console.log('⏳ [SmartEventsRedirect] Still loading collections...');
+      return;
     }
 
     // Wait for events to load and user to be available
@@ -103,6 +113,20 @@ const SmartEventsRedirect = () => {
     if (!userId) {
       console.log('❌ [SmartEventsRedirect] No userId found');
       setHasFinishedChecking(true);
+      return;
+    }
+
+    // Check if user has any games in their collection
+    const userCollection = getUserCollection(userId);
+    const hasGames = userCollection && userCollection.length > 0;
+    console.log('🎮 [SmartEventsRedirect] User collection:', userCollection?.length || 0, 'games');
+
+    // If user has no games, redirect to collection screen
+    if (!hasGames) {
+      console.log('📚 [SmartEventsRedirect] User has no games, redirecting to collection');
+      setHasRedirected(true);
+      setHasFinishedChecking(true);
+      navigate('/collection', { replace: true });
       return;
     }
 
@@ -159,10 +183,10 @@ const SmartEventsRedirect = () => {
         }
       };
     }
-  }, [user, getUserEvents, loading, navigate, events, hasRedirected]);
+  }, [user, getUserEvents, loading, navigate, events, hasRedirected, getUserCollection, collectionsInitialised, collectionsLoading]);
 
-  // Show loading spinner while loading events or checking
-  if (loading || (!hasFinishedChecking && !hasRedirected && user)) {
+  // Show loading spinner while loading events/collections or checking
+  if (loading || collectionsLoading || !collectionsInitialised || (!hasFinishedChecking && !hasRedirected && user)) {
     console.log('⏳ [SmartEventsRedirect] Showing loading spinner');
     return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }

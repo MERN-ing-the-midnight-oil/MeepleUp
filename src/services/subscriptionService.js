@@ -43,6 +43,12 @@ export const initializePurchases = async () => {
       return { success: false, error: 'Web platform not supported' };
     }
 
+    // Check if InAppPurchases module is available
+    if (!InAppPurchases || typeof InAppPurchases.isAvailableAsync !== 'function') {
+      console.warn('In-app purchases module is not available');
+      return { success: false, error: 'In-app purchases module is not available' };
+    }
+
     const isAvailable = await InAppPurchases.isAvailableAsync();
     if (!isAvailable) {
       return { success: false, error: 'In-app purchases are not available on this device' };

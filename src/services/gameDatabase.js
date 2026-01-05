@@ -81,10 +81,12 @@ export async function searchGamesByName(query, limit = 10) {
     }
     
     // Add timeout wrapper to prevent hanging
+    // Increased to 7s to give Firestore more time for legitimate slow queries
+    // This helps avoid premature timeouts when Firestore is just slow (not broken)
     const queryWithTimeout = (queryPromise, queryName, searchTermForLog = null) => {
       const searchInfo = searchTermForLog ? ` (search term: "${searchTermForLog}")` : '';
       if (__DEV__) {
-        console.log(`[Game Database] Starting ${queryName} with 5s timeout${searchInfo}`);
+        console.log(`[Game Database] Starting ${queryName} with 7s timeout${searchInfo}`);
       }
       return Promise.race([
         queryPromise.then((result) => {
@@ -97,10 +99,10 @@ export async function searchGamesByName(query, limit = 10) {
           setTimeout(() => {
             if (__DEV__) {
               // Use warn instead of error - timeouts are expected for games that don't exist
-              console.warn(`[Game Database] ${queryName} timed out after 5 seconds${searchInfo}`);
+              console.warn(`[Game Database] ${queryName} timed out after 7 seconds${searchInfo}`);
             }
-            reject(new Error(`Firestore query timeout after 5 seconds: ${queryName}${searchInfo}`));
-          }, 5000);
+            reject(new Error(`Firestore query timeout after 7 seconds: ${queryName}${searchInfo}`));
+          }, 7000);
         })
       ]);
     };
@@ -701,8 +703,27 @@ export async function batchGetGamesById(gameIds) {
 }
 
 /**
+ * Check if a game is missing all critical fields needed for recommendations
+ * Critical fields: mechanics, categories, publisher/publishers, complexity/averageWeight
+ */
+function isGameMissingAllCriticalFields(bggData) {
+  const hasPublisher = !!(bggData.publisher || 
+    (Array.isArray(bggData.publishers) && bggData.publishers.length > 0));
+  const hasMechanics = !!(bggData.mechanics && 
+    Array.isArray(bggData.mechanics) && bggData.mechanics.length > 0);
+  const hasCategories = !!(bggData.categories && 
+    Array.isArray(bggData.categories) && bggData.categories.length > 0);
+  const hasComplexity = !!(bggData.complexity || bggData.averageWeight);
+  
+  // Missing all critical fields
+  return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+}
+
+/**
  * Update game document in Firestore with BGG API data
  * This caches BGG data (thumbnails, images, descriptions, etc.) to reduce API calls
+ * Games missing all critical fields (mechanics, categories, publisher, complexity) are marked
+ * as displayOnly: true - these can be displayed but cannot be favorited or used for recommendations
  * @param {string} gameId - BGG game ID
  * @param {Object} bggData - Game data from BGG API
  * @returns {Promise<boolean>} True if update was successful
@@ -711,6 +732,9 @@ export async function updateGameWithBGGData(gameId, bggData) {
   if (!gameId || !bggData) {
     return false;
   }
+  
+  // Check if game is missing all critical fields
+  const isDisplayOnly = isGameMissingAllCriticalFields(bggData);
 
   try {
     const gamesRef = db.collection(GAMES_COLLECTION);
@@ -723,172 +747,62 @@ export async function updateGameWithBGGData(gameId, bggData) {
       if (__DEV__) {
         console.log('[Game Database] Game not in Firestore, creating new document:', gameId);
       }
-      // Create new document with BGG data
-      await docRef.set({
+      // Create new document with ALL BGG data
+      // Save the entire BGG "Thing" object, preserving all fields even if not currently used
+      const gameDocument = {
+        // Spread all fields from bggData first to preserve everything
+        ...bggData,
+        // Ensure required fields are set (may override if bggData has them)
         id: gameId.toString(),
         name: bggData.name || '',
         nameLower: (bggData.name || '').toLowerCase(),
-        yearPublished: bggData.yearPublished || '',
-        thumbnail: bggData.thumbnail || null,
-        image: bggData.image || null,
-        description: bggData.description || null,
-        minPlayers: bggData.minPlayers || null,
-        maxPlayers: bggData.maxPlayers || null,
-        playingTime: bggData.playingTime || null,
-        minPlayTime: bggData.minPlayTime || null,
-        maxPlayTime: bggData.maxPlayTime || null,
-        minAge: bggData.minAge || null,
-        average: bggData.average || '',
-        bayesAverage: bggData.bayesAverage || '',
-        usersRated: bggData.usersRated || '',
-        rank: bggData.rank || '',
-        // Category ranks
-        strategyGamesRank: bggData.strategyGamesRank || '',
-        familyGamesRank: bggData.familyGamesRank || '',
-        partyGamesRank: bggData.partyGamesRank || '',
-        abstractsRank: bggData.abstractsRank || '',
-        thematicRank: bggData.thematicRank || '',
-        wargamesRank: bggData.wargamesRank || '',
-        childrensGamesRank: bggData.childrensGamesRank || '',
-        cgsRank: bggData.cgsRank || '',
-        // New comprehensive fields
-        mechanics: bggData.mechanics || null,
-        categories: bggData.categories || null,
-        designers: bggData.designers || null,
-        publishers: bggData.publishers || null,
-        artists: bggData.artists || null,
-        complexity: bggData.complexity || null,
-        ownedCount: bggData.ownedCount || null,
-        bestPlayerCount: bggData.bestPlayerCount || null,
-        languageDependence: bggData.languageDependence || null,
-        suggestedPlayerAge: bggData.suggestedPlayerAge || null,
-        alternateNames: bggData.alternateNames || null,
-        dimensions: bggData.dimensions || null,
-        weight: bggData.weight || null,
-        // Mark that this was populated from BGG API
+        // Ensure publisher field is set (extract from publishers array if needed)
+        publisher: bggData.publisher || (Array.isArray(bggData.publishers) && bggData.publishers.length > 0 ? bggData.publishers[0] : null),
+        // Ensure averageWeight is set (alias for complexity)
+        averageWeight: bggData.averageWeight || bggData.complexity || null,
+        // Add metadata fields
         bggDataCached: true,
         bggDataCachedAt: firebase.firestore.Timestamp.now(),
-      });
+        displayOnly: isDisplayOnly,
+      };
+      
+      await docRef.set(gameDocument);
     } else {
-      // Update existing document with missing BGG data
+      // Update existing document with ALL BGG data
+      // Merge all fields from bggData into the existing document
+      const existingData = doc.data();
       const updateData = {};
       
-      // Only update fields that are missing or null
-      const existingData = doc.data();
+      // Update ALL fields from bggData (preserve all BGG "Thing" data)
+      // This ensures we save all fields, even ones we're not currently using
+      Object.keys(bggData).forEach(key => {
+        // Always update with new BGG data (fields may change over time)
+        if (bggData[key] !== undefined && bggData[key] !== null) {
+          updateData[key] = bggData[key];
+        }
+      });
       
-      if (!existingData.thumbnail && bggData.thumbnail) {
-        updateData.thumbnail = bggData.thumbnail;
-      }
-      if (!existingData.image && bggData.image) {
-        updateData.image = bggData.image;
-      }
-      if (!existingData.description && bggData.description) {
-        updateData.description = bggData.description;
-      }
-      if (!existingData.minPlayers && bggData.minPlayers) {
-        updateData.minPlayers = bggData.minPlayers;
-      }
-      if (!existingData.maxPlayers && bggData.maxPlayers) {
-        updateData.maxPlayers = bggData.maxPlayers;
-      }
-      if (!existingData.playingTime && bggData.playingTime) {
-        updateData.playingTime = bggData.playingTime;
-      }
-      if (!existingData.minPlayTime && bggData.minPlayTime) {
-        updateData.minPlayTime = bggData.minPlayTime;
-      }
-      if (!existingData.maxPlayTime && bggData.maxPlayTime) {
-        updateData.maxPlayTime = bggData.maxPlayTime;
-      }
-      if (!existingData.minAge && bggData.minAge) {
-        updateData.minAge = bggData.minAge;
-      }
-      
-      // Always update ratings/rank if available (they change over time)
-      if (bggData.average) updateData.average = bggData.average;
-      if (bggData.bayesAverage) updateData.bayesAverage = bggData.bayesAverage;
-      if (bggData.usersRated) updateData.usersRated = bggData.usersRated;
-      if (bggData.rank) updateData.rank = bggData.rank;
-      
-      // Update category ranks if missing or if new data is available
-      if (!existingData.strategyGamesRank && bggData.strategyGamesRank) {
-        updateData.strategyGamesRank = bggData.strategyGamesRank;
-      }
-      if (!existingData.familyGamesRank && bggData.familyGamesRank) {
-        updateData.familyGamesRank = bggData.familyGamesRank;
-      }
-      if (!existingData.partyGamesRank && bggData.partyGamesRank) {
-        updateData.partyGamesRank = bggData.partyGamesRank;
-      }
-      if (!existingData.abstractsRank && bggData.abstractsRank) {
-        updateData.abstractsRank = bggData.abstractsRank;
-      }
-      if (!existingData.thematicRank && bggData.thematicRank) {
-        updateData.thematicRank = bggData.thematicRank;
-      }
-      if (!existingData.wargamesRank && bggData.wargamesRank) {
-        updateData.wargamesRank = bggData.wargamesRank;
-      }
-      if (!existingData.childrensGamesRank && bggData.childrensGamesRank) {
-        updateData.childrensGamesRank = bggData.childrensGamesRank;
-      }
-      if (!existingData.cgsRank && bggData.cgsRank) {
-        updateData.cgsRank = bggData.cgsRank;
-      }
-      
-      // Update new comprehensive fields (always update if available, as they may change)
-      if (bggData.mechanics !== undefined) {
-        updateData.mechanics = bggData.mechanics;
-      }
-      if (bggData.categories !== undefined) {
-        updateData.categories = bggData.categories;
-      }
-      if (bggData.designers !== undefined) {
-        updateData.designers = bggData.designers;
-      }
-      if (bggData.publishers !== undefined) {
-        updateData.publishers = bggData.publishers;
-      }
-      if (bggData.artists !== undefined) {
-        updateData.artists = bggData.artists;
-      }
-      if (bggData.complexity !== undefined && bggData.complexity !== null) {
-        updateData.complexity = bggData.complexity;
-      }
-      if (bggData.ownedCount !== undefined && bggData.ownedCount !== null) {
-        updateData.ownedCount = bggData.ownedCount;
-      }
-      if (bggData.bestPlayerCount !== undefined) {
-        updateData.bestPlayerCount = bggData.bestPlayerCount;
-      }
-      if (bggData.languageDependence !== undefined) {
-        updateData.languageDependence = bggData.languageDependence;
-      }
-      if (bggData.suggestedPlayerAge !== undefined) {
-        updateData.suggestedPlayerAge = bggData.suggestedPlayerAge;
-      }
-      if (bggData.alternateNames !== undefined) {
-        updateData.alternateNames = bggData.alternateNames;
-      }
-      if (bggData.dimensions !== undefined) {
-        updateData.dimensions = bggData.dimensions;
-      }
-      if (bggData.weight !== undefined && bggData.weight !== null) {
-        updateData.weight = bggData.weight;
-      }
-      
-      // Mark that BGG data was cached
+      // Ensure required metadata fields are set
+      updateData.nameLower = (bggData.name || existingData.name || '').toLowerCase();
+      updateData.publisher = bggData.publisher || (Array.isArray(bggData.publishers) && bggData.publishers.length > 0 ? bggData.publishers[0] : existingData.publisher || null);
+      updateData.averageWeight = bggData.averageWeight || bggData.complexity || existingData.averageWeight || null;
       updateData.bggDataCached = true;
       updateData.bggDataCachedAt = firebase.firestore.Timestamp.now();
+      updateData.displayOnly = isDisplayOnly;
+      
+      // Preserve existing fields that might not be in bggData (like nameLower if name didn't change)
+      if (existingData.nameLower && !updateData.nameLower) {
+        updateData.nameLower = existingData.nameLower;
+      }
       
       if (Object.keys(updateData).length > 0) {
         if (__DEV__) {
-          console.log('[Game Database] Updating game with BGG data:', gameId, Object.keys(updateData));
+          console.log('[Game Database] Updating game with ALL BGG data:', gameId, Object.keys(updateData).length, 'fields');
         }
         await docRef.update(updateData);
       } else {
         if (__DEV__) {
-          console.log('[Game Database] Game already has all BGG data, skipping update:', gameId);
+          console.log('[Game Database] No updates needed for game:', gameId);
         }
       }
     }
@@ -901,115 +815,26 @@ export async function updateGameWithBGGData(gameId, bggData) {
 }
 
 /**
- * Save BGG API search results to Firestore with FULL DETAILS
- * This fetches complete game information (thumbnails, images, descriptions, ratings, etc.)
- * and caches EVERYTHING to Firestore so no additional BGG API calls are needed in the future.
+ * Save BGG API search results to Firestore - DO NOT SAVE INCOMPLETE RECORDS
  * 
- * Cached fields include:
- * - Basic: id, name, nameLower, yearPublished, alternateNames
- * - Media: thumbnail, image
- * - Details: description, minPlayers, maxPlayers, playingTime, minPlayTime, maxPlayTime, minAge, suggestedPlayerAge
- * - Ratings: average, bayesAverage, usersRated, rank, complexity, ownedCount
- * - Category Ranks: strategyGamesRank, familyGamesRank, partyGamesRank, etc.
- * - Game Mechanics & Categories: mechanics, categories
- * - Publication Details: designers, publishers, artists
- * - Player Info: bestPlayerCount, languageDependence
- * - Physical Properties: dimensions, weight
+ * IMPORTANT: This function does NOT save incomplete records to Firestore.
+ * Search results only contain basic info (id, name, yearPublished) from the /search endpoint.
+ * We should NEVER save incomplete records to Firebase.
+ * 
+ * Full "Thing" data must be fetched using fetchBGGGameDetails() before saving to Firestore.
+ * This ensures Firebase always has complete game records with all BGG data.
  * 
  * @param {Array} searchResults - Array of game search results from BGG API (basic info only)
- * @returns {Promise<number>} Number of games successfully cached with full details
+ * @returns {Promise<number>} Always returns 0 - we don't save incomplete records
  */
 export async function cacheBGGSearchResults(searchResults) {
-  if (!searchResults || !Array.isArray(searchResults) || searchResults.length === 0) {
-    return 0;
+  // DO NOT save incomplete records to Firestore
+  // Search results only have id, name, yearPublished - not full "Thing" data
+  // Games should only be saved to Firestore after fetching complete data via fetchBGGGameDetails()
+  if (__DEV__) {
+    console.log(`[Game Database] Skipping cache of ${searchResults?.length || 0} search results - incomplete data. Full "Thing" data will be fetched and cached when games are selected.`);
   }
-
-  if (!db) {
-    if (__DEV__) {
-      console.warn('[Game Database] Firestore db not initialized, cannot cache search results');
-    }
-    return 0;
-  }
-
-  try {
-    const gamesRef = db.collection(GAMES_COLLECTION);
-    let cachedCount = 0;
-
-    // First, cache basic info for all results (fast, non-blocking)
-    // This ensures games are searchable even if detail fetching fails
-    const basicCachePromises = searchResults.map(async (game) => {
-      try {
-        if (!game.id || !game.name) {
-          return false;
-        }
-
-        const docRef = gamesRef.doc(game.id.toString());
-        const doc = await docRef.get();
-
-        if (!doc.exists) {
-          await docRef.set({
-            id: game.id.toString(),
-            name: game.name || '',
-            nameLower: (game.name || '').toLowerCase(),
-            yearPublished: game.yearPublished || '',
-            // Placeholder fields - will be filled with full details below
-            rank: '',
-            average: '',
-            bayesAverage: '',
-            usersRated: '',
-            thumbnail: null,
-            image: null,
-            description: null,
-            minPlayers: null,
-            maxPlayers: null,
-            playingTime: null,
-            minAge: null,
-            strategyGamesRank: '',
-            familyGamesRank: '',
-            partyGamesRank: '',
-            abstractsRank: '',
-            thematicRank: '',
-            wargamesRank: '',
-            childrensGamesRank: '',
-            cgsRank: '',
-            bggDataCached: false,
-            searchResultCached: true,
-            searchResultCachedAt: firebase.firestore.Timestamp.now(),
-          });
-        } else {
-          // Update name if missing or different
-          const existingData = doc.data();
-          if (!existingData.name || existingData.name !== game.name) {
-            await docRef.update({
-              name: game.name || '',
-              nameLower: (game.name || '').toLowerCase(),
-              yearPublished: game.yearPublished || existingData.yearPublished || '',
-            });
-          }
-        }
-        return true;
-      } catch (error) {
-        if (__DEV__) {
-          console.warn(`[Game Database] Failed to cache basic info for game ${game.id}:`, error);
-        }
-        return false;
-      }
-    });
-
-    await Promise.all(basicCachePromises);
-
-    // User-driven fetching: Only cache basic info from search results
-    // Full details will be fetched when user actually selects/views the game
-    // This avoids unnecessary API calls for games users never interact with
-    if (__DEV__) {
-      console.log(`[Game Database] Cached basic info for ${searchResults.length} games. Full details will be fetched on-demand when users select games.`);
-    }
-    
-    return searchResults.length;
-  } catch (error) {
-    console.error('[Game Database] Error caching search results:', error);
-    return 0;
-  }
+  return 0;
 }
 
 /**

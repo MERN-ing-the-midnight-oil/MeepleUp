@@ -31,6 +31,7 @@ const TextListGameIdentifier = ({
   const [searchResults, setSearchResults] = useState({}); // { gameTitle: [results] }
   const [selectedGames, setSelectedGames] = useState({}); // { gameTitle: selectedBggId }
   const [processingGameIndex, setProcessingGameIndex] = useState(null);
+  const [loadingGames, setLoadingGames] = useState(new Set()); // Track which games are still loading (including retries)
 
   const handleFormatList = async () => {
     if (!gameListText.trim()) {
@@ -43,6 +44,7 @@ const TextListGameIdentifier = ({
     setFormattedGames([]);
     setSearchResults({});
     setSelectedGames({});
+    setLoadingGames(new Set());
 
     try {
       const result = await formatGameListForBGG(gameListText.trim());
@@ -52,6 +54,9 @@ const TextListGameIdentifier = ({
         setIsProcessing(false);
         return;
       }
+
+      console.log('[TextListGameIdentifier] Claude returned games:', result.games);
+      console.log(`[TextListGameIdentifier] Starting BGG search for ${result.games.length} games`);
 
       setFormattedGames(result.games);
       
@@ -69,47 +74,163 @@ const TextListGameIdentifier = ({
     const results = {};
     const selected = {};
 
+    console.log(`[TextListGameIdentifier → BGG] Starting search for ${games.length} games`);
+    console.log(`[TextListGameIdentifier → BGG] Game titles to search:`, games);
+
     for (let i = 0; i < games.length; i++) {
       const gameTitle = games[i];
       setProcessingGameIndex(i);
       
+      // Mark this game as loading (will persist through retries)
+      setLoadingGames(prev => new Set(prev).add(gameTitle));
+      
+      console.log(`[TextListGameIdentifier → BGG] Searching BGG for: "${gameTitle}" (${i + 1}/${games.length})`);
+      
       try {
+        console.log(`[TextListGameIdentifier → BGG] Calling searchGamesByName for "${gameTitle}" with fallbackToBGG=true`);
         const searchResults = await searchGamesByName(gameTitle, true);
         
-        // Fetch thumbnails for search results (optional, non-blocking)
+        console.log(`[TextListGameIdentifier → BGG] BGG search results for "${gameTitle}":`, 
+          searchResults ? `${searchResults.length} result(s)` : 'null',
+          searchResults?.length > 0 ? `(first result: ${searchResults[0]?.name || 'N/A'})` : ''
+        );
+        
+        if (!searchResults || searchResults.length === 0) {
+          console.warn(`[TextListGameIdentifier → BGG] WARNING: No search results returned for "${gameTitle}" - this game may not exist in BGG (successful API call with no results)`);
+        }
+        
+        // Fetch thumbnails and additional data for search results (optional, non-blocking)
         const resultsWithThumbnails = await Promise.all(
           (searchResults || []).map(async (result) => {
             try {
-              // Try to get thumbnail from game details (quick fetch)
+              // Try to get thumbnail and rank from game details (quick fetch)
               const gameDetails = await getGameDetails(result.id);
               return {
                 ...result,
                 thumbnail: gameDetails?.thumbnail || null,
+                rank: gameDetails?.rank || null, // BGG overall rank (lower = more popular)
+                type: gameDetails?.type || null, // 'boardgame', 'boardgameexpansion', etc.
               };
             } catch {
-              // If fetching details fails, return result without thumbnail
-              return result;
+              // If fetching details fails, return result without thumbnail/rank
+              return {
+                ...result,
+                thumbnail: null,
+                rank: null,
+                type: null,
+              };
             }
           })
         );
         
         results[gameTitle] = resultsWithThumbnails;
         
+        // Mark this game as no longer loading (search completed successfully, with or without results)
+        setLoadingGames(prev => {
+          const updated = new Set(prev);
+          updated.delete(gameTitle);
+          return updated;
+        });
+        
         // Update search results incrementally so UI updates as each game finishes
         setSearchResults({ ...results });
         
-        // Auto-select the first result if available
+        // Smart auto-selection: prefer exact name matches, then lower rank (more popular)
         if (resultsWithThumbnails && resultsWithThumbnails.length > 0) {
-          selected[gameTitle] = resultsWithThumbnails[0].id;
+          const normalizedSearchTitle = gameTitle.toLowerCase().trim();
+          
+          // Score each result (higher score = better match)
+          const scoredResults = resultsWithThumbnails.map(result => {
+            let score = 0;
+            const normalizedResultName = (result.name || '').toLowerCase().trim();
+            
+            // Exact name match gets highest priority (score +1000)
+            if (normalizedResultName === normalizedSearchTitle) {
+              score += 1000;
+            }
+            // Starts with search title (score +500)
+            else if (normalizedResultName.startsWith(normalizedSearchTitle)) {
+              score += 500;
+            }
+            // Contains search title (score +100)
+            else if (normalizedResultName.includes(normalizedSearchTitle)) {
+              score += 100;
+            }
+            
+            // Prefer boardgames over expansions (score +50 for boardgame)
+            if (result.type === 'boardgame') {
+              score += 50;
+            }
+            
+            // Prefer games with better (lower) rank (score = 10000 - rank, capped at 10000)
+            // Rank 1 gets +9999, rank 100 gets +9900, rank 10000 gets +0
+            if (result.rank && result.rank > 0) {
+              score += Math.max(0, 10000 - result.rank);
+            }
+            
+            // Prefer games with thumbnails (score +10)
+            if (result.thumbnail) {
+              score += 10;
+            }
+            
+            return { ...result, _matchScore: score };
+          });
+          
+          // Sort by score (highest first), then by name for tie-breaking
+          scoredResults.sort((a, b) => {
+            if (b._matchScore !== a._matchScore) {
+              return b._matchScore - a._matchScore;
+            }
+            return (a.name || '').localeCompare(b.name || '');
+          });
+          
+          const bestMatch = scoredResults[0];
+          const matchScore = bestMatch._matchScore;
+          
+          // Remove the temporary _matchScore field before storing
+          const { _matchScore, ...cleanResult } = bestMatch;
+          
+          // Update results with cleaned data (remove _matchScore from all)
+          results[gameTitle] = scoredResults.map(({ _matchScore, ...clean }) => clean);
+          setSearchResults({ ...results });
+          
+          selected[gameTitle] = bestMatch.id;
           setSelectedGames({ ...selected });
+          console.log(`[TextListGameIdentifier → BGG] Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, rank: ${bestMatch.rank || 'N/A'})`);
+        } else {
+          console.warn(`[TextListGameIdentifier → BGG] No BGG results found for "${gameTitle}" (definitive - successful API call returned empty)`);
         }
       } catch (err) {
-        console.error(`[TextListGameIdentifier] Error searching for ${gameTitle}:`, err);
+        // Check if this is a rate-limit error - if so, keep the game in loading state
+        if (err.isRateLimited || (err.message && err.message.includes('rate limited'))) {
+          console.warn(`[TextListGameIdentifier → BGG] Rate limited for "${gameTitle}" - keeping in loading state (game may exist but BGG API is overloaded)`);
+          // Don't remove from loadingGames - keep showing loading spinner
+          // Don't set results - leave undefined so it stays in loading state
+          // Don't show "No matches found" - we don't know if the game exists or not
+          continue; // Continue to next game, but keep this one loading
+        }
+        
+        // For other errors, mark as failed and show "No matches found"
+        console.error(`[TextListGameIdentifier → BGG] Error searching for "${gameTitle}":`, err);
         results[gameTitle] = [];
-        // Update search results even for empty results to show "No matches found" instead of loading
+        
+        // Mark this game as no longer loading (search failed with non-rate-limit error)
+        setLoadingGames(prev => {
+          const updated = new Set(prev);
+          updated.delete(gameTitle);
+          return updated;
+        });
+        
+        // Update search results to show "No matches found"
         setSearchResults({ ...results });
       }
     }
+
+    console.log(`[TextListGameIdentifier → BGG] Completed searching all games. Summary:`);
+    console.log(`[TextListGameIdentifier → BGG] - Total games searched: ${games.length}`);
+    console.log(`[TextListGameIdentifier → BGG] - Games with results: ${Object.values(results).filter(r => r && r.length > 0).length}`);
+    console.log(`[TextListGameIdentifier → BGG] - Games with no results: ${Object.values(results).filter(r => !r || r.length === 0).length}`);
+    console.log(`[TextListGameIdentifier → BGG] - Games selected: ${Object.keys(selected).length}`);
 
     setSearchResults(results);
     setSelectedGames(selected);
@@ -152,6 +273,14 @@ const TextListGameIdentifier = ({
               minPlayers: gameDetails.minPlayers || null,
               maxPlayers: gameDetails.maxPlayers || null,
               playingTime: gameDetails.playingTime || null,
+              // Include fields needed for GameCard to show heart instead of "?"
+              // GameCard checks for publisher, mechanics, categories, and complexity
+              mechanics: gameDetails.mechanics || null,
+              categories: gameDetails.categories || null,
+              publishers: gameDetails.publishers || null,
+              publisher: gameDetails.publisher || null,
+              complexity: gameDetails.complexity || gameDetails.averageWeight || null,
+              averageWeight: gameDetails.averageWeight || gameDetails.complexity || null,
               source: 'text_list',
             };
 
@@ -215,7 +344,9 @@ const TextListGameIdentifier = ({
     setSearchResults({});
     setSelectedGames({});
     setError(null);
+    setIsProcessing(false);
     setProcessingGameIndex(null);
+    setLoadingGames(new Set());
   };
 
   const handleClose = () => {
@@ -229,11 +360,12 @@ const TextListGameIdentifier = ({
     const results = searchResults[gameTitle];
     const selectedBggId = selectedGames[gameTitle];
     const isProcessing = processingGameIndex === index;
-    // Show loading if currently processing this game OR if results haven't been set yet
-    const isLoading = isProcessing || (results === undefined && processingGameIndex !== null);
+    // Show loading if this game is in the loadingGames set (persists through retries)
+    // OR if currently processing this game and results haven't been set yet
+    const isLoading = loadingGames.has(gameTitle) || (isProcessing && results === undefined);
 
     return (
-      <View key={gameTitle} style={styles.gameSelectionCard}>
+      <View key={`${index}-${gameTitle}`} style={styles.gameSelectionCard}>
         <View style={styles.gameTitleRow}>
           <Text style={styles.gameTitleText}>{gameTitle}</Text>
           <Pressable
@@ -309,14 +441,14 @@ const TextListGameIdentifier = ({
 
         <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
           <Text style={styles.instructions}>
-            Type or paste your list of board game titles, or describe your collection. You can include multiple games (one per line or separated by commas), or use descriptions like "Pretty much all the 'Dominion' games" or "I have almost all the Settlers Expansions". The AI will generate a comprehensive list for you.
+            Type or paste your list of board game titles, or describe your collection. Enter a list, paragraph, or whatever. Or be conversational by saying something like "Pretty much all the 'Dominion' games" or "I have almost all the Settlers Expansions". The AI will generate a comprehensive list for you.
           </Text>
 
           <TextInput
             style={styles.textInput}
             multiline
             numberOfLines={10}
-            placeholder="Enter your game titles or description...&#10;&#10;Examples:&#10;• Catan, Ticket to Ride, Pandemic&#10;• Pretty much all the 'Dominion' games&#10;• I have almost all the Settlers Expansions&#10;• All Ticket to Ride games except the base game"
+            placeholder=""
             placeholderTextColor={theme.colors.textSecondary}
             value={gameListText}
             onChangeText={setGameListText}
@@ -410,10 +542,11 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
   },
   instructions: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.textSecondary,
+    fontSize: theme.typography.fontSize.lg,
+    color: theme.colors.textPrimary,
     marginBottom: theme.spacing.md,
-    lineHeight: theme.typography.fontSize.base * theme.typography.lineHeight.normal,
+    lineHeight: theme.typography.fontSize.lg * theme.typography.lineHeight.normal,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   textInput: {
     ...commonStyles.card,
@@ -481,6 +614,8 @@ const styles = StyleSheet.create({
     padding: theme.spacing.xs,
     borderRadius: theme.borderRadius.sm,
     backgroundColor: theme.colors.woodLight,
+    borderWidth: 2,
+    borderColor: theme.colors.meepleRed,
     minWidth: 28,
     minHeight: 28,
     justifyContent: 'center',
@@ -488,7 +623,7 @@ const styles = StyleSheet.create({
   },
   removeButtonText: {
     fontSize: theme.typography.fontSize.base,
-    color: theme.colors.textSecondary,
+    color: theme.colors.meepleRed,
     fontWeight: theme.typography.fontWeight.bold,
   },
   processingContainer: {
@@ -521,7 +656,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   resultCardSelected: {
-    borderColor: theme.colors.meepleRed,
+    borderColor: '#4CAF50',
     backgroundColor: theme.colors.woodLight,
   },
   resultThumbnail: {
@@ -559,16 +694,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 4,
     right: 4,
-    backgroundColor: theme.colors.meepleRed,
-    borderRadius: 12,
-    width: 24,
-    height: 24,
+    backgroundColor: '#4CAF50',
+    borderRadius: 18,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
   },
   selectedIndicatorText: {
     color: '#fff',
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.base,
     fontWeight: theme.typography.fontWeight.bold,
   },
   addButton: {

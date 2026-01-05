@@ -77,8 +77,36 @@ export const preCalculateAllMatches = (games, userCollection) => {
     };
   });
 
+  // Debug: Log favorited games data to see what we have (only log once per session to reduce noise)
+  // Use a static flag to prevent repeated logging
+  if (__DEV__ && normalizedUserCollection.length > 0 && !preCalculateAllMatches._hasLogged) {
+    const favorited = normalizedUserCollection.filter(g => g.isFavorite);
+    if (favorited.length > 0) {
+      // Check if all favorites are "Unknown Game" - this indicates a data loading issue
+      const allUnknown = favorited.every(g => g.title === 'Unknown Game');
+      if (allUnknown) {
+        console.warn('[optimizedRecommendations] All favorited games are "Unknown Game" - collection data may not be loaded properly');
+        console.log('[optimizedRecommendations] Sample favorite game data:', favorited[0]);
+      } else {
+        console.log('[optimizedRecommendations] Normalized favorited games:', favorited.length);
+        favorited.slice(0, 3).forEach((game, idx) => {
+          console.log(`[optimizedRecommendations] Normalized favorite ${idx + 1}:`, {
+            title: game.title,
+            publisher: game.publisher || '(none)',
+            mechanicsCount: game.mechanics.length,
+            categoriesCount: game.categories.length,
+            complexity: game.complexity || '(none)',
+            mechanics: game.mechanics.slice(0, 3),
+            categories: game.categories.slice(0, 3),
+          });
+        });
+      }
+      preCalculateAllMatches._hasLogged = true;
+    }
+  }
+
   // Pre-calculate matches for each game
-  games.forEach(game => {
+  games.forEach((game, index) => {
     const gameId = game.bggId || game.id;
     if (!gameId) {
       // Still add to map with empty matches if no gameId
@@ -89,6 +117,16 @@ export const preCalculateAllMatches = (games, userCollection) => {
         complexity: []
       });
       return;
+    }
+    
+    // Log first few game IDs being calculated for debugging
+    if (index < 3) {
+      console.log(`[optimizedRecommendations] Pre-calculating for game ${index}:`, {
+        gameId: String(gameId),
+        bggId: game.bggId,
+        id: game.id,
+        title: game.title || game.name,
+      });
     }
 
     const bggData = game._bggData || game;
@@ -182,12 +220,54 @@ export const preCalculateAllMatches = (games, userCollection) => {
       m.complexity.length > 0
     ).length;
     
-    // Only log if there are meaningful matches to report
-    if (gamesWithMatches > 0 || games.length > 10) {
-      console.log('[optimizedRecommendations] Pre-calculated matches:', {
-        totalGames: games.length,
-        totalUserGames: normalizedUserCollection.length,
-        gamesWithMatches,
+    // Always log to help debug matching issues
+    console.log('[optimizedRecommendations] Pre-calculated matches:', {
+      totalGames: games.length,
+      totalUserGames: normalizedUserCollection.length,
+      favoritedUserGames: normalizedUserCollection.filter(g => g.isFavorite).length,
+      gamesWithMatches,
+    });
+    
+    // If no matches found, log sample data to debug
+    if (gamesWithMatches === 0 && normalizedUserCollection.length > 0 && games.length > 0) {
+      console.log('[optimizedRecommendations] No matches found - debugging sample data:');
+      
+      // Sample a few user games
+      const sampleUserGames = normalizedUserCollection.slice(0, 3);
+      sampleUserGames.forEach((userGame, idx) => {
+        console.log(`[optimizedRecommendations] Sample user game ${idx + 1}:`, {
+          title: userGame.title,
+          isFavorite: userGame.isFavorite,
+          publisher: userGame.publisher || '(none)',
+          mechanicsCount: userGame.mechanics.length,
+          categoriesCount: userGame.categories.length,
+          complexity: userGame.complexity || '(none)',
+          sampleMechanics: userGame.mechanics.slice(0, 3),
+          sampleCategories: userGame.categories.slice(0, 3),
+        });
+      });
+      
+      // Sample a few games being matched
+      const sampleGames = games.slice(0, 3);
+      sampleGames.forEach((game, idx) => {
+        const bggData = game._bggData || game;
+        const proposedPublisher = normalizeString(
+          bggData.publisher || 
+          (Array.isArray(bggData.publishers) && bggData.publishers.length > 0 ? bggData.publishers[0] : null) ||
+          (Array.isArray(game.publishers) && game.publishers.length > 0 ? game.publishers[0] : null) ||
+          game.publisher || null
+        );
+        const proposedMechanics = normalizeArray(bggData.mechanics || game.mechanics || []);
+        const proposedCategories = normalizeArray(bggData.categories || game.categories || []);
+        
+        console.log(`[optimizedRecommendations] Sample game ${idx + 1} being matched:`, {
+          title: game.title || game.name,
+          publisher: proposedPublisher || '(none)',
+          mechanicsCount: proposedMechanics.length,
+          categoriesCount: proposedCategories.length,
+          sampleMechanics: proposedMechanics.slice(0, 3),
+          sampleCategories: proposedCategories.slice(0, 3),
+        });
       });
     }
   }

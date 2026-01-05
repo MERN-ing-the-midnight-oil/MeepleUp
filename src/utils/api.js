@@ -353,24 +353,18 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     }
 
     // Try Firebase Firestore first (if available)
+    let firestoreFailed = false;
+    let firestoreResults = null;
     try {
       const { searchGamesByName: searchFirestore } = await import('../services/gameDatabase');
       
-      // Add timeout wrapper in case Firestore hangs
-      // Reduced timeout from 6s to 4s for faster failure
-      const firestorePromise = searchFirestore(query, 50);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Firestore search timeout')), 4000);
-      });
-      
-      const firestoreResults = await Promise.race([firestorePromise, timeoutPromise]);
-      
-      if (__DEV__) {
-        console.log('[Firestore] Query completed, results:', firestoreResults ? firestoreResults.length : 'null');
-      }
+      // gameDatabase has its own 7s timeout, so we don't need a wrapper timeout here
+      // This gives Firestore more time for legitimate slow queries while still timing out if broken
+      firestoreResults = await searchFirestore(query, 50);
       
       if (firestoreResults && firestoreResults.length > 0) {
         if (__DEV__) {
+          console.log('[Firestore] Query completed, results:', firestoreResults.length);
           console.log(`[Firestore] Found ${firestoreResults.length} games`);
         }
         // Format response
@@ -384,64 +378,128 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
         }
         return formatted;
       } else {
-        // Firestore returned empty array - try BGG API if fallback is enabled
+        // Firestore returned empty array or null - mark as failed to trigger BGG fallback
+        firestoreFailed = true;
         if (__DEV__) {
           console.log('[Firestore] No results found');
         }
       }
     } catch (firestoreError) {
+      // Firestore error or timeout - mark as failed and fall through to BGG if fallback enabled
+      firestoreFailed = true;
+      console.warn(`[Game Search] Firestore search error for "${query}":`, firestoreError.message);
       if (__DEV__) {
         console.log('[Firestore] Not available or error, trying BGG API:', firestoreError.message);
       }
       // Don't throw - fall through to BGG API if fallback is enabled
     }
 
-    // No results found in Firestore - try BGG API if fallback is enabled
+    // No results found in Firestore OR Firestore failed/timed out - try BGG API if fallback is enabled
     // Note: For search, we'll allow BGG API calls since we don't know the publication year yet
     // The filtering will happen when we fetch individual game details
-    if (fallbackToBGG) {
+    if (fallbackToBGG && (firestoreFailed || !firestoreResults || firestoreResults.length === 0)) {
       if (__DEV__) {
-        console.log('[Game Search] No results in Firestore, trying BGG API...');
+        console.log('[Game Search] Firestore failed or returned no results, trying BGG API...');
       }
-      try {
-        const { searchBGGAPI } = await import('../services/bggApi');
-        const bggResults = await searchBGGAPI(query, 50);
-        if (bggResults && bggResults.length > 0) {
-          if (__DEV__) {
-            console.log(`[BGG API] Found ${bggResults.length} games`);
+      
+      // Retry BGG search with exponential backoff if rate limited
+      // User said it's okay if it takes a few minutes - we'll keep trying until we get results
+      // Exponential backoff prevents overwhelming the API - delays get progressively longer
+      const maxBggRetries = 8; // More retries for bulk imports (with exponential backoff: up to ~21 min total wait time)
+      const maxEmptyResultRetries = 4; // More retries for empty results (might be temporary issues, not wrong query format)
+      let bggRetryCount = 0;
+      let emptyResultCount = 0;
+      let bggResults = null;
+      let lastError = null;
+      
+      while (bggRetryCount <= maxBggRetries) {
+        try {
+          if (bggRetryCount > 0) {
+            // Exponential backoff: 10s, 20s, 40s, 80s, 160s, 320s, 640s (10.7 min), 1280s (21.3 min)
+            const backoffMs = 10000 * Math.pow(2, bggRetryCount - 1);
+            console.log(`[Game Search → BGG API] Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+          } else {
+            console.log(`[Game Search → BGG API] Sending search query to BGG: "${query}"`);
           }
           
-          // Cache search results to Firestore for future searches (non-blocking)
-          // Only cache basic info - full details fetched when user selects a game
-          try {
-            const { cacheBGGSearchResults } = await import('../services/gameDatabase');
-            cacheBGGSearchResults(bggResults).catch(err => {
-              if (__DEV__) {
-                console.warn('[Game Search] Failed to cache search results:', err);
-              }
-            });
-          } catch (cacheError) {
-            // Non-critical - just log it
+          const { searchBGGAPI } = await import('../services/bggApi');
+          bggResults = await searchBGGAPI(query, 50, 3); // 3 retries per attempt
+          
+          if (bggResults && bggResults.length > 0) {
+            console.log(`[Game Search → BGG API] BGG returned ${bggResults.length} result(s) for "${query}"`);
             if (__DEV__) {
-              console.warn('[Game Search] Error caching search results:', cacheError);
+              console.log(`[BGG API] Found ${bggResults.length} games`);
+            }
+            
+            // DO NOT cache incomplete search results to Firestore
+            // Search results only contain basic info (id, name, yearPublished) from /search endpoint
+            // We should NEVER save incomplete records to Firebase
+            // Full "Thing" data will be fetched and cached when user selects a game via getGameDetails()
+            
+            return bggResults;
+          } else {
+            // No results - could be the game doesn't exist, wrong query format, or transient issue
+            emptyResultCount++;
+            if (emptyResultCount <= maxEmptyResultRetries && bggRetryCount < maxBggRetries) {
+              console.warn(`[Game Search → BGG API] BGG returned no results for "${query}" (attempt ${emptyResultCount}/${maxEmptyResultRetries}), will retry...`);
+              bggRetryCount++;
+              continue;
+            } else {
+              console.warn(`[Game Search → BGG API] BGG returned no results for "${query}" after ${emptyResultCount} attempts`);
+              break;
             }
           }
-          
-          return bggResults;
+        } catch (bggError) {
+          lastError = bggError;
+          // Check if it's a rate limit error
+          if (bggError.message && bggError.message.includes('rate limited')) {
+            if (bggRetryCount < maxBggRetries) {
+              console.warn(`[Game Search → BGG API] Rate limited for "${query}", will retry (attempt ${bggRetryCount + 1}/${maxBggRetries})...`);
+              bggRetryCount++;
+              continue;
+            } else {
+              console.error(`[Game Search → BGG API] Rate limited for "${query}" after ${maxBggRetries} retries. Giving up.`);
+              break;
+            }
+          } else {
+            // Other error - log and retry once more, then break
+            console.error(`[Game Search → BGG API] BGG search failed for "${query}":`, bggError);
+            if (bggRetryCount < maxBggRetries) {
+              console.warn(`[Game Search → BGG API] Will retry after error...`);
+              bggRetryCount++;
+              continue;
+            } else {
+              if (__DEV__) {
+                console.warn('[BGG API] Search failed after retries:', bggError);
+              }
+              break;
+            }
+          }
         }
-      } catch (bggError) {
-        if (__DEV__) {
-          console.warn('[BGG API] Search failed:', bggError);
-        }
+      }
+      
+      // If we exhausted retries and still have an error, throw it so caller can handle it
+      if (lastError && lastError.message && lastError.message.includes('rate limited')) {
+        console.error(`[Game Search → BGG API] Exhausted all retries for "${query}" due to rate limiting. Game may exist but BGG API is overloaded.`);
+        // Throw a specific error so the caller knows this is rate-limited, not a definitive "no results"
+        const rateLimitError = new Error(`BGG API rate limited for "${query}" after exhausting retries`);
+        rateLimitError.isRateLimited = true;
+        throw rateLimitError;
       }
     }
 
-    // No results found
+    // No results found (successful API call returned empty, not rate-limited)
+    console.warn(`[Game Search] No results found for "${query}" (successful API call with no results)`);
     if (__DEV__) {
       console.log('[Game Search] No results found, returning empty array');
     }
     return [];
   } catch (error) {
+    // Re-throw rate-limit errors so caller can handle them (keep game in loading state)
+    if (error.isRateLimited || (error.message && error.message.includes('rate limited'))) {
+      throw error;
+    }
     console.error('[Game Search] Error:', error);
     return [];
   }
@@ -753,6 +811,8 @@ function getBGGToken() {
  * @param {boolean} options.own - Filter to owned games (default: true)
  * @param {boolean} options.stats - Include statistics (default: true)
  * @param {string} options.subtype - Filter by subtype, e.g. 'boardgame' (default: 'boardgame')
+ * @param {number} options.maxRetries - Maximum number of retries (default: 30)
+ * @param {Function} options.onProgress - Callback for progress updates: (attempt, maxRetries, estimatedSecondsRemaining) => void
  * @returns {Promise<Array>} Array of games in the collection
  */
 export const fetchBGGCollection = async (username, options = {}) => {
@@ -764,8 +824,8 @@ export const fetchBGGCollection = async (username, options = {}) => {
     own = true,
     stats = true,
     subtype = 'boardgame',
-    maxRetries = 5,
-    retryDelay = 2000,
+    maxRetries = 30, // Increased from 5 to 30 to handle large collections (up to ~2 minutes)
+    onProgress,
   } = options;
 
   try {
@@ -785,9 +845,11 @@ export const fetchBGGCollection = async (username, options = {}) => {
       console.log('[BGG Collection] URL:', url);
     }
 
-    // Retry logic for 202 responses
+    // Retry logic for 202 responses with exponential backoff
     let retries = 0;
     let xmlText = null;
+    const initialDelay = 2000; // Start with 2 seconds
+    const maxDelay = 10000; // Cap at 10 seconds
     
     while (retries < maxRetries) {
       const headers = {};
@@ -805,13 +867,25 @@ export const fetchBGGCollection = async (username, options = {}) => {
       
       if (response.status === 200) {
         xmlText = await response.text();
+        if (onProgress) {
+          onProgress(retries + 1, maxRetries, 0);
+        }
         break;
       } else if (response.status === 202) {
-        // BGG is processing the request - wait and retry
-        if (__DEV__) {
-          console.log(`[BGG Collection] BGG is processing request (202). Waiting ${retryDelay}ms before retry...`);
+        // BGG is processing the request - wait and retry with exponential backoff
+        // Exponential backoff: 2s, 4s, 8s, then cap at 10s
+        const delay = Math.min(initialDelay * Math.pow(2, retries), maxDelay);
+        const remainingRetries = maxRetries - retries - 1;
+        const estimatedSecondsRemaining = Math.ceil((delay * remainingRetries) / 1000);
+        
+        if (onProgress) {
+          onProgress(retries + 1, maxRetries, estimatedSecondsRemaining);
         }
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        
+        if (__DEV__) {
+          console.log(`[BGG Collection] BGG is processing request (202). Waiting ${delay}ms before retry ${retries + 1}/${maxRetries}...`);
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         retries++;
       } else if (response.status === 429) {
         // Rate limit exceeded - wait longer before retrying
@@ -840,13 +914,24 @@ export const fetchBGGCollection = async (username, options = {}) => {
           const responseNoAuth = await fetch(url);
           if (responseNoAuth.status === 200) {
             xmlText = await responseNoAuth.text();
+            if (onProgress) {
+              onProgress(retries + 1, maxRetries, 0);
+            }
             break;
           } else if (responseNoAuth.status === 202) {
-            // BGG is processing - wait and retry
-            if (__DEV__) {
-              console.log(`[BGG Collection] BGG is processing request (202). Waiting ${retryDelay}ms before retry...`);
+            // BGG is processing - wait and retry with exponential backoff
+            const delay = Math.min(initialDelay * Math.pow(2, retries), maxDelay);
+            const remainingRetries = maxRetries - retries - 1;
+            const estimatedSecondsRemaining = Math.ceil((delay * remainingRetries) / 1000);
+            
+            if (onProgress) {
+              onProgress(retries + 1, maxRetries, estimatedSecondsRemaining);
             }
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            
+            if (__DEV__) {
+              console.log(`[BGG Collection] BGG is processing request (202). Waiting ${delay}ms before retry...`);
+            }
+            await new Promise(resolve => setTimeout(resolve, delay));
             retries++;
             continue;
           } else if (responseNoAuth.status === 429) {
@@ -897,8 +982,17 @@ export const fetchBGGCollection = async (username, options = {}) => {
       // Check for specific error cases and provide helpful messages
       const lowerErrorMessage = errorMessage.toLowerCase();
       
-      if (lowerErrorMessage.includes('invalid username')) {
-        throw new Error(`Invalid username: "${username.trim()}". Please check the username and try again.`);
+      if (lowerErrorMessage.includes('invalid username') || 
+          lowerErrorMessage.includes('user not found') ||
+          lowerErrorMessage.includes('username not found') ||
+          lowerErrorMessage.includes('unknown user')) {
+        throw new Error(
+          `The username "${username.trim()}" was not found on BoardGameGeek.\n\n` +
+          `Please check that:\n` +
+          `• The username is spelled correctly\n` +
+          `• The username exists on BoardGameGeek\n` +
+          `• You're using your BGG username (not your email or display name)`
+        );
       }
       
       // Check for rate limit errors
@@ -1042,6 +1136,8 @@ export const fetchBGGCollection = async (username, options = {}) => {
         if (__DEV__) {
           console.log('[BGG Collection] User has no games matching the criteria (own=1, subtype=boardgame)');
         }
+        // Return empty array - this is a valid state (user exists but has no games)
+        return collection;
       }
     }
 

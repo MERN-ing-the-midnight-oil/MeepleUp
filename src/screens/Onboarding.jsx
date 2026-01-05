@@ -5,6 +5,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { useAuth } from '../context/AuthContext';
 import { useEvents } from '../context/EventsContext';
+import { useCollections } from '../context/CollectionsContext';
 import { validateJoinCode } from '../utils/api';
 import { theme, commonStyles } from '../utils/theme';
 import { db } from '../config/firebase';
@@ -24,6 +25,7 @@ const Onboarding = () => {
   const { width } = useWindowDimensions();
   const { user, updateUser } = useAuth();
   const { joinEventWithCode, createEvent, createEventWithPurchaseCheck, getUserEvents, leaveEvent, getEventById, getUserArchivedEvents, loading: eventsLoading, events } = useEvents();
+  const { getUserCollection, initialised: collectionsInitialised, loading: collectionsLoading } = useCollections();
   const [hasCheckedRedirect, setHasCheckedRedirect] = useState(false);
   const redirectTimeoutRef = useRef(null);
   const [joinCodeWord1, setJoinCodeWord1] = useState('');
@@ -102,9 +104,15 @@ const Onboarding = () => {
   // Reduced logging - removed editingDateIndex change log
 
   // Check if user is member of exactly one meepleUp and redirect to logistics tab
+  // Also redirects to collection if user has no games
   useEffect(() => {
     // Don't check if we've already checked or if still loading
     if (hasCheckedRedirect || eventsLoading) {
+      return;
+    }
+
+    // Wait for collections to initialize before checking
+    if (!collectionsInitialised || collectionsLoading) {
       return;
     }
 
@@ -122,6 +130,19 @@ const Onboarding = () => {
     const userId = user.uid || user.id;
     if (!userId) {
       setHasCheckedRedirect(true);
+      return;
+    }
+
+    // Check if user has any games in their collection
+    const userCollection = getUserCollection(userId);
+    const hasGames = userCollection && userCollection.length > 0;
+    console.log('[Onboarding] User collection:', userCollection?.length || 0, 'games');
+
+    // If user has no games, redirect to collection screen
+    if (!hasGames) {
+      console.log('[Onboarding] User has no games, redirecting to collection');
+      setHasCheckedRedirect(true);
+      navigation.navigate('Collection');
       return;
     }
 
@@ -175,7 +196,7 @@ const Onboarding = () => {
         }
       };
     }
-  }, [user, getUserEvents, eventsLoading, events, navigation, hasCheckedRedirect]);
+  }, [user, getUserEvents, eventsLoading, events, navigation, hasCheckedRedirect, getUserCollection, collectionsInitialised, collectionsLoading]);
 
   const handleModeChange = (nextMode) => {
     setError('');

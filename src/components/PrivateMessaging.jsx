@@ -25,7 +25,7 @@ import { db } from '../config/firebase';
 import { blockUser, reportUser } from '../services/blocking';
 import UserProfileModal from './UserProfileModal';
 
-const PrivateMessaging = ({ eventId, members, onBackToTabletalk }) => {
+const PrivateMessaging = ({ eventId, members, onBackToTabletalk, initialOtherUserId }) => {
   const { user } = useAuth();
   const userId = user?.uid || user?.id;
   
@@ -40,6 +40,7 @@ const PrivateMessaging = ({ eventId, members, onBackToTabletalk }) => {
   const [selectedProfileUserId, setSelectedProfileUserId] = useState(null);
   const [selectedProfileUserName, setSelectedProfileUserName] = useState(null);
   const [selectedProfileAvatarUrl, setSelectedProfileAvatarUrl] = useState(null);
+  const [hasHandledInitialUser, setHasHandledInitialUser] = useState(false);
 
   // Load member data
   useEffect(() => {
@@ -101,6 +102,20 @@ const PrivateMessaging = ({ eventId, members, onBackToTabletalk }) => {
     const interval = setInterval(loadConversations, 30000); // Every 30 seconds
     return () => clearInterval(interval);
   }, [eventId, userId]);
+
+  // Reset hasHandledInitialUser when initialOtherUserId changes
+  useEffect(() => {
+    setHasHandledInitialUser(false);
+  }, [initialOtherUserId]);
+
+  // Handle initial user to start conversation with
+  useEffect(() => {
+    if (initialOtherUserId && !hasHandledInitialUser && memberData[initialOtherUserId] && !selectedConversation && Object.keys(memberData).length > 0) {
+      setHasHandledInitialUser(true);
+      handleStartConversation(initialOtherUserId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOtherUserId, hasHandledInitialUser, memberData, selectedConversation]);
 
   // Load unread count
   useEffect(() => {

@@ -11,7 +11,6 @@ import GameDetailsModal from '../components/GameDetailsModal';
 import UserProfileModal from '../components/UserProfileModal';
 import Modal from '../components/common/Modal';
 import { formatDate, formatTime } from '../utils/helpers';
-import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
 import BeepleRecommendations from '../components/BeepleRecommendations';
 import BeepleGameOptimizer from '../components/BeepleGameOptimizer';
@@ -524,19 +523,16 @@ const BrowseAndProposeScreen = () => {
       const effectiveBggData = hasCategoryRanks ? game : null;
       
       if (effectiveBggData) {
-        const rating = effectiveBggData.average ? getStarRating(effectiveBggData.average) : (game.bggRating ? getStarRating(game.bggRating) : 0);
         const primaryCategory = getCategoryFromRanks(effectiveBggData);
         
         return {
           ...game,
-          _rating: rating,
           _primaryCategory: primaryCategory,
         };
       }
       
       return {
         ...game,
-        _rating: game.bggRating ? getStarRating(game.bggRating) : 0,
         _primaryCategory: 'Other',
       };
     });
@@ -1602,6 +1598,7 @@ const BrowseAndProposeScreen = () => {
         contentContainerStyle={styles.scrollContent}
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Beeple Game Optimizer */}
         {filteredProposals.length > 0 && confirmedAttendees.length > 0 && (

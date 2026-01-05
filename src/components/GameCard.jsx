@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { View, Text, Image, StyleSheet, Pressable, Dimensions, useWindowDimensions, Alert, Animated } from 'react-native';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
-import { getGameBadges, getStarRating } from '../utils/gameBadges';
+import { getGameBadges } from '../utils/gameBadges';
 import GameDetailsModal from './GameDetailsModal';
 import DottedHeart from './DottedHeart';
 import { getColumnCount, BREAKPOINTS } from '../utils/responsive';
@@ -35,13 +35,36 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   const { width: screenWidth } = useWindowDimensions();
   const [bggData, setBggData] = useState(null);
   const [badges, setBadges] = useState([]);
-  const [starRating, setStarRating] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [showIncompleteExplanation, setShowIncompleteExplanation] = useState(false);
   
   // Animation values for card press effects
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  
+  // Check if game is display-only (missing all critical fields for recommendations)
+  const isDisplayOnly = useMemo(() => {
+    // Check displayOnly flag from game data or bggData
+    if (game.displayOnly === true || (preloadedBggData && preloadedBggData.displayOnly === true)) {
+      return true;
+    }
+    
+    // Use preloadedBggData if available, otherwise check game object directly
+    // (enriched games have all BGG data merged into them, so game itself is the source)
+    const bggData = preloadedBggData || game;
+    
+    const hasPublisher = !!(bggData.publisher || 
+      (Array.isArray(bggData.publishers) && bggData.publishers.length > 0));
+    const hasMechanics = !!(bggData.mechanics && 
+      (Array.isArray(bggData.mechanics) ? bggData.mechanics.length > 0 : true));
+    const hasCategories = !!(bggData.categories && 
+      (Array.isArray(bggData.categories) ? bggData.categories.length > 0 : true));
+    const hasComplexity = !!(bggData.averageWeight || bggData.complexity);
+    
+    // Missing all critical fields
+    return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+  }, [game, preloadedBggData]);
   
   // Animation values for favorite heart shimmer effect
   const shimmerOpacity = useRef(new Animated.Value(1)).current;
@@ -104,7 +127,6 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     initializationKeyRef.current = currentKey;
 
     const gameBadges = getGameBadges(preloadedBggData);
-    const stars = preloadedBggData.average ? getStarRating(preloadedBggData.average) : 0;
     const thumbnail =
       preloadedBggData.thumbnail && !game.bggThumbnail && !game.thumbnail
         ? preloadedBggData.thumbnail
@@ -116,7 +138,6 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
 
       setBggData(preloadedBggData);
       setBadges(gameBadges);
-      setStarRating(stars);
       if (thumbnail) setThumbnailUrl(thumbnail);
 
       console.log('[GameCard] Initialization complete for:', game.title);
@@ -284,18 +305,24 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     [game.yearPublished, bggData?.yearPublished],
   );
 
-  const rating = useMemo(() => {
-    if (starRating) return starRating;
-    if (bggData?.average) {
-      try {
-        return getStarRating(bggData.average);
-      } catch (error) {
-        console.error('[GameCard] Error calculating rating:', error);
-        return 0;
-      }
+  // Get BGG rating (0-10 scale) directly from game data
+  const bggRating = useMemo(() => {
+    // Check game object directly for average or bggRating
+    if (game.average) {
+      const rating = parseFloat(game.average);
+      return isNaN(rating) ? null : rating;
     }
-    return 0;
-  }, [starRating, bggData?.average]);
+    if (game.bggRating) {
+      const rating = parseFloat(game.bggRating);
+      return isNaN(rating) ? null : rating;
+    }
+    // Check bggData from preloadedBggData
+    if (bggData?.average) {
+      const rating = parseFloat(bggData.average);
+      return isNaN(rating) ? null : rating;
+    }
+    return null;
+  }, [game.average, game.bggRating, bggData?.average]);
 
   const handleDelete = () => {
     if (onDelete) {
@@ -334,6 +361,12 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     // Stop event propagation to prevent triggering parent handlers
     if (e && e.stopPropagation) {
       e.stopPropagation();
+    }
+    
+    // If game is display-only, show explanation instead of favoriting
+    if (isDisplayOnly) {
+      setShowIncompleteExplanation(true);
+      return;
     }
     
     if (!userId || !game) return;
@@ -414,7 +447,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
 
     return (
       <Animated.View style={[dynamicStyles.card, styles.card, animatedCardStyle]} pointerEvents={disableModal ? 'box-none' : 'auto'}>
-        {/* Favorite Heart Button - Upper Left */}
+        {/* Favorite Heart Button or Incomplete Data Indicator - Upper Left */}
         {userId && (
           <Pressable
             style={styles.favoriteButton}
@@ -426,26 +459,55 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
               }
             }}
             accessibilityRole="button"
-            accessibilityLabel={isFavorite ? `Remove ${title} from favorites` : `Add ${title} to favorites`}
+            accessibilityLabel={
+              isDisplayOnly 
+                ? `Game has incomplete data - tap for explanation`
+                : isFavorite 
+                  ? `Remove ${title} from favorites` 
+                  : `Add ${title} to favorites`
+            }
           >
-            <Animated.View
-              style={{
-                opacity: isFavorite ? shimmerOpacity : 1,
-                transform: isFavorite ? [{ scale: shimmerScale }] : [],
-              }}
-            >
-              {isFavorite ? (
-                <FontAwesome5 
-                  name="heart" 
-                  size={16} 
-                  solid={true}
-                  color="#FFD700"
-                />
-              ) : (
-                <DottedHeart size={16} color="#555555" />
-              )}
-            </Animated.View>
+            {isDisplayOnly ? (
+              <View style={styles.incompleteIndicator}>
+                <Text style={styles.incompleteQuestionMark}>?</Text>
+              </View>
+            ) : (
+              <Animated.View
+                style={{
+                  opacity: isFavorite ? shimmerOpacity : 1,
+                  transform: isFavorite ? [{ scale: shimmerScale }] : [],
+                }}
+              >
+                {isFavorite ? (
+                  <FontAwesome5 
+                    name="heart" 
+                    size={16} 
+                    solid={true}
+                    color="#FFD700"
+                  />
+                ) : (
+                  <DottedHeart size={16} color="#555555" />
+                )}
+              </Animated.View>
+            )}
           </Pressable>
+        )}
+        
+        {/* Explanation Modal for Incomplete Games */}
+        {showIncompleteExplanation && (
+          <View style={styles.modalOverlay}>
+            <View style={styles.explanationModal}>
+              <Text style={styles.explanationText}>
+                Lacks heart data
+              </Text>
+              <Pressable
+                style={styles.explanationButton}
+                onPress={() => setShowIncompleteExplanation(false)}
+              >
+                <Text style={styles.explanationButtonText}>Got it</Text>
+              </Pressable>
+            </View>
+          </View>
         )}
 
         {/* Delete Button */}
@@ -504,17 +566,11 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
             {/* Collapsed View - Year and Rating only */}
             <View style={styles.metaRow}>
               {year && <Text style={styles.year}>{year}</Text>}
-              {rating > 0 && (
-                <View style={styles.ratingContainer}>
-                  <Text style={styles.ratingText}>
-                    {'★'.repeat(Math.floor(rating))}
-                    {rating % 1 >= 0.5 ? '½' : ''}
+              {bggRating !== null && bggRating > 0 && (
+                <View style={styles.ratingHexagon}>
+                  <Text style={styles.ratingHexagonText}>
+                    {bggRating.toFixed(1)}
                   </Text>
-                  {bggData?.average && (
-                    <Text style={styles.ratingNumber}>
-                      {parseFloat(bggData.average).toFixed(1)}
-                    </Text>
-                  )}
                 </View>
               )}
             </View>
@@ -605,6 +661,74 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.1)',
   },
+  incompleteIndicator: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 193, 7, 0.9)', // Amber/yellow background
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 152, 0, 0.3)',
+  },
+  incompleteQuestionMark: {
+    fontSize: 18,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    elevation: 10,
+  },
+  explanationModal: {
+    backgroundColor: theme.colors.surfaceColor,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.lg,
+    margin: theme.spacing.lg,
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  explanationTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+  },
+  explanationText: {
+    fontSize: theme.typography.fontSize.lg,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.md,
+    lineHeight: 24,
+    textAlign: 'center',
+    fontWeight: theme.typography.fontWeight.medium,
+  },
+  explanationButton: {
+    backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.sm,
+    alignItems: 'center',
+    marginTop: theme.spacing.sm,
+  },
+  explanationButtonText: {
+    color: '#FFFFFF',
+    fontSize: theme.typography.fontSize.md,
+    fontWeight: theme.typography.fontWeight.semibold,
+  },
   thumbnailContainer: {
     width: '100%',
     height: 120, // Thumbnail height for grid cards
@@ -659,20 +783,23 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: theme.typography.fontWeight.semibold,
   },
-  ratingContainer: {
-    flexDirection: 'row',
+  ratingHexagon: {
+    width: 34,
+    height: 34,
+    backgroundColor: '#5cb85c',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: theme.spacing.xs,
+    transform: [{ rotate: '45deg' }],
+    borderRadius: 2,
   },
-  ratingText: {
-    fontSize: 16,
-    color: theme.colors.meepleYellow,
-    fontWeight: theme.typography.fontWeight.semibold,
-  },
-  ratingNumber: {
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    fontWeight: theme.typography.fontWeight.medium,
+  ratingHexagonText: {
+    fontSize: 14,
+    color: '#ffffff',
+    fontWeight: theme.typography.fontWeight.bold,
+    transform: [{ rotate: '-45deg' }],
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
 });
 

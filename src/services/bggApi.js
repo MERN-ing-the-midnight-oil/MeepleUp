@@ -110,7 +110,7 @@ function getBGGToken() {
  * @param {number} limit - Maximum number of results (default: 10)
  * @returns {Promise<Array>} Array of matching games with id, name, yearPublished
  */
-export async function searchBGGAPI(query, limit = 10) {
+export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
   if (!query || !query.trim()) {
     return [];
   }
@@ -129,9 +129,17 @@ export async function searchBGGAPI(query, limit = 10) {
       headers['Authorization'] = `Bearer ${token}`;
     }
     
-    let response = await fetch(url, {
-      headers: Object.keys(headers).length > 0 ? headers : undefined,
-    });
+    // Helper function to retry the fetch
+    const fetchWithRetry = async () => {
+      return await fetch(url, {
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+      });
+    };
+    
+    let response = await fetchWithRetry();
+    
+    // Handle 429 rate limit errors with exponential backoff
+    response = await handle429WithRetry(response, fetchWithRetry, 0, maxRetries);
     
     // If header auth fails with 401, try token as query parameter
     if (response.status === 401 && token) {
@@ -139,7 +147,9 @@ export async function searchBGGAPI(query, limit = 10) {
         console.log('[BGG API] Header auth failed, trying token as query parameter');
       }
       const urlWithToken = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame&token=${token}`;
+      const fetchWithTokenRetry = async () => await fetch(urlWithToken);
       response = await fetch(urlWithToken);
+      response = await handle429WithRetry(response, fetchWithTokenRetry, 0, maxRetries);
       
       // If still fails, try without authentication
       if (response.status === 401 || response.status === 403) {
@@ -147,7 +157,9 @@ export async function searchBGGAPI(query, limit = 10) {
           console.log('[BGG API] Token query param also failed, trying without auth');
         }
         const urlNoAuth = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame`;
+        const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
         response = await fetch(urlNoAuth);
+        response = await handle429WithRetry(response, fetchNoAuthRetry, 0, maxRetries);
       }
     } else if (response.status === 401 && !token) {
       // No token configured, try without auth
@@ -155,21 +167,36 @@ export async function searchBGGAPI(query, limit = 10) {
         console.log('[BGG API] No token configured, trying without auth');
       }
       const urlNoAuth = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame`;
+      const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
       response = await fetch(urlNoAuth);
+      response = await handle429WithRetry(response, fetchNoAuthRetry, 0, maxRetries);
     }
     
     if (!response.ok) {
-      // If we still have errors after all fallbacks, log and return empty array
+      // If we still have errors after all fallbacks and retries, log and return empty array
       if (__DEV__) {
-        console.warn(`[BGG API] All authentication methods failed. Final status: ${response.status}`);
+        console.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
       }
-      // Don't throw - return empty array so the app can continue
+      // For 429 errors specifically, log a more helpful message
+      if (response.status === 429) {
+        if (__DEV__) {
+          console.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
+        }
+        // Throw an error so the caller knows to retry
+        throw new Error(`BGG API rate limited (429) for search: "${query}"`);
+      }
+      // Don't throw for other errors - return empty array so the app can continue
       return [];
     }
 
     const xmlText = await response.text();
     return parseBGGSearchXML(xmlText, limit);
   } catch (error) {
+    // If it's a 429 error, re-throw it so caller can retry
+    if (error.message && error.message.includes('rate limited')) {
+      throw error;
+    }
+    
     console.error('[BGG API] Error searching games:', error);
     // Try one more time without authentication as a last resort
     try {
@@ -177,14 +204,23 @@ export async function searchBGGAPI(query, limit = 10) {
         console.log('[BGG API] Trying final fallback without authentication for search');
       }
       const urlNoAuth = `${BGG_API_BASE}/search?query=${encodeURIComponent(query.trim())}&type=boardgame`;
+      const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
       const finalResponse = await fetch(urlNoAuth);
-      if (finalResponse.ok) {
-        const xmlText = await finalResponse.text();
+      const retriedResponse = await handle429WithRetry(finalResponse, fetchNoAuthRetry, 0, maxRetries);
+      if (retriedResponse.ok) {
+        const xmlText = await retriedResponse.text();
         return parseBGGSearchXML(xmlText, limit);
+      } else if (retriedResponse.status === 429) {
+        // Still rate limited after retries
+        throw new Error(`BGG API rate limited (429) for search: "${query}"`);
       }
     } catch (finalError) {
       if (__DEV__) {
         console.warn('[BGG API] Final fallback also failed:', finalError);
+      }
+      // Re-throw 429 errors
+      if (finalError.message && finalError.message.includes('rate limited')) {
+        throw finalError;
       }
     }
     return [];

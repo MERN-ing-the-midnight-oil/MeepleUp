@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, useWindowDimensions, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
@@ -8,9 +8,12 @@ import FaderSlider from './FaderSlider';
 import BeepleAvatar from './BeepleAvatar';
 import PoweredByBGG from './PoweredByBGG';
 import GameCard from './GameCard';
+import LoadingSpinner from './common/LoadingSpinner';
+import Modal from './common/Modal';
 import { preCalculateAllMatches, calculateGameScore, getRecommendationText } from '../utils/optimizedRecommendations';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import storage from '../utils/storage';
 
 const DEFAULT_WEIGHTS = {
   publisher: 3,
@@ -24,19 +27,30 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   const { width } = useWindowDimensions();
   const navigation = useNavigation();
   const { user, updateUser } = useAuth();
-  const { collections, updateGameInCollection, addGameToCollection } = useCollections();
+  const { collections, updateGameInCollection, addGameToCollection, getUserCollection } = useCollections();
+  const userId = user?.uid || user?.id;
   const [weights, setWeights] = useState(DEFAULT_WEIGHTS);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [preCalculatedMatches, setPreCalculatedMatches] = useState(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(true);
+  const [showExplanationModal, setShowExplanationModal] = useState(false);
+  const [hasSeenExplanation, setHasSeenExplanation] = useState(false);
   const [pendingFavorites, setPendingFavorites] = useState(new Map()); // Map<gameId, isFavorite>
   const pendingFavoritesRef = useRef(new Map()); // Ref to track pending favorites for cleanup
   const pendingFavoriteGamesRef = useRef(new Map()); // Ref to track game data for pending favorites
   const saveTimeoutRef = useRef(null);
   const expandAnimation = useRef(new Animated.Value(0)).current;
   const collapseAnimation = useRef(new Animated.Value(0)).current;
+  
+  // Count user's favorited games
+  const favoritedGamesCount = useMemo(() => {
+    if (!userId) return 0;
+    const collection = getUserCollection ? getUserCollection(userId) : (collections[userId] || []);
+    if (!Array.isArray(collection)) return 0;
+    return collection.filter(game => game.isFavorite === true).length;
+  }, [userId, collections, getUserCollection]);
 
   // Load user's custom weights
   useEffect(() => {
@@ -54,28 +68,336 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     };
   }, []);
 
+  // Check if user has seen the explanation modal
+  useEffect(() => {
+    const checkExplanationSeen = async () => {
+      try {
+        const seen = await storage.getItem('beeple_recommends_explanation_seen');
+        setHasSeenExplanation(seen === 'true');
+      } catch (error) {
+        console.error('[BeepleRecommendations] Error checking explanation seen:', error);
+      }
+    };
+    checkExplanationSeen();
+  }, []);
+
+  // Handle banner click - show modal on first click
+  const handleBannerClick = useCallback(() => {
+    if (!hasSeenExplanation) {
+      setShowExplanationModal(true);
+      // Mark as seen
+      storage.setItem('beeple_recommends_explanation_seen', 'true').catch(err => {
+        console.error('[BeepleRecommendations] Error saving explanation seen:', err);
+      });
+      setHasSeenExplanation(true);
+    }
+  }, [hasSeenExplanation]);
+
+  // Automatically expand component when analysis completes
+  const prevIsCalculatingRef = useRef(isCalculating);
+  useEffect(() => {
+    // Check if calculation just finished (transitioned from true to false)
+    if (prevIsCalculatingRef.current === true && isCalculating === false && isCollapsed) {
+      // Analysis just finished, expand the component immediately
+      setIsCollapsed(false);
+      // Set animation value immediately
+      collapseAnimation.setValue(1);
+    }
+    prevIsCalculatingRef.current = isCalculating;
+  }, [isCalculating, isCollapsed]);
+
+  // Helper function to check if a game is display-only (missing all critical fields)
+  const isDisplayOnlyGame = useCallback((game) => {
+    // Check displayOnly flag
+    if (game.displayOnly === true) {
+      return true;
+    }
+    
+    // Also check if game is missing all critical fields
+    const bggData = game._bggData || game;
+    const hasPublisher = !!(bggData.publisher || 
+      (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+      (Array.isArray(game.publishers) && game.publishers.length > 0) ||
+      game.publisher);
+    const hasMechanics = !!(bggData.mechanics || game.mechanics) && 
+      (!Array.isArray(bggData.mechanics || game.mechanics) || (bggData.mechanics || game.mechanics).length > 0);
+    const hasCategories = !!(bggData.categories || game.categories) && 
+      (!Array.isArray(bggData.categories || game.categories) || (bggData.categories || game.categories).length > 0);
+    const hasComplexity = !!(bggData.averageWeight || bggData.complexity || game.averageWeight || game.complexity);
+    
+    // Missing all critical fields
+    return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+  }, []);
+
+  // Enrich userCollection if it contains references without full BGG data
+  const enrichedUserCollection = useMemo(() => {
+    if (!userCollection || userCollection.length === 0) return [];
+    
+    // Filter out display-only games - they cannot be used for recommendations
+    const validGames = userCollection.filter(game => !isDisplayOnlyGame(game));
+    
+    // Check if any games are references (missing ALL publisher/mechanics/categories/complexity)
+    // A game needs enrichment if it has a bggId but is missing ALL critical matching fields
+    const needsEnrichment = validGames.some(game => {
+      if (!game.bggId && !game.id) return false; // Not a reference if no ID
+      
+      const bggData = game._bggData || game;
+      const hasPublisher = !!(bggData.publisher || 
+        (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+        (Array.isArray(game.publishers) && game.publishers.length > 0) ||
+        game.publisher);
+      const hasMechanics = !!(bggData.mechanics || game.mechanics);
+      const hasCategories = !!(bggData.categories || game.categories);
+      const hasComplexity = !!(bggData.averageWeight || bggData.complexity || game.averageWeight || game.complexity);
+      
+      // If it's a reference with bggId but missing ALL critical fields, it needs enrichment
+      // Note: we check for missing ALL fields, not just any one field
+      return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+    });
+    
+    if (!needsEnrichment) {
+      // Collection is already enriched, return filtered games
+      return validGames;
+    }
+    
+    // Return filtered games as-is for now - enrichment will happen asynchronously
+    // The enrichment should be handled by CollectionsContext, but we'll still try to work with what we have
+    return validGames;
+  }, [userCollection, isDisplayOnlyGame]);
+
+  // Track last calculated data to prevent unnecessary recalculations
+  const lastCalculatedRef = useRef({ gamesLength: 0, collectionLength: 0, collectionHash: '' });
+
   // Pre-calculate all matches once when games or collection changes
   useEffect(() => {
-    console.log('[BeepleRecommendations] useEffect triggered:', {
-      gamesCount: games?.length || 0,
-      userCollectionCount: userCollection?.length || 0,
-      hasGames: !!games && games.length > 0,
-      hasCollection: !!userCollection && userCollection.length > 0
+    // Create a simple hash of collection to detect actual changes
+    const collectionHash = enrichedUserCollection 
+      ? enrichedUserCollection.map(g => `${g.bggId || g.id}_${g.isFavorite ? 'f' : 'n'}`).join(',')
+      : '';
+    
+    const gamesLength = games?.length || 0;
+    const collectionLength = enrichedUserCollection?.length || 0;
+    
+    // Skip if nothing has actually changed
+    if (
+      lastCalculatedRef.current.gamesLength === gamesLength &&
+      lastCalculatedRef.current.collectionLength === collectionLength &&
+      lastCalculatedRef.current.collectionHash === collectionHash
+    ) {
+      return; // No actual changes, skip recalculation
+    }
+    
+    // Update ref
+    lastCalculatedRef.current = {
+      gamesLength,
+      collectionLength,
+      collectionHash,
+    };
+
+    // Only log once per actual change, not on every render
+    console.log('[BeepleRecommendations] Recalculating recommendations:', {
+      gamesCount: gamesLength,
+      collectionCount: collectionLength,
+      favoritedCount: favoritedGamesCount,
+      hasGames: !!(games && games.length > 0),
+      hasCollection: !!(enrichedUserCollection && enrichedUserCollection.length > 0),
     });
 
-    if (!games || games.length === 0 || !userCollection || userCollection.length === 0) {
-      console.log('[BeepleRecommendations] Skipping calculation - missing games or collection');
+    if (!games || games.length === 0 || !enrichedUserCollection || enrichedUserCollection.length === 0) {
+      console.warn('[BeepleRecommendations] Skipping calculation - missing games or collection:', {
+        games: !games ? 'null' : games.length === 0 ? 'empty' : `has ${games.length} games`,
+        collection: !enrichedUserCollection ? 'null' : enrichedUserCollection.length === 0 ? 'empty' : `has ${enrichedUserCollection.length} games`,
+      });
       setPreCalculatedMatches(null);
       return;
     }
 
     setIsCalculating(true);
     // Use setTimeout to allow UI to update, then calculate
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       try {
         console.log('[BeepleRecommendations] Starting pre-calculation...');
-        const preCalculated = preCalculateAllMatches(games, userCollection);
-        console.log('[BeepleRecommendations] Pre-calculation complete, matches found:', preCalculated.size);
+        console.log('[BeepleRecommendations] Initial collection state:', {
+          totalGames: enrichedUserCollection.length,
+          favoritedGames: enrichedUserCollection.filter(g => g.isFavorite === true).length,
+          sampleFavoritedGame: enrichedUserCollection.find(g => g.isFavorite === true) ? {
+            title: enrichedUserCollection.find(g => g.isFavorite === true).title || enrichedUserCollection.find(g => g.isFavorite === true).name,
+            bggId: enrichedUserCollection.find(g => g.isFavorite === true).bggId,
+            hasMechanics: !!(enrichedUserCollection.find(g => g.isFavorite === true).mechanics || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.mechanics),
+            hasCategories: !!(enrichedUserCollection.find(g => g.isFavorite === true).categories || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.categories),
+            hasPublisher: !!(enrichedUserCollection.find(g => g.isFavorite === true).publisher || enrichedUserCollection.find(g => g.isFavorite === true).publishers || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.publisher || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.publishers),
+          } : null,
+        });
+        
+        // Try to enrich collection if needed
+        let collectionToUse = enrichedUserCollection;
+        const needsEnrichment = enrichedUserCollection.some(game => {
+          if (!game.bggId && !game.id) return false;
+          
+          const bggData = game._bggData || game;
+          const hasPublisher = !!(bggData.publisher || 
+            (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+            (Array.isArray(game.publishers) && game.publishers.length > 0) ||
+            game.publisher);
+          const hasMechanics = !!(bggData.mechanics || game.mechanics);
+          const hasCategories = !!(bggData.categories || game.categories);
+          const hasComplexity = !!(bggData.averageWeight || bggData.complexity || game.averageWeight || game.complexity);
+          
+          // Needs enrichment if missing ALL critical fields
+          return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+        });
+        
+        if (needsEnrichment) {
+          try {
+            const { batchGetGamesById } = await import('../services/gameDatabase');
+            
+            // OPTIMIZATION: Only enrich games that are favorited OR games that have missing data
+            // For recommendations, we primarily care about favorited games, but we'll enrich
+            // all games that need it to ensure accurate matching
+            const gamesToEnrich = enrichedUserCollection.filter(g => {
+              if (!g.bggId) return false;
+              
+              // Always enrich favorited games
+              if (g.isFavorite === true) return true;
+              
+              // Also enrich games that are missing all critical fields
+              const bggData = g._bggData || g;
+              const hasPublisher = !!(bggData.publisher || 
+                (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+                (Array.isArray(g.publishers) && g.publishers.length > 0) ||
+                g.publisher);
+              const hasMechanics = !!(bggData.mechanics || g.mechanics);
+              const hasCategories = !!(bggData.categories || g.categories);
+              const hasComplexity = !!(bggData.averageWeight || bggData.complexity || g.averageWeight || g.complexity);
+              
+              return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+            });
+            
+            const bggIds = gamesToEnrich
+              .map(g => g.bggId.toString());
+            
+            if (bggIds.length > 0) {
+              if (__DEV__) {
+                console.log(`[BeepleRecommendations] Enriching ${bggIds.length} games (${gamesToEnrich.filter(g => g.isFavorite).length} favorited)`);
+              }
+              
+              const gameDataMap = await batchGetGamesById(bggIds);
+              console.log('[BeepleRecommendations] Enrichment results:', {
+                requestedGames: bggIds.length,
+                foundGames: gameDataMap.size,
+                missingGames: bggIds.length - gameDataMap.size,
+                sampleFoundGame: gameDataMap.size > 0 ? (() => {
+                  const firstKey = Array.from(gameDataMap.keys())[0];
+                  const firstGame = gameDataMap.get(firstKey);
+                  return {
+                    bggId: firstKey,
+                    hasMechanics: !!(firstGame.mechanics && Array.isArray(firstGame.mechanics) && firstGame.mechanics.length > 0),
+                    hasCategories: !!(firstGame.categories && Array.isArray(firstGame.categories) && firstGame.categories.length > 0),
+                    hasPublisher: !!(firstGame.publisher || (firstGame.publishers && Array.isArray(firstGame.publishers) && firstGame.publishers.length > 0)),
+                    hasComplexity: !!(firstGame.averageWeight || firstGame.complexity),
+                    mechanicsCount: Array.isArray(firstGame.mechanics) ? firstGame.mechanics.length : 0,
+                    categoriesCount: Array.isArray(firstGame.categories) ? firstGame.categories.length : 0,
+                  };
+                })() : null,
+              });
+              
+              // Create a map for quick lookup
+              const enrichedGamesMap = new Map();
+              gamesToEnrich.forEach(game => {
+                if (!game.bggId) return;
+                const fullData = gameDataMap.get(game.bggId.toString());
+                if (fullData) {
+                  enrichedGamesMap.set(game.bggId.toString(), {
+                    ...fullData,
+                    ...game, // Preserve user-specific data like isFavorite
+                    id: game.id || `bgg_${game.bggId}`,
+                    title: fullData.name || game.title || game.name,
+                    bggId: game.bggId,
+                    isFavorite: game.isFavorite === true,
+                  });
+                } else {
+                  console.warn(`[BeepleRecommendations] Game ${game.bggId} not found in enrichment results`);
+                }
+              });
+              
+              // Merge enriched games back into collection
+              collectionToUse = enrichedUserCollection.map(game => {
+                if (!game.bggId) return game;
+                const enriched = enrichedGamesMap.get(game.bggId.toString());
+                return enriched || game;
+              });
+              
+              if (__DEV__) {
+                const favoritedBefore = enrichedUserCollection.filter(g => g.isFavorite === true).length;
+                const favoritedAfter = collectionToUse.filter(g => g.isFavorite === true).length;
+                
+                // Debug: Check what data the enriched games actually have
+                const sampleEnriched = collectionToUse
+                  .filter(g => g.isFavorite)
+                  .slice(0, 1);
+                
+                if (sampleEnriched.length > 0) {
+                  const sample = sampleEnriched[0];
+                  console.log('[BeepleRecommendations] Sample enriched favorite game data:', {
+                    title: sample.title || sample.name,
+                    bggId: sample.bggId,
+                    hasMechanics: !!(sample.mechanics || (sample._bggData && sample._bggData.mechanics)),
+                    hasCategories: !!(sample.categories || (sample._bggData && sample._bggData.categories)),
+                    hasPublisher: !!(sample.publisher || sample.publishers || (sample._bggData && (sample._bggData.publisher || sample._bggData.publishers))),
+                    hasComplexity: !!(sample.averageWeight || sample.complexity || (sample._bggData && (sample._bggData.averageWeight || sample._bggData.complexity))),
+                    mechanicsType: typeof sample.mechanics,
+                    mechanicsValue: Array.isArray(sample.mechanics) ? sample.mechanics.slice(0, 3) : sample.mechanics,
+                    categoriesType: typeof sample.categories,
+                    categoriesValue: Array.isArray(sample.categories) ? sample.categories.slice(0, 3) : sample.categories,
+                    publisherValue: sample.publisher || (Array.isArray(sample.publishers) ? sample.publishers[0] : sample.publishers),
+                    complexityValue: sample.averageWeight || sample.complexity,
+                  });
+                }
+                
+                console.log('[BeepleRecommendations] Enriched collection:', {
+                  original: enrichedUserCollection.length,
+                  enriched: collectionToUse.length,
+                  gamesFound: gameDataMap.size,
+                  favoritedBefore,
+                  favoritedAfter,
+                });
+              }
+            }
+          } catch (enrichError) {
+            console.error('[BeepleRecommendations] Error enriching collection:', enrichError);
+            // Continue with original collection if enrichment fails
+          }
+        }
+        
+        // Filter out display-only games from both games list and user collection
+        // Display-only games cannot be used for recommendations
+        const validGames = games.filter(game => !isDisplayOnlyGame(game));
+        const validCollection = collectionToUse.filter(game => !isDisplayOnlyGame(game));
+        
+        if (__DEV__ && validGames.length < games.length) {
+          console.log(`[BeepleRecommendations] Filtered out ${games.length - validGames.length} display-only games from recommendations pool`);
+        }
+        if (__DEV__ && validCollection.length < collectionToUse.length) {
+          console.log(`[BeepleRecommendations] Filtered out ${collectionToUse.length - validCollection.length} display-only games from user collection`);
+        }
+        
+        console.log('[BeepleRecommendations] About to pre-calculate matches:', {
+          validGamesCount: validGames.length,
+          validCollectionCount: validCollection.length,
+          favoritedInCollection: validCollection.filter(g => g.isFavorite === true).length,
+        });
+        
+        const preCalculated = preCalculateAllMatches(validGames, validCollection);
+        console.log('[BeepleRecommendations] Pre-calculation complete:', {
+          totalMatchesMapSize: preCalculated.size,
+          sampleMatchCount: Array.from(preCalculated.values()).slice(0, 5).map(m => ({
+            totalMatches: m.publisher.length + m.mechanics.length + m.category.length + m.complexity.length,
+            publisher: m.publisher.length,
+            mechanics: m.mechanics.length,
+            category: m.category.length,
+            complexity: m.complexity.length,
+          })),
+        });
         setPreCalculatedMatches(preCalculated);
         setCurrentIndex(0); // Reset to first recommendation
       } catch (error) {
@@ -86,24 +408,24 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [games, userCollection]);
+  }, [games, enrichedUserCollection, isDisplayOnlyGame]);
 
   // Create a set of owned and favorited game IDs for quick lookup
   const ownedGameIds = useMemo(() => {
-    if (!userCollection || userCollection.length === 0) return new Set();
+    if (!enrichedUserCollection || enrichedUserCollection.length === 0) return new Set();
     return new Set(
-      userCollection
+      enrichedUserCollection
         .filter(game => game.bggId || game.id)
         .map(game => String(game.bggId || game.id))
     );
-  }, [userCollection]);
+  }, [enrichedUserCollection]);
 
   const favoritedGameIds = useMemo(() => {
     const favorited = new Set();
     
-    // Add favorited games from userCollection prop
-    if (userCollection && userCollection.length > 0) {
-      userCollection
+    // Add favorited games from enrichedUserCollection
+    if (enrichedUserCollection && enrichedUserCollection.length > 0) {
+      enrichedUserCollection
         .filter(game => game.isFavorite === true && (game.bggId || game.id))
         .forEach(game => {
           favorited.add(String(game.bggId || game.id));
@@ -128,30 +450,56 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     });
     
     return favorited;
-  }, [userCollection, collections, user, pendingFavorites]);
+  }, [enrichedUserCollection, collections, user, pendingFavorites]);
 
   // Calculate scores for all games with current weights
   const scoredGames = useMemo(() => {
     if (!preCalculatedMatches || !games || games.length === 0) {
+      console.log('[BeepleRecommendations] ScoredGames: No pre-calculated matches or games:', {
+        hasMatches: !!preCalculatedMatches,
+        hasGames: !!(games && games.length > 0),
+      });
       return [];
     }
 
-    const scored = games
+    // Filter out display-only games (same as pre-calculation)
+    const validGames = games.filter(game => !isDisplayOnlyGame(game));
+
+    let filteredOutOwned = 0;
+    let filteredOutFavorited = 0;
+    let gamesWithNoMatches = 0;
+    let gamesWithZeroScore = 0;
+    
+    const scored = validGames
       .map(game => {
         const gameId = String(game.bggId || game.id);
         
         // Filter out games the user owns
         if (ownedGameIds.has(gameId)) {
+          filteredOutOwned++;
           return null;
         }
         
         // Filter out games the user has favorited
         if (favoritedGameIds.has(gameId)) {
+          filteredOutFavorited++;
           return null;
         }
         
         const matches = preCalculatedMatches.get(gameId);
         if (!matches) {
+          gamesWithNoMatches++;
+          // Log first few missing matches to debug
+          if (gamesWithNoMatches <= 3) {
+            console.log(`[BeepleRecommendations] Game ${gameId} not found in preCalculatedMatches:`, {
+              gameId,
+              bggId: game.bggId,
+              id: game.id,
+              title: game.title || game.name,
+              mapKeys: Array.from(preCalculatedMatches.keys()).slice(0, 5),
+              mapSize: preCalculatedMatches.size,
+            });
+          }
           // If no matches found, still calculate score (might be 0)
           const emptyMatches = {
             publisher: [],
@@ -160,6 +508,9 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             complexity: []
           };
           const score = calculateGameScore(emptyMatches, weights, game);
+          if (score === 0) {
+            gamesWithZeroScore++;
+          }
           return {
             game,
             score,
@@ -168,6 +519,9 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         }
 
         const score = calculateGameScore(matches, weights, game);
+        if (score === 0) {
+          gamesWithZeroScore++;
+        }
         return {
           game,
           score,
@@ -177,20 +531,30 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       .filter(item => item !== null && item.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    // Debug logging - only in development and reduce verbosity
-    if (__DEV__ && scored.length > 0) {
-      console.log('[BeepleRecommendations] Scored games:', {
-        totalGames: games.length,
-        gamesWithScore: scored.length,
-        topScores: scored.slice(0, 3).map(s => ({ 
-          title: s.game.title || s.game.name, 
-          score: Math.round(s.score)
-        }))
-      });
-    }
+    console.log('[BeepleRecommendations] Scored games summary:', {
+      totalGames: games.length,
+      validGames: validGames.length,
+      filteredOutOwned,
+      filteredOutFavorited,
+      gamesWithNoMatches,
+      gamesWithZeroScore,
+      gamesWithScore: scored.length,
+      ownedGameIdsCount: ownedGameIds.size,
+      favoritedGameIdsCount: favoritedGameIds.size,
+      topScores: scored.slice(0, 5).map(s => ({ 
+        title: s.game.title || s.game.name, 
+        score: Math.round(s.score * 100) / 100,
+        matchCounts: {
+          publisher: s.matches.publisher.length,
+          mechanics: s.matches.mechanics.length,
+          category: s.matches.category.length,
+          complexity: s.matches.complexity.length,
+        },
+      })),
+    });
 
     return scored;
-  }, [preCalculatedMatches, games, weights, ownedGameIds, favoritedGameIds]);
+  }, [preCalculatedMatches, games, weights, ownedGameIds, favoritedGameIds, isDisplayOnlyGame]);
 
   // Get current recommendation
   const currentRecommendation = useMemo(() => {
@@ -387,20 +751,173 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     favorite: 'Multiplier for games you\'ve marked as favorites',
   };
 
+  // Show placeholder if user hasn't loved enough games
+  if (favoritedGamesCount < 8) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.collapsibleHeader}>
+          <View style={styles.headerTopRow}>
+            <View style={styles.beepleContainer}>
+              <BeepleAvatar size={80} />
+              <Text style={styles.beepleCaption}>Beeple</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.headerImageContainer}
+              onPress={handleBannerClick}
+              activeOpacity={0.8}
+            >
+              <Image 
+                source={require('../../assets/images/beeplerecommends.png')} 
+                style={styles.headerImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.headerPoweredByBGG}>
+            <PoweredByBGG 
+              size="small" 
+              containerWidth={200} 
+              style={styles.headerPoweredByBGGStyle} 
+            />
+          </View>
+        </View>
+        <View style={styles.collapsibleContent}>
+          <TouchableOpacity 
+            style={styles.placeholderContainer}
+            onPress={() => navigation.navigate('Collection')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.placeholderText}>
+              "Heart" at least 8 games to unlock beeple recommendations
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Beeple Explanation Modal */}
+        <Modal
+          isOpen={showExplanationModal}
+          onClose={() => setShowExplanationModal(false)}
+          title="Beeple Recommends"
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalBeepleContainer}>
+              <BeepleAvatar size={120} />
+              <Text style={styles.modalBeepleCaption}>Beeple</Text>
+            </View>
+            <View style={styles.modalTextContainer}>
+              <Text style={styles.modalText}>
+                Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
+              </Text>
+              <Text style={styles.modalText}>
+                I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
+              </Text>
+              <Text style={styles.modalText}>
+                I look at things like:
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Publishers (games from the same publishers)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Mechanics (similar gameplay mechanics)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Categories (similar themes and genres)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Complexity (similar difficulty levels)
+              </Text>
+              <Text style={styles.modalText}>
+                The more games you favorite, the better I can understand your preferences and make recommendations!
+              </Text>
+              <Text style={styles.modalText}>
+                You can adjust how much each factor influences my recommendations using the sliders below.
+              </Text>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  }
+
   if (isCalculating) {
     return (
       <View style={styles.container}>
         <View style={styles.collapsibleHeader}>
-          <View style={styles.beepleContainer}>
-            <BeepleAvatar size={80} />
-            <Text style={styles.beepleCaption}>Beeple</Text>
+          <View style={styles.headerTopRow}>
+            <View style={styles.beepleContainer}>
+              <BeepleAvatar size={80} />
+              <Text style={styles.beepleCaption}>Beeple</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.headerImageContainer}
+              onPress={handleBannerClick}
+              activeOpacity={0.8}
+            >
+              <Image 
+                source={require('../../assets/images/beeplerecommends.png')} 
+                style={styles.headerImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
           </View>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerText}>Beeple Recommends</Text>
+          <View style={styles.headerPoweredByBGG}>
+            <PoweredByBGG 
+              size="small" 
+              containerWidth={200} 
+              style={styles.headerPoweredByBGGStyle} 
+            />
           </View>
         </View>
         <View style={styles.collapsibleContent}>
+          <View style={styles.loadingContainer}>
+            <LoadingSpinner size="large" />
+            <Text style={styles.loadingText}>Analyzing your collection...</Text>
+            <Text style={styles.loadingSubtext}>Beep-Boop-Bop, I'm thinking!</Text>
+          </View>
         </View>
+
+        {/* Beeple Explanation Modal */}
+        <Modal
+          isOpen={showExplanationModal}
+          onClose={() => setShowExplanationModal(false)}
+          title="Beeple Recommends"
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalBeepleContainer}>
+              <BeepleAvatar size={120} />
+              <Text style={styles.modalBeepleCaption}>Beeple</Text>
+            </View>
+            <View style={styles.modalTextContainer}>
+              <Text style={styles.modalText}>
+                Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
+              </Text>
+              <Text style={styles.modalText}>
+                I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
+              </Text>
+              <Text style={styles.modalText}>
+                I look at things like:
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Publishers (games from the same publishers)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Mechanics (similar gameplay mechanics)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Categories (similar themes and genres)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Complexity (similar difficulty levels)
+              </Text>
+              <Text style={styles.modalText}>
+                The more games you favorite, the better I can understand your preferences and make recommendations!
+              </Text>
+              <Text style={styles.modalText}>
+                You can adjust how much each factor influences my recommendations using the sliders below.
+              </Text>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -413,14 +930,31 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           onPress={toggleCollapse}
           activeOpacity={0.7}
         >
-          <View style={styles.beepleContainer}>
-            <BeepleAvatar size={80} />
-            <Text style={styles.beepleCaption}>Beeple</Text>
+          <View style={styles.headerTopRow}>
+            <View style={styles.beepleContainer}>
+              <BeepleAvatar size={80} />
+              <Text style={styles.beepleCaption}>Beeple</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.headerImageContainer}
+              onPress={handleBannerClick}
+              activeOpacity={0.8}
+            >
+              <Image 
+                source={require('../../assets/images/beeplerecommends.png')} 
+                style={styles.headerImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+            <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
           </View>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerText}>Beeple Recommends</Text>
+          <View style={styles.headerPoweredByBGG}>
+            <PoweredByBGG 
+              size="small" 
+              containerWidth={200} 
+              style={styles.headerPoweredByBGGStyle} 
+            />
           </View>
-          <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
         </TouchableOpacity>
         
         <Animated.View 
@@ -432,16 +966,8 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             }
           ]}
         >
-          <View style={styles.poweredByBGGContainer}>
-            <PoweredByBGG 
-              size="extraLarge" 
-              containerWidth={width - (theme.spacing.lg * 4)} 
-              style={styles.poweredByBGG} 
-            />
-          </View>
           <Text style={styles.emptyText}>
-            Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities between these games and your collection. 
-            Try <Text style={styles.linkText} onPress={() => navigation.navigate('Collection')}>adding more games to your collection</Text> so I can give you better recommendations!
+            No games are jumping out at me as being similar to the games you have favorited. Try favoriting more games in your collection (or other people's collections!) You have favorited {favoritedGamesCount} games.
           </Text>
           
           {/* Show sliders even when no recommendations */}
@@ -490,6 +1016,49 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             </Animated.View>
           </View>
         </Animated.View>
+
+        {/* Beeple Explanation Modal */}
+        <Modal
+          isOpen={showExplanationModal}
+          onClose={() => setShowExplanationModal(false)}
+          title="Beeple Recommends"
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalBeepleContainer}>
+              <BeepleAvatar size={120} />
+              <Text style={styles.modalBeepleCaption}>Beeple</Text>
+            </View>
+            <View style={styles.modalTextContainer}>
+              <Text style={styles.modalText}>
+                Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
+              </Text>
+              <Text style={styles.modalText}>
+                I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
+              </Text>
+              <Text style={styles.modalText}>
+                I look at things like:
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Publishers (games from the same publishers)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Mechanics (similar gameplay mechanics)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Categories (similar themes and genres)
+              </Text>
+              <Text style={styles.modalBullet}>
+                • Complexity (similar difficulty levels)
+              </Text>
+              <Text style={styles.modalText}>
+                The more games you favorite, the better I can understand your preferences and make recommendations!
+              </Text>
+              <Text style={styles.modalText}>
+                You can adjust how much each factor influences my recommendations using the sliders below.
+              </Text>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   }
@@ -501,14 +1070,31 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           onPress={toggleCollapse}
           activeOpacity={0.7}
         >
-          <View style={styles.beepleContainer}>
-            <BeepleAvatar size={80} />
-            <Text style={styles.beepleCaption}>Beeple</Text>
+          <View style={styles.headerTopRow}>
+            <View style={styles.beepleContainer}>
+              <BeepleAvatar size={80} />
+              <Text style={styles.beepleCaption}>Beeple</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.headerImageContainer}
+              onPress={handleBannerClick}
+              activeOpacity={0.8}
+            >
+              <Image 
+                source={require('../../assets/images/beeplerecommends.png')} 
+                style={styles.headerImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+            <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
           </View>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerText}>Beeple Recommends</Text>
+          <View style={styles.headerPoweredByBGG}>
+            <PoweredByBGG 
+              size="small" 
+              containerWidth={200} 
+              style={styles.headerPoweredByBGGStyle} 
+            />
           </View>
-          <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
         </TouchableOpacity>
 
       <Animated.View 
@@ -522,13 +1108,6 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       >
         {currentRecommendation && (
           <>
-            <View style={styles.poweredByBGGContainer}>
-              <PoweredByBGG 
-                size="extraLarge" 
-                containerWidth={width - (theme.spacing.lg * 4)} 
-                style={styles.poweredByBGG} 
-              />
-            </View>
             <View style={styles.headerSubtextContainer}>
               <Text style={styles.headerSubtext}>
                 Recommendation {currentRecommendation.index} of {currentRecommendation.total}
@@ -645,6 +1224,49 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           </>
         )}
       </Animated.View>
+
+      {/* Beeple Explanation Modal */}
+      <Modal
+        isOpen={showExplanationModal}
+        onClose={() => setShowExplanationModal(false)}
+        title="Beeple Recommends"
+      >
+        <View style={styles.modalContent}>
+          <View style={styles.modalBeepleContainer}>
+            <BeepleAvatar size={120} />
+            <Text style={styles.modalBeepleCaption}>Beeple</Text>
+          </View>
+          <View style={styles.modalTextContainer}>
+            <Text style={styles.modalText}>
+              Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
+            </Text>
+            <Text style={styles.modalText}>
+              I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
+            </Text>
+            <Text style={styles.modalText}>
+              I look at things like:
+            </Text>
+            <Text style={styles.modalBullet}>
+              • Publishers (games from the same publishers)
+            </Text>
+            <Text style={styles.modalBullet}>
+              • Mechanics (similar gameplay mechanics)
+            </Text>
+            <Text style={styles.modalBullet}>
+              • Categories (similar themes and genres)
+            </Text>
+            <Text style={styles.modalBullet}>
+              • Complexity (similar difficulty levels)
+            </Text>
+            <Text style={styles.modalText}>
+              The more games you favorite, the better I can understand your preferences and make recommendations!
+            </Text>
+            <Text style={styles.modalText}>
+              You can adjust how much each factor influences my recommendations using the sliders below.
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -657,12 +1279,17 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
   },
   collapsibleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
     marginBottom: theme.spacing.md,
-    padding: theme.spacing.sm,
+    padding: theme.spacing.md,
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.bgColor,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+    flexWrap: 'wrap',
   },
   header: {
     flexDirection: 'row',
@@ -693,6 +1320,32 @@ const styles = StyleSheet.create({
   headerTextContainer: {
     flex: 1,
     justifyContent: 'center',
+  },
+  headerImageContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: theme.spacing.xs,
+    backgroundColor: theme.colors.meepleRed,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    overflow: 'hidden',
+    maxWidth: '100%',
+  },
+  headerImage: {
+    height: 80,
+    width: undefined,
+    aspectRatio: 1536 / 672, // Actual image aspect ratio
+    maxWidth: '100%',
+  },
+  headerPoweredByBGG: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  headerPoweredByBGGStyle: {
+    width: '100%',
+    maxWidth: '100%',
   },
   collapseIcon: {
     fontSize: theme.typography.fontSize.lg,
@@ -875,6 +1528,68 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     fontWeight: theme.typography.fontWeight.semibold,
     color: '#fff',
+  },
+  placeholderContainer: {
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.woodLight,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    borderStyle: 'dashed',
+    margin: theme.spacing.md,
+  },
+  placeholderText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  loadingContainer: {
+    padding: theme.spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 200,
+  },
+  loadingText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.md,
+    fontWeight: theme.typography.fontWeight.medium,
+    textAlign: 'center',
+  },
+  loadingSubtext: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  modalContent: {
+    padding: theme.spacing.lg,
+  },
+  modalBeepleContainer: {
+    alignItems: 'center',
+    marginBottom: theme.spacing.lg,
+  },
+  modalBeepleCaption: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.sm,
+  },
+  modalTextContainer: {
+    gap: theme.spacing.md,
+  },
+  modalText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    lineHeight: theme.typography.lineHeight.relaxed,
+  },
+  modalBullet: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    lineHeight: theme.typography.lineHeight.relaxed,
+    marginLeft: theme.spacing.md,
   },
 });
 

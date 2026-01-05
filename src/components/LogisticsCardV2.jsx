@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, Image, Platform } from 'react-native';
 import { formatDate, formatTime } from '../utils/helpers';
 import { theme } from '../utils/theme';
@@ -63,6 +63,9 @@ const LogisticsCardV2 = ({
   setSelectedUserForProfile = null,
   // Edit handlers
   handleUpdateDateCardField = null,
+  // Scroll to date props
+  scrollToDateIndex = null,
+  parentScrollRef = null,
 }) => {
   // State for text inputs - one per card
   const [inputs, setInputs] = useState({}); // { [index]: text }
@@ -80,6 +83,69 @@ const LogisticsCardV2 = ({
   });
   const [editingAnnouncement, setEditingAnnouncement] = useState(null); // { announcementId, content }
   const [editingAnnouncementContent, setEditingAnnouncementContent] = useState(''); // Content being edited
+  
+  // Refs and positions for date cards to enable scrolling
+  const dateCardRefs = useRef({}); // { [originalIndex]: ref }
+  const dateCardPositions = useRef({}); // { [originalIndex]: { y: number } }
+
+  // Handle scrolling to a specific date card when scrollToDateIndex changes
+  useEffect(() => {
+    if (scrollToDateIndex !== null && parentScrollRef?.current) {
+      // Try to use stored position first
+      const storedPosition = dateCardPositions.current[scrollToDateIndex];
+      if (storedPosition) {
+        parentScrollRef.current.scrollTo({
+          y: storedPosition.y - 20, // Small offset from top
+          animated: true,
+        });
+        return;
+      }
+
+      // Fallback: measure the date card
+      const dateCardRef = dateCardRefs.current[scrollToDateIndex];
+      if (dateCardRef && typeof dateCardRef.measure === 'function') {
+        dateCardRef.measure((x, y, width, height, pageX, pageY) => {
+          if (parentScrollRef?.current) {
+            // Get the current scroll position to calculate relative position
+            // Since we can't directly measure relative to ScrollView, use pageY
+            // and estimate the scroll position
+            const futureEventIndex = futureEvents.findIndex(
+              fe => fe.originalIndex === scrollToDateIndex
+            );
+            if (futureEventIndex !== -1) {
+              // Estimate based on index (more reliable than pageY which is absolute)
+              const estimatedCardHeight = 350;
+              const headerHeight = 200;
+              const scrollY = headerHeight + (futureEventIndex * estimatedCardHeight);
+              
+              parentScrollRef.current.scrollTo({
+                y: scrollY,
+                animated: true,
+              });
+              
+              // Store the position for future use
+              dateCardPositions.current[scrollToDateIndex] = { y: scrollY };
+            }
+          }
+        });
+      } else {
+        // Ref not yet available, use index-based estimation
+        const futureEventIndex = futureEvents.findIndex(
+          fe => fe.originalIndex === scrollToDateIndex
+        );
+        if (futureEventIndex !== -1 && parentScrollRef?.current) {
+          const estimatedCardHeight = 350;
+          const headerHeight = 200;
+          const scrollY = headerHeight + (futureEventIndex * estimatedCardHeight);
+          
+          parentScrollRef.current.scrollTo({
+            y: scrollY,
+            animated: true,
+          });
+        }
+      }
+    }
+  }, [scrollToDateIndex, parentScrollRef, futureEvents]);
 
   // Fetch announcements from Firestore
   // Simplified query to avoid composite index requirement
@@ -174,7 +240,12 @@ const LogisticsCardV2 = ({
         const dateRSVP = showRSVPForDate && getRSVPForDate ? getRSVPForDate(userId, date) : null;
         
         // Get all members' RSVP statuses for this date
-        const membersWithRSVP = members.map(member => {
+        // First, deduplicate members by userId to prevent duplicate keys
+        const uniqueMembers = Array.from(
+          new Map(members.filter(m => m && m.userId).map(m => [m.userId, m])).values()
+        );
+        
+        const membersWithRSVP = uniqueMembers.map(member => {
           if (!member || !member.userId) return null;
           const memberRsvps = memberRSVPs[member.userId];
           let rsvpStatus = null;
@@ -212,6 +283,18 @@ const LogisticsCardV2 = ({
         return (
           <TouchableOpacity
             key={`v2-card-${index}`}
+            ref={(ref) => {
+              if (ref && originalIndex !== undefined) {
+                dateCardRefs.current[originalIndex] = ref;
+              }
+            }}
+            onLayout={(event) => {
+              // Store the y position when layout is measured
+              if (originalIndex !== undefined) {
+                const { y } = event.nativeEvent.layout;
+                dateCardPositions.current[originalIndex] = { y };
+              }
+            }}
             activeOpacity={0.7}
             onPress={() => {
               // Close dropdown if open
@@ -583,7 +666,7 @@ const LogisticsCardV2 = ({
                     📋 RSVP:
                   </Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
-                    {membersWithRSVP.map((member) => {
+                    {membersWithRSVP.map((member, memberIndex) => {
                       const hasValidAvatar = isValidAvatarUrl(member.avatarUrl);
                       const rsvpStatus = member.rsvpStatus;
                       const rsvpColor =
@@ -594,8 +677,12 @@ const LogisticsCardV2 = ({
                       
                       const isEditingThisMember = editingMemberRSVP?.dateKey === dateKey && editingMemberRSVP?.memberId === member.userId;
                       
+                      // Use composite key to ensure uniqueness: dateKey + userId + index
+                      // This handles cases where the same member might appear multiple times
+                      const uniqueKey = `${dateKey}-${member.userId}-${memberIndex}`;
+                      
                       return (
-                        <View key={member.userId} style={{ marginRight: 8, marginBottom: 8 }}>
+                        <View key={uniqueKey} style={{ marginRight: 8, marginBottom: 8 }}>
                           {isEditingThisMember ? (
                             <View style={{
                               backgroundColor: '#ffffff',

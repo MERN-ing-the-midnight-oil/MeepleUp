@@ -205,22 +205,131 @@ const parseClaudeJson = (text) => {
     cleanedText = jsonMatch[0];
   }
 
+  // Remove control characters (U+0000 thru U+001F) that can cause JSON parse errors
+  // BUT preserve newlines (\n = 0x0A) and carriage returns (\r = 0x0D) as they're needed for JSON structure
+  cleanedText = cleanedText.replace(/[\x00-\x09\x0B-\x1F]/g, '');
+
+  // Try to fix incomplete JSON strings (common when response is truncated)
+  // Look for incomplete strings at the end (missing closing quote)
+  const fixIncompleteString = (jsonStr) => {
+    // Check if there's an incomplete string (pattern: ,"text without closing quote)
+    // This can appear anywhere, not just at the end, if the response was truncated
+    const incompleteMatch = jsonStr.match(/,\s*"([^"]*?)(?:\s*\]|\s*$)/);
+    if (incompleteMatch) {
+      // Find the position where the incomplete string starts (the comma before it)
+      const incompleteStart = incompleteMatch.index;
+      const beforeIncomplete = jsonStr.substring(0, incompleteStart);
+      
+      // Find the last complete entry before the incomplete one
+      // Look for the last occurrence of "text", pattern (with comma)
+      // We need to search backwards from the incomplete start
+      let lastCompleteIndex = -1;
+      
+      // Try to find entries with commas: "text",
+      // Search for all matches and get the last one before incompleteStart
+      const allCompleteMatches = [];
+      const regex = /"([^"]+)",/g;
+      let match;
+      while ((match = regex.exec(beforeIncomplete)) !== null) {
+        allCompleteMatches.push({
+          index: match.index,
+          endIndex: match.index + match[0].length
+        });
+      }
+      
+      if (allCompleteMatches.length > 0) {
+        // Use the last complete entry with comma
+        const lastComplete = allCompleteMatches[allCompleteMatches.length - 1];
+        lastCompleteIndex = lastComplete.endIndex;
+      } else {
+        // Try to find entry without comma: "text" (might be last item)
+        const withoutCommaMatch = beforeIncomplete.match(/"([^"]+)"\s*$/);
+        if (withoutCommaMatch) {
+          lastCompleteIndex = withoutCommaMatch.index + withoutCommaMatch[0].length;
+        } else {
+          // Find last comma and use everything before it
+          const lastComma = beforeIncomplete.lastIndexOf(',');
+          if (lastComma > 0) {
+            lastCompleteIndex = lastComma;
+          }
+        }
+      }
+      
+      if (lastCompleteIndex > 0) {
+        let fixed = jsonStr.substring(0, lastCompleteIndex).trim();
+        // Remove trailing comma if present (shouldn't be, but just in case)
+        fixed = fixed.replace(/,\s*$/, '');
+        // Close the array and object properly
+        return fixed + '\n  ]\n}';
+      }
+    }
+    
+    // Also check if JSON ends with incomplete string (no closing quote)
+    if (jsonStr.match(/"[^"]*$/)) {
+      // Find the last complete entry
+      const allMatches = [];
+      const regex = /"([^"]+)",/g;
+      let match;
+      while ((match = regex.exec(jsonStr)) !== null) {
+        allMatches.push({
+          index: match.index,
+          endIndex: match.index + match[0].length
+        });
+      }
+      
+      if (allMatches.length > 0) {
+        const lastMatch = allMatches[allMatches.length - 1];
+        let fixed = jsonStr.substring(0, lastMatch.endIndex).trim();
+        return fixed + '\n  ]\n}';
+      }
+    }
+    
+    return jsonStr;
+  };
+
   try {
     return JSON.parse(cleanedText);
   } catch (error) {
-    // Log more details about the parsing error
-    if (__DEV__) {
-      console.error('[Claude API] JSON parse error:', error.message);
-      console.error('[Claude API] Original text (first 2000 chars):', text.substring(0, 2000));
-      console.error('[Claude API] Cleaned text (first 2000 chars):', cleanedText.substring(0, 2000));
-      console.error('[Claude API] Full cleaned text length:', cleanedText.length);
+    // Try to fix incomplete JSON
+    console.warn('[Claude API] Initial JSON parse failed, attempting to fix incomplete JSON...');
+    let fixedText = fixIncompleteString(cleanedText);
+    
+    // Also try to close any unclosed brackets/braces
+    const openBraces = (fixedText.match(/\{/g) || []).length;
+    const closeBraces = (fixedText.match(/\}/g) || []).length;
+    const openBrackets = (fixedText.match(/\[/g) || []).length;
+    const closeBrackets = (fixedText.match(/\]/g) || []).length;
+    
+    // Close unclosed brackets first, then braces
+    for (let i = 0; i < openBrackets - closeBrackets; i++) {
+      fixedText += '\n  ]';
+    }
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      fixedText += '\n}';
     }
     
-    // Create error with more context
-    const parseError = new Error(`Claude returned an unreadable response. ${error.message}`);
-    parseError.originalText = text;
-    parseError.cleanedText = cleanedText;
-    throw parseError;
+    try {
+      const parsed = JSON.parse(fixedText);
+      console.log('[Claude API] Successfully fixed and parsed incomplete JSON');
+      return parsed;
+    } catch (fixError) {
+      // Log more details about the parsing error
+      if (__DEV__) {
+        console.error('[Claude API] JSON parse error after fix attempt:', fixError.message);
+        console.error('[Claude API] Original text (first 2000 chars):', text.substring(0, 2000));
+        console.error('[Claude API] Cleaned text (first 2000 chars):', cleanedText.substring(0, 2000));
+        console.error('[Claude API] Fixed text (first 2000 chars):', fixedText.substring(0, 2000));
+        console.error('[Claude API] Full cleaned text length:', cleanedText.length);
+        console.error('[Claude API] Full fixed text length:', fixedText.length);
+      }
+      
+      // Create error with more context
+      const parseError = new Error(`Claude returned an unreadable response. ${error.message}`);
+      parseError.originalText = text;
+      parseError.cleanedText = cleanedText;
+      parseError.fixedText = fixedText;
+      throw parseError;
+    }
   }
 };
 
@@ -391,6 +500,10 @@ export const buildGameIdentificationPrompt = buildPrompt;
  * @returns {Promise<{ games: Array<string>, rawText: string }>}
  */
 export const formatGameListForBGG = async (gameListText) => {
+  console.log('[Claude → BGG] Starting formatGameListForBGG with input text:');
+  console.log('[Claude → BGG] Input length:', gameListText?.length || 0);
+  console.log('[Claude → BGG] Input preview:', gameListText?.substring(0, 200) || 'empty');
+  
   if (!API_CONFIG.ANTHROPIC_API_KEY) {
     throw new Error('Anthropic API key is not configured. Set EXPO_PUBLIC_ANTHROPIC_API_KEY before using this feature.');
   }
@@ -491,8 +604,17 @@ ${gameListText.trim()}`;
       
       const parsed = parseClaudeJson(rawText);
 
+      const gamesList = parsed.games ?? [];
+      
+      // Log what titles Claude identified
+      console.log('[Claude → BGG] Claude identified the following game titles:');
+      console.log(`[Claude → BGG] Total titles: ${gamesList.length}`);
+      gamesList.forEach((title, index) => {
+        console.log(`[Claude → BGG] ${index + 1}. "${title}"`);
+      });
+
       return {
-        games: parsed.games ?? [],
+        games: gamesList,
         rawText,
       };
     } catch (error) {

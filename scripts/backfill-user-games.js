@@ -409,20 +409,49 @@ async function updateGameInFirestore(gameId, bggData) {
  * Main function to backfill incomplete games in user collections
  */
 async function backfillUserGames() {
-  console.log('\n🔄 Starting Backfill of Incomplete Games in User Collections...\n');
+  console.log('\n🔄 Starting Backfill of Incomplete Games in Active MeepleUp User Collections...\n');
   
   try {
     // Get all users
     console.log('👥 Fetching all users...');
     const usersSnapshot = await auth.listUsers();
-    const users = usersSnapshot.users;
-    console.log(`   Found ${users.length} users\n`);
+    const allUsers = usersSnapshot.users;
+    console.log(`   Found ${allUsers.length} total users\n`);
+    
+    // Get all active events to find active users
+    console.log('🎯 Finding active MeepleUp events and their members...');
+    const eventsSnapshot = await db.collection('meepleups').get();
+    // Filter for active events (isActive !== false, meaning isActive === true or isActive is undefined)
+    const activeEvents = eventsSnapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter(event => event.isActive !== false); // Include events where isActive is true or undefined
+    
+    // Collect all unique user IDs who are members of active events
+    const activeUserIds = new Set();
+    activeEvents.forEach(event => {
+      if (event.members && Array.isArray(event.members)) {
+        event.members.forEach(memberId => {
+          if (memberId) activeUserIds.add(memberId);
+        });
+      }
+      // Also check organizers
+      if (event.organizerId) {
+        activeUserIds.add(event.organizerId);
+      }
+    });
+    
+    console.log(`   Found ${activeEvents.length} active MeepleUp events`);
+    console.log(`   Found ${activeUserIds.size} active users\n`);
+    
+    // Filter to only active users
+    const users = allUsers.filter(user => activeUserIds.has(user.uid));
+    console.log(`   Processing ${users.length} active users (${allUsers.length - users.length} inactive users skipped)\n`);
     
     // Collect all unique game IDs from user collections
     const userGameIds = new Set();
     const userGameMap = new Map(); // gameId -> { count: number, users: Set, name: string }
     
-    console.log('📋 Scanning user collections...');
+    console.log('📋 Scanning active user collections...');
     let usersWithGames = 0;
     let totalUserGames = 0;
     
