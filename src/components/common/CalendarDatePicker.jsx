@@ -789,7 +789,14 @@ const CalendarDatePicker = ({
                     }}
                     onLongPress={() => {
                       if (!isDisabled && !readOnly) {
-                        toggleDate(date);
+                        // If onDateLongPress callback is provided, use it instead of toggleDate
+                        if (onDateLongPress) {
+                          const isSelected = isDateSelected(date);
+                          const dateInfo = isSelected ? getDateInfo(date) : null;
+                          onDateLongPress(date, isSelected, dateInfo);
+                        } else {
+                          toggleDate(date);
+                        }
                       }
                     }}
                     delayLongPress={300}

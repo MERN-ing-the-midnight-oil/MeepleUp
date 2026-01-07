@@ -108,6 +108,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const profileCacheRef = useRef({});
+  const previousEmailVerifiedRef = useRef(null);
 
   // Helper function to load user profile and set user state
   const loadUserProfile = async (firebaseUser) => {
@@ -169,10 +170,29 @@ export const AuthProvider = ({ children }) => {
         profileCacheRef.current[cacheKey] = cachedProfile;
       }
 
-      setUser(mapUser(firebaseUser, cachedProfile));
+      const mappedUser = mapUser(firebaseUser, cachedProfile);
+      
+      // Check if email was just verified (changed from false to true)
+      const wasEmailVerified = previousEmailVerifiedRef.current;
+      const isEmailVerified = mappedUser?.emailVerified || false;
+      
+      if (wasEmailVerified === false && isEmailVerified === true) {
+        // Email was just verified - clear tour completion so user sees the tour
+        try {
+          await storage.removeItem('meepleup_tour_completed');
+          console.log('[AuthContext] Email verified - cleared tour completion status');
+        } catch (error) {
+          console.error('[AuthContext] Error clearing tour status:', error);
+        }
+      }
+      
+      previousEmailVerifiedRef.current = isEmailVerified;
+      setUser(mappedUser);
     } catch (error) {
       console.error('Error loading user profile:', error);
-      setUser(mapUser(firebaseUser));
+      const mappedUser = mapUser(firebaseUser);
+      previousEmailVerifiedRef.current = mappedUser?.emailVerified || false;
+      setUser(mappedUser);
     }
   };
 
@@ -199,6 +219,13 @@ export const AuthProvider = ({ children }) => {
           const currentUser = auth.currentUser;
           if (currentUser) {
             await currentUser.reload();
+            // Clear tour completion status when email is verified
+            try {
+              await storage.removeItem('meepleup_tour_completed');
+              console.log('[AuthContext] Email verified - cleared tour completion status');
+            } catch (error) {
+              console.error('[AuthContext] Error clearing tour status:', error);
+            }
             await loadUserProfile(currentUser);
           }
           
@@ -952,6 +979,22 @@ export const AuthProvider = ({ children }) => {
 
     console.log('[AuthContext] Mapping and setting user...');
     const mappedUser = mapUser(auth.currentUser, profile);
+    
+    // Check if email was just verified (changed from false to true)
+    const wasEmailVerified = previousEmailVerifiedRef.current;
+    const isEmailVerified = mappedUser?.emailVerified || false;
+    
+    if (wasEmailVerified === false && isEmailVerified === true) {
+      // Email was just verified - clear tour completion so user sees the tour
+      try {
+        await storage.removeItem('meepleup_tour_completed');
+        console.log('[AuthContext] Email verified - cleared tour completion status');
+      } catch (error) {
+        console.error('[AuthContext] Error clearing tour status:', error);
+      }
+    }
+    
+    previousEmailVerifiedRef.current = isEmailVerified;
     setUser(mappedUser);
     console.log('[AuthContext] refreshUser completed');
     return mappedUser;

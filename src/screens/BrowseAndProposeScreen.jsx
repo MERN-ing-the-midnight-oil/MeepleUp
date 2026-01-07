@@ -502,9 +502,13 @@ const BrowseAndProposeScreen = () => {
   }, [proposedGames, aggregatedGames, event?.id, selectedDate, db]);
   // Enrich games with category data (games should already have category rank fields)
   const enrichedGames = useMemo(() => {
-    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) return [];
+    const memoStartTime = performance.now();
+    if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) {
+      console.log('[BrowseAndProposeScreen] enrichedGames useMemo: returning empty array');
+      return [];
+    }
     
-    return aggregatedGames.map(game => {
+    const result = aggregatedGames.map(game => {
       // Helper to get category from rank fields
       const getCategoryFromRanks = (data) => {
         if (!data) return 'Other';
@@ -536,147 +540,248 @@ const BrowseAndProposeScreen = () => {
         _primaryCategory: 'Other',
       };
     });
+    
+    const memoTime = performance.now() - memoStartTime;
+    console.log('[BrowseAndProposeScreen] enrichedGames useMemo complete:', {
+      inputCount: aggregatedGames.length,
+      outputCount: result.length,
+      timeMs: memoTime.toFixed(2),
+    });
+    
+    return result;
   }, [aggregatedGames]);
 
   // Load match scores for games (both enriched games and proposed games)
+  // Use refs to track previous values and prevent unnecessary recalculations
+  const enrichedGamesRef = useRef(enrichedGames);
+  const proposedGamesRef = useRef(proposedGames);
+  const collectionsRef = useRef(collections);
+  const personalMatchWeightsRef = useRef(user?.personalMatchWeights);
+  const matchScoresCalculationInProgressRef = useRef(false);
+  
+  // Update refs when values change - log if collections object reference changes unnecessarily
+  useEffect(() => {
+    enrichedGamesRef.current = enrichedGames;
+  }, [enrichedGames]);
+  
+  useEffect(() => {
+    proposedGamesRef.current = proposedGames;
+  }, [proposedGames]);
+  
+  useEffect(() => {
+    // Check if collections object reference changed but content is the same
+    const prevCollections = collectionsRef.current;
+    if (prevCollections && collections) {
+      const prevKeys = Object.keys(prevCollections);
+      const currKeys = Object.keys(collections);
+      if (prevKeys.length === currKeys.length && 
+          prevKeys.every(key => prevCollections[key] === collections[key])) {
+        // Collections content is the same, but reference changed - this is a performance issue
+        console.warn('[BrowseAndPropose] Collections object reference changed but content is identical - potential performance issue');
+      }
+    }
+    collectionsRef.current = collections;
+  }, [collections]);
+  
+  useEffect(() => {
+    personalMatchWeightsRef.current = user?.personalMatchWeights;
+  }, [user?.personalMatchWeights]);
+
   useEffect(() => {
     if (!eventId || !userId) {
       return;
     }
 
+    // Prevent multiple simultaneous calculations
+    if (matchScoresCalculationInProgressRef.current) {
+      console.log('[BrowseAndPropose] Match scores calculation already in progress, skipping');
+      return;
+    }
+
     const loadMatchScores = async () => {
-      // Use ref to get current scores without dependency
-      const scores = { ...matchScoresRef.current }; // Start with existing scores to avoid recalculating
-      const allGamesToScore = [];
-      const gamesNeedingCalculation = [];
-      
-      // Add enriched games
-      if (Array.isArray(enrichedGames) && enrichedGames.length > 0) {
-        enrichedGames.forEach(game => {
-          const gameId = game.bggId || game.id;
-          if (gameId) {
-            const gameIdStr = String(gameId);
-            // Only process if we don't already have a score
-            if (!scores[gameIdStr]) {
-              allGamesToScore.push({ gameId: gameIdStr, game });
-            }
-          }
-        });
-      }
-      
-      // Add proposed games
-      if (Array.isArray(proposedGames) && proposedGames.length > 0) {
-        proposedGames.forEach(proposal => {
-          const gameId = proposal.gameId;
-          if (gameId) {
-            const gameIdStr = String(gameId);
-            if (!scores[gameIdStr] && !allGamesToScore.find(g => g.gameId === gameIdStr)) {
-              // Create a minimal game object for proposed games
-              allGamesToScore.push({
-                gameId: gameIdStr,
-                game: {
-                  bggId: gameId,
-                  id: gameId,
-                  title: proposal.gameName,
-                  image: proposal.gameImage,
-                }
-              });
-            }
-          }
-        });
-      }
-      
-      if (allGamesToScore.length === 0) {
-        return; // All scores already calculated or no games
-      }
-      
-      const userCollection = collections[userId] || [];
-      if (userCollection.length === 0) {
-        return;
-      }
-      
-      const customWeights = user?.personalMatchWeights || null;
-      const weights = customWeights || {
-        publisher: 3,
-        mechanics: 3,
-        category: 2,
-        complexity: 1.5,
-        favorite: 2,
-      };
-      
-      // First, batch check for stored scores
-      const storedScorePromises = allGamesToScore.map(async ({ gameId, game }) => {
-        try {
-          const storedScore = await getMatchScore(eventId, gameId, userId);
-          if (storedScore !== null) {
-            const scoreNum = typeof storedScore === 'number' ? storedScore : Number(storedScore);
-            if (!isNaN(scoreNum)) {
-              return { gameId, score: scoreNum, hasScore: true };
-            }
-          }
-          return { gameId, game, hasScore: false };
-        } catch (error) {
-          console.warn(`[BrowseAndPropose] Error getting stored score for game ${gameId}:`, error);
-          return { gameId, game, hasScore: false };
-        }
+      const startTime = performance.now();
+      console.log('[BrowseAndPropose] Starting match scores calculation', {
+        enrichedGamesCount: enrichedGamesRef.current?.length || 0,
+        proposedGamesCount: proposedGamesRef.current?.length || 0,
       });
       
-      const storedScoreResults = await Promise.all(storedScorePromises);
+      matchScoresCalculationInProgressRef.current = true;
       
-      // Add stored scores to results and collect games that need calculation
-      storedScoreResults.forEach(result => {
-        if (result.hasScore) {
-          scores[result.gameId] = result.score;
-        } else {
-          gamesNeedingCalculation.push(result);
-        }
-      });
-      
-      // Batch process games that need calculation
-      // Games already have BGG data from import, no need to fetch
-      if (gamesNeedingCalculation.length > 0) {
-        // Batch calculate all matches at once (much more efficient)
-        const gamesToCalculate = gamesNeedingCalculation.filter(({ game }) => game && game._bggData);
-        if (gamesToCalculate.length > 0) {
-          const preCalculatedMatches = preCalculateAllMatches(
-            gamesToCalculate.map(({ game }) => game),
-            userCollection
-          );
-          
-          // Calculate scores for all games
-          gamesToCalculate.forEach(({ gameId, game }) => {
-            const matches = preCalculatedMatches.get(gameId);
-            if (matches) {
-              const score = calculateGameScore(matches, weights, game);
-              if (score !== null && score > 0) {
-                const scoreNum = typeof score === 'number' ? score : Number(score);
-                if (!isNaN(scoreNum)) {
-                  scores[gameId] = scoreNum;
-                  // Store it for future use (non-blocking)
-                  calculateMatchScoresForGame(eventId, gameId, game, collections, { [userId]: customWeights }).catch(err => {
-                    if (__DEV__) {
-                      console.warn('[BrowseAndPropose] Error storing match score:', err);
-                    }
-                  });
-                }
+      try {
+        // Use ref to get current scores without dependency
+        const scores = { ...matchScoresRef.current }; // Start with existing scores to avoid recalculating
+        const allGamesToScore = [];
+        const gamesNeedingCalculation = [];
+        
+        // Add enriched games
+        if (Array.isArray(enrichedGamesRef.current) && enrichedGamesRef.current.length > 0) {
+          enrichedGamesRef.current.forEach(game => {
+            const gameId = game.bggId || game.id;
+            if (gameId) {
+              const gameIdStr = String(gameId);
+              // Only process if we don't already have a score
+              if (!scores[gameIdStr]) {
+                allGamesToScore.push({ gameId: gameIdStr, game });
               }
             }
           });
         }
-      }
-      
-      // Only update state if we have new scores
-      const hasNewScores = Object.keys(scores).some(key => matchScoresRef.current[key] !== scores[key]) || 
-                         Object.keys(scores).length > Object.keys(matchScoresRef.current).length;
-      
-      if (hasNewScores) {
-        matchScoresRef.current = scores; // Update ref
-        setMatchScores(scores);
+        
+        // Add proposed games
+        if (Array.isArray(proposedGamesRef.current) && proposedGamesRef.current.length > 0) {
+          proposedGamesRef.current.forEach(proposal => {
+            const gameId = proposal.gameId;
+            if (gameId) {
+              const gameIdStr = String(gameId);
+              if (!scores[gameIdStr] && !allGamesToScore.find(g => g.gameId === gameIdStr)) {
+                // Create a minimal game object for proposed games
+                allGamesToScore.push({
+                  gameId: gameIdStr,
+                  game: {
+                    bggId: gameId,
+                    id: gameId,
+                    title: proposal.gameName,
+                    image: proposal.gameImage,
+                  }
+                });
+              }
+            }
+          });
+        }
+        
+        if (allGamesToScore.length === 0) {
+          console.log('[BrowseAndPropose] No new games to score');
+          matchScoresCalculationInProgressRef.current = false;
+          return; // All scores already calculated or no games
+        }
+        
+        const userCollection = collectionsRef.current[userId] || [];
+        if (userCollection.length === 0) {
+          console.log('[BrowseAndPropose] User collection is empty');
+          matchScoresCalculationInProgressRef.current = false;
+          return;
+        }
+        
+        const customWeights = personalMatchWeightsRef.current || null;
+        const weights = customWeights || {
+          publisher: 3,
+          mechanics: 3,
+          category: 2,
+          complexity: 1.5,
+          favorite: 2,
+        };
+        
+        console.log('[BrowseAndPropose] Processing match scores', {
+          gamesToScore: allGamesToScore.length,
+          userCollectionSize: userCollection.length,
+        });
+        
+        // First, batch check for stored scores
+        const storedScorePromises = allGamesToScore.map(async ({ gameId, game }) => {
+          try {
+            const storedScore = await getMatchScore(eventId, gameId, userId);
+            if (storedScore !== null) {
+              const scoreNum = typeof storedScore === 'number' ? storedScore : Number(storedScore);
+              if (!isNaN(scoreNum)) {
+                return { gameId, score: scoreNum, hasScore: true };
+              }
+            }
+            return { gameId, game, hasScore: false };
+          } catch (error) {
+            console.warn(`[BrowseAndPropose] Error getting stored score for game ${gameId}:`, error);
+            return { gameId, game, hasScore: false };
+          }
+        });
+        
+        const storedScoreResults = await Promise.all(storedScorePromises);
+        
+        // Add stored scores to results and collect games that need calculation
+        storedScoreResults.forEach(result => {
+          if (result.hasScore) {
+            scores[result.gameId] = result.score;
+          } else {
+            gamesNeedingCalculation.push(result);
+          }
+        });
+        
+        console.log('[BrowseAndPropose] Stored scores found', {
+          storedCount: Object.keys(scores).length,
+          needsCalculation: gamesNeedingCalculation.length,
+        });
+        
+        // Batch process games that need calculation
+        // Games already have BGG data from import, no need to fetch
+        if (gamesNeedingCalculation.length > 0) {
+          // Batch calculate all matches at once (much more efficient)
+          const gamesToCalculate = gamesNeedingCalculation.filter(({ game }) => game && game._bggData);
+          if (gamesToCalculate.length > 0) {
+            console.log('[BrowseAndPropose] Calculating match scores for', gamesToCalculate.length, 'games');
+            const calculationStartTime = performance.now();
+            
+            const preCalculatedMatches = preCalculateAllMatches(
+              gamesToCalculate.map(({ game }) => game),
+              userCollection
+            );
+            
+            // Calculate scores for all games
+            gamesToCalculate.forEach(({ gameId, game }) => {
+              const matches = preCalculatedMatches.get(gameId);
+              if (matches) {
+                const score = calculateGameScore(matches, weights, game);
+                if (score !== null && score > 0) {
+                  const scoreNum = typeof score === 'number' ? score : Number(score);
+                  if (!isNaN(scoreNum)) {
+                    scores[gameId] = scoreNum;
+                    // Store it for future use (non-blocking)
+                    calculateMatchScoresForGame(eventId, gameId, game, collectionsRef.current, { [userId]: customWeights }).catch(err => {
+                      if (__DEV__) {
+                        console.warn('[BrowseAndPropose] Error storing match score:', err);
+                      }
+                    });
+                  }
+                }
+              }
+            });
+            
+            const calculationTime = performance.now() - calculationStartTime;
+            console.log('[BrowseAndPropose] Match score calculation completed', {
+              timeMs: calculationTime.toFixed(2),
+              gamesCalculated: gamesToCalculate.length,
+            });
+          }
+        }
+        
+        // Only update state if we have new scores
+        const hasNewScores = Object.keys(scores).some(key => matchScoresRef.current[key] !== scores[key]) || 
+                           Object.keys(scores).length > Object.keys(matchScoresRef.current).length;
+        
+        if (hasNewScores) {
+          matchScoresRef.current = scores; // Update ref
+          setMatchScores(scores);
+          const totalTime = performance.now() - startTime;
+          console.log('[BrowseAndPropose] Match scores updated', {
+            totalTimeMs: totalTime.toFixed(2),
+            scoresCount: Object.keys(scores).length,
+          });
+        } else {
+          console.log('[BrowseAndPropose] No new scores to update');
+        }
+      } catch (error) {
+        console.error('[BrowseAndPropose] Error in loadMatchScores:', error);
+      } finally {
+        matchScoresCalculationInProgressRef.current = false;
       }
     };
 
-    loadMatchScores();
-  }, [eventId, userId, enrichedGames, proposedGames, collections, user?.personalMatchWeights]);
+    // Debounce the calculation to prevent rapid-fire updates
+    const timeoutId = setTimeout(() => {
+      loadMatchScores();
+    }, 300); // Wait 300ms after dependencies change
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [eventId, userId]); // Only depend on eventId and userId, use refs for the rest
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -1619,7 +1724,9 @@ const BrowseAndProposeScreen = () => {
         {/* Proposed Games Section */}
         {filteredProposals.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Proposed Games</Text>
+            <Text style={styles.sectionTitle}>
+              Games Proposed for {selectedDate?.date ? formatDate(selectedDate.date.toISOString()) : 'this event'}
+            </Text>
             <Text style={styles.sectionCopy}>
               Rate each game to help decide what to play.
             </Text>
@@ -1790,70 +1897,6 @@ const BrowseAndProposeScreen = () => {
             <Text style={styles.emptyText}>No games found from confirmed attendees for this date.</Text>
           ) : (
             <>
-              {/* Owner Filter - shown when sorting by owner */}
-              {/* Owner Filter Buttons */}
-              {uniqueOwners.length > 0 && (
-                <View style={styles.ownerFilterContainer}>
-                  <Text style={styles.ownerFilterLabel}>Filter by owner:</Text>
-                  <View style={styles.ownerButtonsContainer}>
-                    {uniqueOwners.map((owner) => {
-                      const isSelected = selectedOwner === owner.userId;
-                      return (
-                        <TouchableOpacity
-                          key={owner.userId}
-                          style={[
-                            styles.ownerButtonWrapper,
-                            isSelected && styles.ownerButtonWrapperSelected
-                          ]}
-                          onPress={() => {
-                            setSelectedOwner(isSelected ? null : owner.userId);
-                          }}
-                        >
-                          <View style={[
-                            styles.ownerButton,
-                            isSelected && styles.ownerButtonSelected
-                          ]}>
-                            {owner.avatarUrl ? (
-                              <Image
-                                source={{ uri: owner.avatarUrl }}
-                                style={styles.ownerButtonAvatar}
-                              />
-                            ) : (
-                              <View style={styles.ownerButtonAvatarPlaceholder}>
-                                <Text style={styles.ownerButtonAvatarInitial}>
-                                  {owner.name.charAt(0).toUpperCase()}
-                                </Text>
-                              </View>
-                            )}
-                            {isSelected && (
-                              <View style={styles.ownerButtonCheckmark}>
-                                <Text style={styles.ownerButtonCheckmarkText}>✓</Text>
-                              </View>
-                            )}
-                          </View>
-                          <Text style={[
-                            styles.ownerButtonName,
-                            isSelected && styles.ownerButtonNameSelected
-                          ]}>
-                            {owner.name}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                  {selectedOwner && (
-                    <TouchableOpacity
-                      style={styles.clearOwnerFilterButton}
-                            onPress={() => setSelectedOwner(null)}
-                    >
-                      <Text style={styles.clearOwnerFilterButtonText}>
-                        Show all owners
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-              
                     {/* Everyone's Games - using shared GameCollectionView component */}
                     <GameCollectionView
                       games={gamesToDisplay}
@@ -1875,6 +1918,9 @@ const BrowseAndProposeScreen = () => {
                       showSearch={true}
                       showSortOptions={true}
                       headerTitle="Everyone's Games"
+                      uniqueOwnersForFilter={uniqueOwners}
+                      selectedOwner={selectedOwner}
+                      onOwnerFilterChange={setSelectedOwner}
                     />
             </>
           )}

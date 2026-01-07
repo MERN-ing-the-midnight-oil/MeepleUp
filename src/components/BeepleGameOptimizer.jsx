@@ -261,7 +261,7 @@ const BeepleGameOptimizer = ({
         </View>
         <View style={styles.headerTextContainer}>
           <Text style={styles.headerTitle}>Hi, I'm Beeple!</Text>
-          <Text style={styles.headerSubtitle}>Game Schedule Optimizer</Text>
+          <Text style={styles.headerSubtitle}>Your Game Interest Summarizer</Text>
         </View>
       </View>
 
@@ -290,7 +290,19 @@ const BeepleGameOptimizer = ({
         <>
           <View style={styles.scheduleContainer}>
             <Text style={styles.scheduleTitle}>
-              I'm currently suggesting your group start gameplay with the following games:
+              {(() => {
+                if (!selectedDate?.date) {
+                  return "Based on group feedback so far,I'm currently suggesting your group start gameplay with the following games:";
+                }
+                const date = new Date(selectedDate.date);
+                const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+                const dateFormatted = date.toLocaleDateString('en-US', {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric'
+                });
+                return `I'm currently suggesting your group start gameplay on ${weekday}, ${dateFormatted} with the following games:`;
+              })()}
             </Text>
             
             {optimizedSchedule.map((scheduleItem, index) => {

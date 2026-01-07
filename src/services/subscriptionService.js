@@ -6,7 +6,30 @@
  * It uses expo-in-app-purchases for cross-platform support.
  */
 
-import * as InAppPurchases from 'expo-in-app-purchases';
+// Conditionally import InAppPurchases - may not be available in Expo Go
+let InAppPurchases = null;
+try {
+  InAppPurchases = require('expo-in-app-purchases');
+} catch (error) {
+  console.warn('expo-in-app-purchases module not available (likely running in Expo Go):', error.message);
+  // Create a mock object to prevent errors
+  InAppPurchases = {
+    isAvailableAsync: async () => false,
+    connectAsync: async () => {},
+    disconnectAsync: async () => {},
+    getProductsAsync: async () => ({ results: [] }),
+    purchaseItemAsync: async () => { throw new Error('In-app purchases not available'); },
+    getPurchaseHistoryAsync: async () => ({ results: [] }),
+    setPurchaseListener: () => ({ remove: () => {} }),
+    finishTransactionAsync: async () => {},
+    IAPResponseCode: {
+      OK: 0,
+      USER_CANCELED: 1,
+      ERROR: 2,
+    },
+  };
+}
+
 import { Platform } from 'react-native';
 import { db, functions } from '../config/firebase';
 import firebase from '../config/firebase';
@@ -360,6 +383,12 @@ export const isSubscriptionActive = (subscription) => {
  */
 export const setupPurchaseListener = (callback) => {
   if (Platform.OS === 'web') {
+    return () => {}; // Return no-op unsubscribe function
+  }
+
+  // Check if InAppPurchases module is available
+  if (!InAppPurchases || typeof InAppPurchases.setPurchaseListener !== 'function') {
+    console.warn('In-app purchases module is not available, returning no-op listener');
     return () => {}; // Return no-op unsubscribe function
   }
 

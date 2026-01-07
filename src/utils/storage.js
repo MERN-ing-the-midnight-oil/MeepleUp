@@ -3,6 +3,7 @@
 // Falls back to localStorage on web
 
 import { Platform } from 'react-native';
+import logger from './logger';
 
 let storage;
 
@@ -13,7 +14,7 @@ if (Platform.OS === 'web') {
       try {
         return localStorage.getItem(key);
       } catch (error) {
-        console.error('Error reading from localStorage:', error);
+        logger.error('Error reading from localStorage:', error);
         return null;
       }
     },
@@ -21,14 +22,14 @@ if (Platform.OS === 'web') {
       try {
         localStorage.setItem(key, value);
       } catch (error) {
-        console.error('Error writing to localStorage:', error);
+        logger.error('Error writing to localStorage:', error);
       }
     },
     async removeItem(key) {
       try {
         localStorage.removeItem(key);
       } catch (error) {
-        console.error('Error removing from localStorage:', error);
+        logger.error('Error removing from localStorage:', error);
       }
     },
   };
@@ -38,7 +39,7 @@ if (Platform.OS === 'web') {
     const AsyncStorage = require('@react-native-async-storage/async-storage').default;
     storage = AsyncStorage;
   } catch (error) {
-    console.warn('AsyncStorage not available, falling back to in-memory storage');
+    logger.warn('AsyncStorage not available, falling back to in-memory storage');
     // Fallback to in-memory storage if AsyncStorage is not available
     const memoryStorage = {};
     storage = {

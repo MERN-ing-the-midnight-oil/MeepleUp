@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, useTransition } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, useWindowDimensions, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
@@ -23,7 +23,7 @@ const DEFAULT_WEIGHTS = {
   favorite: 2,
 };
 
-const BeepleRecommendations = ({ games, userCollection, onProposeGame, userProposals = new Set(), eventId = null }) => {
+const BeepleRecommendations = ({ games, userCollection, onProposeGame, userProposals = new Set(), eventId = null, userProposalLimit = 5 }) => {
   const { width } = useWindowDimensions();
   const navigation = useNavigation();
   const { user, updateUser } = useAuth();
@@ -43,6 +43,48 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   const saveTimeoutRef = useRef(null);
   const expandAnimation = useRef(new Animated.Value(0)).current;
   const collapseAnimation = useRef(new Animated.Value(0)).current;
+  const calculationAbortRef = useRef(false); // Track if calculation should be aborted
+  const currentCalculationIdRef = useRef(null); // Track the current calculation ID
+  
+  // Track props changes to debug unnecessary recalculations
+  const prevPropsRef = useRef({ gamesLength: 0, userCollectionLength: 0, gamesRef: null, userCollectionRef: null });
+  useEffect(() => {
+    const gamesLength = games?.length || 0;
+    const userCollectionLength = userCollection?.length || 0;
+    const prev = prevPropsRef.current;
+    
+    const gamesRefChanged = games !== prev.gamesRef;
+    const userCollectionRefChanged = userCollection !== prev.userCollectionRef;
+    const gamesLengthChanged = gamesLength !== prev.gamesLength;
+    const userCollectionLengthChanged = userCollectionLength !== prev.userCollectionLength;
+    
+    if (gamesRefChanged || userCollectionRefChanged || gamesLengthChanged || userCollectionLengthChanged) {
+      console.log('[BeepleRecommendations] Props changed:', {
+        timestamp: new Date().toISOString(),
+        gamesLength,
+        prevGamesLength: prev.gamesLength,
+        gamesLengthChanged,
+        userCollectionLength,
+        prevUserCollectionLength: prev.userCollectionLength,
+        userCollectionLengthChanged,
+        gamesReferenceChanged: gamesRefChanged,
+        userCollectionReferenceChanged: userCollectionRefChanged,
+        // Check if reference changed but content is the same
+        gamesContentSame: gamesRefChanged && gamesLength === prev.gamesLength && gamesLength > 0,
+        userCollectionContentSame: userCollectionRefChanged && userCollectionLength === prev.userCollectionLength && userCollectionLength > 0,
+      });
+      prevPropsRef.current = {
+        gamesLength,
+        userCollectionLength,
+        gamesRef: games,
+        userCollectionRef: userCollection,
+      };
+    }
+  }, [games, userCollection]);
+  
+  // Use deferred value for weights to prevent blocking recalculations
+  const deferredWeights = useDeferredValue(weights);
+  const [isPending, startTransition] = useTransition();
   
   // Count user's favorited games
   const favoritedGamesCount = useMemo(() => {
@@ -170,6 +212,8 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
 
   // Pre-calculate all matches once when games or collection changes
   useEffect(() => {
+    const effectStartTime = performance.now();
+    
     // Create a simple hash of collection to detect actual changes
     const collectionHash = enrichedUserCollection 
       ? enrichedUserCollection.map(g => `${g.bggId || g.id}_${g.isFavorite ? 'f' : 'n'}`).join(',')
@@ -178,12 +222,36 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     const gamesLength = games?.length || 0;
     const collectionLength = enrichedUserCollection?.length || 0;
     
+    // Log every time the effect runs to track frequency
+    const prevState = lastCalculatedRef.current;
+    console.log('[BeepleRecommendations] useEffect triggered:', {
+      timestamp: new Date().toISOString(),
+      gamesLength,
+      collectionLength,
+      prevGamesLength: prevState.gamesLength,
+      prevCollectionLength: prevState.collectionLength,
+      gamesLengthChanged: gamesLength !== prevState.gamesLength,
+      collectionLengthChanged: collectionLength !== prevState.collectionLength,
+      collectionHashChanged: collectionHash !== prevState.collectionHash,
+      collectionHashLength: collectionHash.length,
+      prevCollectionHashLength: prevState.collectionHash?.length || 0,
+    });
+    
     // Skip if nothing has actually changed
     if (
       lastCalculatedRef.current.gamesLength === gamesLength &&
       lastCalculatedRef.current.collectionLength === collectionLength &&
       lastCalculatedRef.current.collectionHash === collectionHash
     ) {
+      const skipTime = performance.now() - effectStartTime;
+      console.log('[BeepleRecommendations] Skipping recalculation - no changes detected:', {
+        skipTimeMs: skipTime.toFixed(2),
+      });
+      // If we're skipping but isCalculating is true, reset it (calculation was aborted)
+      if (isCalculating) {
+        console.log('[BeepleRecommendations] Resetting isCalculating=false (skipped calculation)');
+        setIsCalculating(false);
+      }
       return; // No actual changes, skip recalculation
     }
     
@@ -195,12 +263,17 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     };
 
     // Only log once per actual change, not on every render
+    const effectTime = performance.now() - effectStartTime;
     console.log('[BeepleRecommendations] Recalculating recommendations:', {
       gamesCount: gamesLength,
       collectionCount: collectionLength,
       favoritedCount: favoritedGamesCount,
       hasGames: !!(games && games.length > 0),
       hasCollection: !!(enrichedUserCollection && enrichedUserCollection.length > 0),
+      effectTimeMs: effectTime.toFixed(2),
+      reason: gamesLength !== prevState.gamesLength ? 'games changed' :
+              collectionLength !== prevState.collectionLength ? 'collection length changed' :
+              collectionHash !== prevState.collectionHash ? 'collection content changed' : 'unknown',
     });
 
     if (!games || games.length === 0 || !enrichedUserCollection || enrichedUserCollection.length === 0) {
@@ -212,11 +285,57 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       return;
     }
 
+    // Check if a calculation is already in progress
+    if (currentCalculationIdRef.current !== null) {
+      console.log('[BeepleRecommendations] Calculation already in progress, skipping new calculation:', {
+        currentCalculationId: currentCalculationIdRef.current,
+        isCalculating,
+      });
+      return;
+    }
+    
+    // Abort any previous calculation
+    calculationAbortRef.current = true;
+    
+    // Store a unique ID for this calculation attempt to prevent stale calculations
+    const calculationId = Date.now() + Math.random();
+    currentCalculationIdRef.current = calculationId;
+    
+    const beforeSetIsCalculating = performance.now();
     setIsCalculating(true);
+    const afterSetIsCalculating = performance.now();
+    console.log('[BeepleRecommendations] Set isCalculating=true:', {
+      timeMs: (afterSetIsCalculating - beforeSetIsCalculating).toFixed(2),
+      calculationId,
+    });
+    
     // Use setTimeout to allow UI to update, then calculate
     const timer = setTimeout(async () => {
+      // Check if this calculation was aborted by a newer one
+      if (currentCalculationIdRef.current !== calculationId) {
+        console.log('[BeepleRecommendations] Timer callback aborted - newer calculation started:', {
+          thisCalculationId: calculationId,
+          currentCalculationId: currentCalculationIdRef.current,
+        });
+        return;
+      }
+      
+      const timerStartTime = performance.now();
+      console.log('[BeepleRecommendations] Timer callback started:', {
+        delayMs: (timerStartTime - afterSetIsCalculating).toFixed(2),
+        calculationId,
+      });
+      
+      // Reset abort flag for this calculation
+      calculationAbortRef.current = false;
+      
+      const calculationStartTime = performance.now();
+      
       try {
-        console.log('[BeepleRecommendations] Starting pre-calculation...');
+        console.log('[BeepleRecommendations] ========== STARTING PRE-CALCULATION ==========');
+        console.log('[BeepleRecommendations] Starting pre-calculation...', {
+          timestamp: new Date().toISOString(),
+        });
         console.log('[BeepleRecommendations] Initial collection state:', {
           totalGames: enrichedUserCollection.length,
           favoritedGames: enrichedUserCollection.filter(g => g.isFavorite === true).length,
@@ -230,6 +349,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         });
         
         // Try to enrich collection if needed
+        const enrichmentStartTime = performance.now();
         let collectionToUse = enrichedUserCollection;
         const needsEnrichment = enrichedUserCollection.some(game => {
           if (!game.bggId && !game.id) return false;
@@ -247,7 +367,14 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
         });
         
+        console.log('[BeepleRecommendations] Enrichment check:', {
+          needsEnrichment,
+          timeMs: (performance.now() - enrichmentStartTime).toFixed(2),
+        });
+        
         if (needsEnrichment) {
+          const enrichmentFetchStartTime = performance.now();
+          console.log('[BeepleRecommendations] Starting enrichment process...');
           try {
             const { batchGetGamesById } = await import('../services/gameDatabase');
             
@@ -281,11 +408,15 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                 console.log(`[BeepleRecommendations] Enriching ${bggIds.length} games (${gamesToEnrich.filter(g => g.isFavorite).length} favorited)`);
               }
               
+              const enrichmentFetchTime = performance.now();
+              console.log('[BeepleRecommendations] Fetching enrichment data for', bggIds.length, 'games...');
               const gameDataMap = await batchGetGamesById(bggIds);
-              console.log('[BeepleRecommendations] Enrichment results:', {
+              const enrichmentFetchDuration = performance.now() - enrichmentFetchTime;
+              console.log('[BeepleRecommendations] Enrichment fetch completed:', {
                 requestedGames: bggIds.length,
                 foundGames: gameDataMap.size,
                 missingGames: bggIds.length - gameDataMap.size,
+                fetchTimeMs: enrichmentFetchDuration.toFixed(2),
                 sampleFoundGame: gameDataMap.size > 0 ? (() => {
                   const firstKey = Array.from(gameDataMap.keys())[0];
                   const firstGame = gameDataMap.get(firstKey);
@@ -321,11 +452,13 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
               });
               
               // Merge enriched games back into collection
+              const mergeStartTime = performance.now();
               collectionToUse = enrichedUserCollection.map(game => {
                 if (!game.bggId) return game;
                 const enriched = enrichedGamesMap.get(game.bggId.toString());
                 return enriched || game;
               });
+              const mergeDuration = performance.now() - mergeStartTime;
               
               if (__DEV__) {
                 const favoritedBefore = enrichedUserCollection.filter(g => g.isFavorite === true).length;
@@ -360,6 +493,8 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                   gamesFound: gameDataMap.size,
                   favoritedBefore,
                   favoritedAfter,
+                  mergeTimeMs: mergeDuration.toFixed(2),
+                  totalEnrichmentTimeMs: (performance.now() - enrichmentFetchStartTime).toFixed(2),
                 });
               }
             }
@@ -367,6 +502,23 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             console.error('[BeepleRecommendations] Error enriching collection:', enrichError);
             // Continue with original collection if enrichment fails
           }
+        }
+        
+        const enrichmentTotalTime = performance.now() - enrichmentStartTime;
+        console.log('[BeepleRecommendations] Enrichment phase complete:', {
+          totalTimeMs: enrichmentTotalTime.toFixed(2),
+          needsEnrichment,
+        });
+        
+        // Check if calculation was aborted
+        if (calculationAbortRef.current || currentCalculationIdRef.current !== calculationId) {
+          console.log('[BeepleRecommendations] Calculation aborted:', {
+            calculationAborted: calculationAbortRef.current,
+            calculationIdMismatch: currentCalculationIdRef.current !== calculationId,
+            thisCalculationId: calculationId,
+            currentCalculationId: currentCalculationIdRef.current,
+          });
+          return;
         }
         
         // Filter out display-only games from both games list and user collection
@@ -381,15 +533,74 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           console.log(`[BeepleRecommendations] Filtered out ${collectionToUse.length - validCollection.length} display-only games from user collection`);
         }
         
+        const preCalcStartTime = performance.now();
         console.log('[BeepleRecommendations] About to pre-calculate matches:', {
           validGamesCount: validGames.length,
           validCollectionCount: validCollection.length,
           favoritedInCollection: validCollection.filter(g => g.isFavorite === true).length,
+          timestamp: new Date().toISOString(),
         });
         
-        const preCalculated = preCalculateAllMatches(validGames, validCollection);
+        // Track progress
+        let lastProgressLog = 0;
+        const progressInterval = setInterval(() => {
+          const elapsed = performance.now() - preCalcStartTime;
+          console.log('[BeepleRecommendations] Pre-calculation still running...', {
+            elapsedSeconds: (elapsed / 1000).toFixed(1),
+            validGamesCount: validGames.length,
+            validCollectionCount: validCollection.length,
+          });
+        }, 5000); // Log every 5 seconds
+        
+        // Use async version with progress callback
+        const preCalculated = await preCalculateAllMatches(validGames, validCollection, (processed, total) => {
+          // Check if aborted during calculation
+          if (calculationAbortRef.current) {
+            clearInterval(progressInterval);
+            return;
+          }
+          
+          // Log progress every 10% or every 100 games, whichever comes first
+          const progressPercent = Math.floor((processed / total) * 100);
+          if (progressPercent >= lastProgressLog + 10 || processed % 100 === 0) {
+            const elapsed = performance.now() - preCalcStartTime;
+            const rate = processed / (elapsed / 1000); // games per second
+            const remaining = total - processed;
+            const estimatedSecondsRemaining = rate > 0 ? remaining / rate : null;
+            
+            console.log('[BeepleRecommendations] Pre-calculation progress:', {
+              processed,
+              total,
+              progressPercent: `${progressPercent}%`,
+              elapsedSeconds: (elapsed / 1000).toFixed(1),
+              ratePerSecond: rate.toFixed(1),
+              estimatedSecondsRemaining: estimatedSecondsRemaining ? estimatedSecondsRemaining.toFixed(1) : 'calculating...',
+            });
+            lastProgressLog = progressPercent;
+          }
+        });
+        
+        clearInterval(progressInterval);
+        const preCalcDuration = performance.now() - preCalcStartTime;
+        
+        // Check if calculation was aborted after completion
+        if (calculationAbortRef.current || currentCalculationIdRef.current !== calculationId) {
+          console.log('[BeepleRecommendations] Calculation aborted after completion:', {
+            calculationAborted: calculationAbortRef.current,
+            calculationIdMismatch: currentCalculationIdRef.current !== calculationId,
+            thisCalculationId: calculationId,
+            currentCalculationId: currentCalculationIdRef.current,
+          });
+          return;
+        }
+        
+        const totalCalculationTime = performance.now() - calculationStartTime;
         console.log('[BeepleRecommendations] Pre-calculation complete:', {
           totalMatchesMapSize: preCalculated.size,
+          preCalcTimeMs: preCalcDuration.toFixed(2),
+          preCalcTimeSeconds: (preCalcDuration / 1000).toFixed(2),
+          totalCalculationTimeMs: totalCalculationTime.toFixed(2),
+          totalCalculationTimeSeconds: (totalCalculationTime / 1000).toFixed(2),
           sampleMatchCount: Array.from(preCalculated.values()).slice(0, 5).map(m => ({
             totalMatches: m.publisher.length + m.mechanics.length + m.category.length + m.complexity.length,
             publisher: m.publisher.length,
@@ -398,16 +609,66 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             complexity: m.complexity.length,
           })),
         });
-        setPreCalculatedMatches(preCalculated);
-        setCurrentIndex(0); // Reset to first recommendation
+        console.log('[BeepleRecommendations] ========== PRE-CALCULATION COMPLETE ==========');
+        
+        // Use startTransition to mark this as non-urgent update
+        startTransition(() => {
+          setPreCalculatedMatches(preCalculated);
+          setCurrentIndex(0); // Reset to first recommendation
+        });
       } catch (error) {
-        console.error('[BeepleRecommendations] Error pre-calculating matches:', error);
+        const errorTime = performance.now() - calculationStartTime;
+        console.error('[BeepleRecommendations] Error pre-calculating matches:', {
+          error,
+          errorMessage: error?.message,
+          errorStack: error?.stack,
+          timeBeforeErrorMs: errorTime.toFixed(2),
+        });
       } finally {
-        setIsCalculating(false);
+        // Only update state if this is still the current calculation
+        if (currentCalculationIdRef.current === calculationId) {
+          const finalTime = performance.now() - calculationStartTime;
+          const beforeSetIsCalculatingFalse = performance.now();
+          console.log('[BeepleRecommendations] Calculation finished (finally block):', {
+            totalTimeMs: finalTime.toFixed(2),
+            totalTimeSeconds: (finalTime / 1000).toFixed(2),
+            calculationId,
+          });
+          setIsCalculating(false);
+          // Reset calculation ID when done
+          currentCalculationIdRef.current = null;
+          const afterSetIsCalculatingFalse = performance.now();
+          console.log('[BeepleRecommendations] Set isCalculating=false:', {
+            timeMs: (afterSetIsCalculatingFalse - beforeSetIsCalculatingFalse).toFixed(2),
+            totalCalculationTimeMs: (afterSetIsCalculatingFalse - calculationStartTime).toFixed(2),
+            calculationId,
+          });
+        } else {
+          console.log('[BeepleRecommendations] Skipping state update - calculation was superseded:', {
+            thisCalculationId: calculationId,
+            currentCalculationId: currentCalculationIdRef.current,
+          });
+        }
       }
     }, 50);
 
-    return () => clearTimeout(timer);
+    return () => {
+      // Only clear timeout and abort if this is still the current calculation
+      if (currentCalculationIdRef.current === calculationId) {
+        console.log('[BeepleRecommendations] Cleanup: clearing timer and aborting calculation:', {
+          calculationId,
+        });
+        clearTimeout(timer);
+        calculationAbortRef.current = true;
+        // Reset calculation ID if we're aborting
+        currentCalculationIdRef.current = null;
+      } else {
+        console.log('[BeepleRecommendations] Cleanup: skipping (newer calculation in progress):', {
+          thisCalculationId: calculationId,
+          currentCalculationId: currentCalculationIdRef.current,
+        });
+      }
+    };
   }, [games, enrichedUserCollection, isDisplayOnlyGame]);
 
   // Create a set of owned and favorited game IDs for quick lookup
@@ -452,7 +713,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     return favorited;
   }, [enrichedUserCollection, collections, user, pendingFavorites]);
 
-  // Calculate scores for all games with current weights
+  // Calculate scores for all games with deferred weights to prevent blocking
   const scoredGames = useMemo(() => {
     if (!preCalculatedMatches || !games || games.length === 0) {
       console.log('[BeepleRecommendations] ScoredGames: No pre-calculated matches or games:', {
@@ -469,6 +730,9 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     let filteredOutFavorited = 0;
     let gamesWithNoMatches = 0;
     let gamesWithZeroScore = 0;
+    
+    // Use deferred weights to prevent blocking
+    const weightsToUse = deferredWeights;
     
     const scored = validGames
       .map(game => {
@@ -507,7 +771,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             category: [],
             complexity: []
           };
-          const score = calculateGameScore(emptyMatches, weights, game);
+          const score = calculateGameScore(emptyMatches, weightsToUse, game);
           if (score === 0) {
             gamesWithZeroScore++;
           }
@@ -518,7 +782,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           };
         }
 
-        const score = calculateGameScore(matches, weights, game);
+        const score = calculateGameScore(matches, weightsToUse, game);
         if (score === 0) {
           gamesWithZeroScore++;
         }
@@ -554,9 +818,9 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     });
 
     return scored;
-  }, [preCalculatedMatches, games, weights, ownedGameIds, favoritedGameIds, isDisplayOnlyGame]);
+  }, [preCalculatedMatches, games, deferredWeights, ownedGameIds, favoritedGameIds, isDisplayOnlyGame]);
 
-  // Get current recommendation
+  // Get current recommendation (use deferred weights)
   const currentRecommendation = useMemo(() => {
     if (!scoredGames || scoredGames.length === 0) {
       return null;
@@ -567,7 +831,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     if (!item) return null;
 
     const gameTitle = item.game.title || item.game.name || 'this game';
-    const recommendationText = getRecommendationText(item.matches, gameTitle, item.game, weights);
+    const recommendationText = getRecommendationText(item.matches, gameTitle, item.game, deferredWeights);
 
     return {
       game: item.game,
@@ -576,34 +840,38 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       index: index + 1,
       total: scoredGames.length,
     };
-  }, [scoredGames, currentIndex, weights]);
+  }, [scoredGames, currentIndex, deferredWeights]);
 
   const handleWeightChange = useCallback((key, value) => {
     const numValue = typeof value === 'number' ? value : parseFloat(value);
     if (isNaN(numValue) || numValue < 0) {
       return;
     }
-    setWeights(prev => {
-      const newWeights = {
-        ...prev,
-        [key]: numValue,
-      };
-      
-      // Debounce saving to avoid too many writes
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-      saveTimeoutRef.current = setTimeout(() => {
-        if (user && updateUser) {
-          updateUser({ personalMatchWeights: newWeights }).catch(err => {
-            console.error('[BeepleRecommendations] Error saving weights:', err);
-          });
+    
+    // Use startTransition to mark weight changes as non-urgent
+    startTransition(() => {
+      setWeights(prev => {
+        const newWeights = {
+          ...prev,
+          [key]: numValue,
+        };
+        
+        // Debounce saving to avoid too many writes
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
         }
-      }, 1000); // Save after 1 second of no changes
-      
-      return newWeights;
+        saveTimeoutRef.current = setTimeout(() => {
+          if (user && updateUser) {
+            updateUser({ personalMatchWeights: newWeights }).catch(err => {
+              console.error('[BeepleRecommendations] Error saving weights:', err);
+            });
+          }
+        }, 1000); // Save after 1 second of no changes
+        
+        return newWeights;
+      });
     });
-  }, [user, updateUser]);
+  }, [user, updateUser, startTransition]);
 
   const handleNextRecommendation = useCallback(() => {
     if (!scoredGames || scoredGames.length === 0) return;
@@ -755,40 +1023,40 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   if (favoritedGamesCount < 8) {
     return (
       <View style={styles.container}>
-        <View style={styles.collapsibleHeader}>
-          <View style={styles.headerTopRow}>
-            <View style={styles.beepleContainer}>
-              <BeepleAvatar size={80} />
-              <Text style={styles.beepleCaption}>Beeple</Text>
+        <View style={styles.combinedCard}>
+          <View style={styles.headerSection}>
+            <View style={styles.headerTopRow}>
+              <View style={styles.beepleContainer}>
+                <BeepleAvatar size={80} />
+                <Text style={styles.beepleCaption}>Beeple</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.headerImageContainer}
+                onPress={handleBannerClick}
+                activeOpacity={0.8}
+              >
+                <Image 
+                  source={require('../../assets/images/beeplerecommends.png')} 
+                  style={styles.headerImage}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity 
-              style={styles.headerImageContainer}
-              onPress={handleBannerClick}
-              activeOpacity={0.8}
-            >
-              <Image 
-                source={require('../../assets/images/beeplerecommends.png')} 
-                style={styles.headerImage}
-                resizeMode="contain"
+            <View style={styles.headerPoweredByBGG}>
+              <PoweredByBGG 
+                size="small" 
+                containerWidth={200} 
+                style={styles.headerPoweredByBGGStyle} 
               />
-            </TouchableOpacity>
+            </View>
           </View>
-          <View style={styles.headerPoweredByBGG}>
-            <PoweredByBGG 
-              size="small" 
-              containerWidth={200} 
-              style={styles.headerPoweredByBGGStyle} 
-            />
-          </View>
-        </View>
-        <View style={styles.collapsibleContent}>
           <TouchableOpacity 
             style={styles.placeholderContainer}
             onPress={() => navigation.navigate('Collection')}
             activeOpacity={0.7}
           >
             <Text style={styles.placeholderText}>
-              "Heart" at least 8 games to unlock beeple recommendations
+              Favorite (heart) at least 8 games to unlock beeple recommendations
             </Text>
           </TouchableOpacity>
         </View>
@@ -806,31 +1074,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             </View>
             <View style={styles.modalTextContainer}>
               <Text style={styles.modalText}>
-                Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
-              </Text>
-              <Text style={styles.modalText}>
-                I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
-              </Text>
-              <Text style={styles.modalText}>
-                I look at things like:
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Publishers (games from the same publishers)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Mechanics (similar gameplay mechanics)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Categories (similar themes and genres)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Complexity (similar difficulty levels)
-              </Text>
-              <Text style={styles.modalText}>
-                The more games you favorite, the better I can understand your preferences and make recommendations!
-              </Text>
-              <Text style={styles.modalText}>
-                You can adjust how much each factor influences my recommendations using the sliders below.
+                Beep Boop Bop. Hello, I'm Beeple. I'm an automated alternative to manually browsing through your friends' game collections. I'll help you discover new games you might like based on other games that you've favorited so far (add a "heart" in the top left corner of a game card to favorite it).  You can adjust your Beeple settings to tell me which characteristics are most important to you at the moment (play time, mechanics, theme, etc). The more games you "favorite", the better my suggestions will be.
               </Text>
             </View>
           </View>
@@ -842,33 +1086,33 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   if (isCalculating) {
     return (
       <View style={styles.container}>
-        <View style={styles.collapsibleHeader}>
-          <View style={styles.headerTopRow}>
-            <View style={styles.beepleContainer}>
-              <BeepleAvatar size={80} />
-              <Text style={styles.beepleCaption}>Beeple</Text>
+        <View style={styles.combinedCard}>
+          <View style={styles.headerSection}>
+            <View style={styles.headerTopRow}>
+              <View style={styles.beepleContainer}>
+                <BeepleAvatar size={80} />
+                <Text style={styles.beepleCaption}>Beeple</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.headerImageContainer}
+                onPress={handleBannerClick}
+                activeOpacity={0.8}
+              >
+                <Image 
+                  source={require('../../assets/images/beeplerecommends.png')} 
+                  style={styles.headerImage}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity 
-              style={styles.headerImageContainer}
-              onPress={handleBannerClick}
-              activeOpacity={0.8}
-            >
-              <Image 
-                source={require('../../assets/images/beeplerecommends.png')} 
-                style={styles.headerImage}
-                resizeMode="contain"
+            <View style={styles.headerPoweredByBGG}>
+              <PoweredByBGG 
+                size="small" 
+                containerWidth={200} 
+                style={styles.headerPoweredByBGGStyle} 
               />
-            </TouchableOpacity>
+            </View>
           </View>
-          <View style={styles.headerPoweredByBGG}>
-            <PoweredByBGG 
-              size="small" 
-              containerWidth={200} 
-              style={styles.headerPoweredByBGGStyle} 
-            />
-          </View>
-        </View>
-        <View style={styles.collapsibleContent}>
           <View style={styles.loadingContainer}>
             <LoadingSpinner size="large" />
             <Text style={styles.loadingText}>Analyzing your collection...</Text>
@@ -889,31 +1133,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             </View>
             <View style={styles.modalTextContainer}>
               <Text style={styles.modalText}>
-                Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
-              </Text>
-              <Text style={styles.modalText}>
-                I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
-              </Text>
-              <Text style={styles.modalText}>
-                I look at things like:
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Publishers (games from the same publishers)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Mechanics (similar gameplay mechanics)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Categories (similar themes and genres)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Complexity (similar difficulty levels)
-              </Text>
-              <Text style={styles.modalText}>
-                The more games you favorite, the better I can understand your preferences and make recommendations!
-              </Text>
-              <Text style={styles.modalText}>
-                You can adjust how much each factor influences my recommendations using the sliders below.
+                Hello, I'm Beeple. I'll help you discover games you might like based on other games you've favorited that have shared characteristics. Just favorite a bunch of games (yours or other's) and I'll try to make useful suggestions. You can adjust your settings to tell me which characteristics are most important to you at the moment (play time, mechanics, theme, etc).
               </Text>
             </View>
           </View>
@@ -925,53 +1145,62 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   if (!currentRecommendation) {
     return (
       <View style={styles.container}>
-        <TouchableOpacity 
-          style={styles.collapsibleHeader}
-          onPress={toggleCollapse}
-          activeOpacity={0.7}
-        >
-          <View style={styles.headerTopRow}>
-            <View style={styles.beepleContainer}>
-              <BeepleAvatar size={80} />
-              <Text style={styles.beepleCaption}>Beeple</Text>
+        <View style={styles.combinedCard}>
+          {/* Header Section - Always Visible */}
+          <TouchableOpacity 
+            style={[
+              styles.headerSection,
+              isCollapsed && styles.headerSectionCollapsed
+            ]}
+            onPress={toggleCollapse}
+            activeOpacity={0.7}
+          >
+            <View style={styles.headerTopRow}>
+              <View style={styles.beepleContainer}>
+                <BeepleAvatar size={80} />
+                <Text style={styles.beepleCaption}>Beeple</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.headerImageContainer}
+                onPress={handleBannerClick}
+                activeOpacity={0.8}
+              >
+                <Image 
+                  source={require('../../assets/images/beeplerecommends.png')} 
+                  style={styles.headerImage}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+              <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
             </View>
-            <TouchableOpacity 
-              style={styles.headerImageContainer}
-              onPress={handleBannerClick}
-              activeOpacity={0.8}
-            >
-              <Image 
-                source={require('../../assets/images/beeplerecommends.png')} 
-                style={styles.headerImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-            <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
-          </View>
-          <View style={styles.headerPoweredByBGG}>
-            <PoweredByBGG 
-              size="small" 
-              containerWidth={200} 
-              style={styles.headerPoweredByBGGStyle} 
-            />
-          </View>
-        </TouchableOpacity>
-        
-        <Animated.View 
-          style={[
-            styles.collapsibleContent,
-            { 
-              maxHeight: collapseMaxHeight,
-              opacity: collapseAnimation 
-            }
-          ]}
-        >
-          <Text style={styles.emptyText}>
-            No games are jumping out at me as being similar to the games you have favorited. Try favoriting more games in your collection (or other people's collections!) You have favorited {favoritedGamesCount} games.
-          </Text>
-          
-          {/* Show sliders even when no recommendations */}
-          <View style={styles.expandableSection}>
+            {!isCollapsed && (
+              <View style={styles.headerPoweredByBGG}>
+                <PoweredByBGG 
+                  size="small" 
+                  containerWidth={200} 
+                  style={styles.headerPoweredByBGGStyle} 
+                />
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Content - Collapsible */}
+          <Animated.View 
+            style={[
+              styles.collapsibleContent,
+              { 
+                maxHeight: collapseMaxHeight,
+                opacity: collapseAnimation 
+              }
+            ]}
+          >
+
+            <Text style={styles.emptyText}>
+              No games are jumping out at me as being similar to the games you have favorited. Try favoriting more games in your collection (or other people's collections!) You have favorited {favoritedGamesCount} games.
+            </Text>
+            
+            {/* Show sliders even when no recommendations */}
+            <View style={styles.expandableSection}>
             <TouchableOpacity 
               style={styles.expandableHeader}
               onPress={toggleExpand}
@@ -1015,7 +1244,8 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
               </View>
             </Animated.View>
           </View>
-        </Animated.View>
+          </Animated.View>
+        </View>
 
         {/* Beeple Explanation Modal */}
         <Modal
@@ -1030,31 +1260,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             </View>
             <View style={styles.modalTextContainer}>
               <Text style={styles.modalText}>
-                Beep-Boop-Bop! I'm Beeple, your friendly MeepleBot! 🎲
-              </Text>
-              <Text style={styles.modalText}>
-                I analyze the games you've favorited and find similar games from everyone's collections that you might want to propose for your game nights!
-              </Text>
-              <Text style={styles.modalText}>
-                I look at things like:
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Publishers (games from the same publishers)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Mechanics (similar gameplay mechanics)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Categories (similar themes and genres)
-              </Text>
-              <Text style={styles.modalBullet}>
-                • Complexity (similar difficulty levels)
-              </Text>
-              <Text style={styles.modalText}>
-                The more games you favorite, the better I can understand your preferences and make recommendations!
-              </Text>
-              <Text style={styles.modalText}>
-                You can adjust how much each factor influences my recommendations using the sliders below.
+                Hello, I'm Beeple. I'll help you discover games you might like based on other games you've favorited that have shared characteristics. Just favorite a bunch of games (yours or other's) and I'll try to make useful suggestions. You can adjust your settings to tell me which characteristics are most important to you at the moment (play time, mechanics, theme, etc).
               </Text>
             </View>
           </View>
@@ -1065,8 +1271,13 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
 
   return (
     <View style={styles.container}>
+      <View style={styles.combinedCard}>
+        {/* Header Section - Always Visible */}
         <TouchableOpacity 
-          style={styles.collapsibleHeader}
+          style={[
+            styles.headerSection,
+            isCollapsed && styles.headerSectionCollapsed
+          ]}
           onPress={toggleCollapse}
           activeOpacity={0.7}
         >
@@ -1088,55 +1299,60 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             </TouchableOpacity>
             <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
           </View>
-          <View style={styles.headerPoweredByBGG}>
-            <PoweredByBGG 
-              size="small" 
-              containerWidth={200} 
-              style={styles.headerPoweredByBGGStyle} 
-            />
-          </View>
+          {!isCollapsed && (
+            <View style={styles.headerPoweredByBGG}>
+              <PoweredByBGG 
+                size="small" 
+                containerWidth={200} 
+                style={styles.headerPoweredByBGGStyle} 
+              />
+            </View>
+          )}
         </TouchableOpacity>
 
-      <Animated.View 
-        style={[
-          styles.collapsibleContent,
-          { 
-            maxHeight: collapseMaxHeight,
-            opacity: collapseAnimation 
-          }
-        ]}
-      >
-        {currentRecommendation && (
-          <>
-            <View style={styles.headerSubtextContainer}>
-              <Text style={styles.headerSubtext}>
-                Recommendation {currentRecommendation.index} of {currentRecommendation.total}
-              </Text>
-            </View>
-
-            {/* Recommendation Text */}
-            {currentRecommendation.text ? (
-              <View style={styles.recommendationTextContainer}>
-                <Text style={styles.recommendationText}>{currentRecommendation.text}</Text>
+        {/* Recommendation Content - Collapsible */}
+        <Animated.View 
+          style={[
+            styles.collapsibleContent,
+            { 
+              maxHeight: collapseMaxHeight,
+              opacity: collapseAnimation 
+            }
+          ]}
+        >
+          {currentRecommendation && (
+            <>
+              <View style={styles.headerSubtextContainer}>
+                <Text style={styles.headerSubtext}>
+                  Recommendation {currentRecommendation.index} of {currentRecommendation.total}
+                </Text>
               </View>
-            ) : (
-              <Text style={styles.noRecommendationText}>
-                Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities for this game.
-              </Text>
-            )}
+
+              {/* Recommendation Text */}
+              {currentRecommendation.text ? (
+                <View style={styles.recommendationTextContainer}>
+                  <Text style={styles.recommendationText}>{currentRecommendation.text}</Text>
+                </View>
+              ) : (
+                <Text style={styles.noRecommendationText}>
+                  Beep-Boop-Bop, I'm Beeple! I couldn't find strong similarities for this game.
+                </Text>
+              )}
 
             {/* Top Recommendation Game Card */}
             <View style={styles.gameCardContainer}>
-              <GameCard 
-                game={currentRecommendation.game} 
-                preloadedBggData={currentRecommendation.game._bggData}
-                disableModal={false}
-                inGrid={false}
-                onFavorite={handleFavoriteToggle}
-                onProposeGame={onProposeGame}
-                userProposals={userProposals}
-                eventId={eventId}
-              />
+              <View style={styles.gameCardWrapper}>
+                <GameCard 
+                  game={currentRecommendation.game} 
+                  preloadedBggData={currentRecommendation.game._bggData}
+                  disableModal={false}
+                  inGrid={true}
+                  onFavorite={handleFavoriteToggle}
+                  onProposeGame={onProposeGame}
+                  userProposals={userProposals}
+                  eventId={eventId}
+                />
+              </View>
               <View style={styles.scoreBadgeContainer}>
                 <View style={styles.scoreBadge}>
                   <Text style={styles.scoreLabel}>Match Score</Text>
@@ -1150,6 +1366,42 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                   <Text style={styles.adjustWeightsButtonText}>Adjust Match Weights</Text>
                 </TouchableOpacity>
               </View>
+              
+              {/* Propose Game Button */}
+              {onProposeGame && userId && (
+                <View style={styles.proposeButtonContainer}>
+                  {(() => {
+                    const gameId = String(currentRecommendation.game.bggId || currentRecommendation.game.id);
+                    const isProposed = userProposals.has(gameId);
+                    const canPropose = userProposals.size < userProposalLimit || isProposed;
+                    
+                    if (!isProposed && canPropose) {
+                      return (
+                        <TouchableOpacity
+                          style={styles.proposeButton}
+                          onPress={() => onProposeGame(currentRecommendation.game)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.proposeButtonText}>Propose this game for the next meeting</Text>
+                        </TouchableOpacity>
+                      );
+                    } else if (isProposed) {
+                      return (
+                        <View style={styles.proposedBadge}>
+                          <Text style={styles.proposedBadgeText}>Proposed</Text>
+                        </View>
+                      );
+                    }
+                    return (
+                      <View style={styles.proposeLimitReached}>
+                        <Text style={styles.proposeLimitReachedText}>
+                          You've reached the limit of {userProposalLimit} proposed game{userProposalLimit !== 1 ? 's' : ''}. Remove a proposal to propose another game.
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+              )}
             </View>
 
             {/* Recommendation Section with Sliders */}
@@ -1222,8 +1474,9 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
               </View>
             )}
           </>
-        )}
-      </Animated.View>
+          )}
+        </Animated.View>
+      </View>
 
       {/* Beeple Explanation Modal */}
       <Modal
@@ -1285,6 +1538,28 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.bgColor,
   },
+  combinedCard: {
+    backgroundColor: theme.colors.bgColor,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    overflow: 'hidden',
+  },
+  combinedCardContent: {
+    overflow: 'hidden',
+    width: '100%',
+  },
+  headerSection: {
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.woodMedium,
+    paddingBottom: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+  },
+  headerSectionCollapsed: {
+    borderBottomWidth: 0,
+    paddingBottom: 0,
+    marginBottom: 0,
+  },
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1325,12 +1600,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: theme.spacing.xs,
-    backgroundColor: theme.colors.meepleRed,
+    backgroundColor: '#fff',
     borderRadius: theme.borderRadius.md,
     paddingHorizontal: 2,
     paddingVertical: 2,
     overflow: 'hidden',
     maxWidth: '100%',
+    borderWidth: 2,
+    borderColor: theme.colors.meepleRed,
   },
   headerImage: {
     height: 80,
@@ -1354,6 +1631,7 @@ const styles = StyleSheet.create({
   },
   collapsibleContent: {
     overflow: 'hidden',
+    width: '100%',
   },
   headerSubtextContainer: {
     marginBottom: theme.spacing.md,
@@ -1383,6 +1661,17 @@ const styles = StyleSheet.create({
   gameCardContainer: {
     position: 'relative',
     marginBottom: theme.spacing.md,
+    width: '100%',
+    maxWidth: '100%',
+    overflow: 'visible',
+    alignSelf: 'flex-start',
+    paddingHorizontal: theme.spacing.sm,
+  },
+  gameCardWrapper: {
+    maxWidth: 320,
+    width: '100%',
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
   },
   scoreBadgeContainer: {
     position: 'absolute',
@@ -1390,23 +1679,29 @@ const styles = StyleSheet.create({
     right: theme.spacing.sm,
     alignItems: 'flex-end',
     zIndex: 10,
+    pointerEvents: 'box-none',
+    maxWidth: 100,
   },
   scoreBadge: {
     backgroundColor: 'rgba(241, 196, 15, 0.95)',
     borderRadius: theme.borderRadius.md,
-    paddingHorizontal: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xs,
     paddingVertical: theme.spacing.xs,
     marginBottom: theme.spacing.xs,
+    minWidth: 60,
+    maxWidth: 100,
   },
   scoreLabel: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.textPrimary,
     fontWeight: theme.typography.fontWeight.medium,
+    textAlign: 'center',
   },
   scoreValue: {
     fontSize: theme.typography.fontSize.lg,
     color: theme.colors.textPrimary,
     fontWeight: theme.typography.fontWeight.bold,
+    textAlign: 'center',
   },
   adjustWeightsButton: {
     backgroundColor: 'rgba(241, 196, 15, 0.95)',
@@ -1415,6 +1710,7 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.xs,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 11,
   },
   adjustWeightsButtonText: {
     fontSize: theme.typography.fontSize.xs,
@@ -1425,8 +1721,6 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   recommendationTextContainer: {
-    backgroundColor: theme.colors.bgColor,
-    borderRadius: theme.borderRadius.md,
     padding: theme.spacing.md,
     marginBottom: theme.spacing.md,
   },
@@ -1590,6 +1884,56 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     lineHeight: theme.typography.lineHeight.relaxed,
     marginLeft: theme.spacing.md,
+  },
+  proposeButtonContainer: {
+    width: '100%',
+    paddingHorizontal: theme.spacing.md,
+    paddingTop: theme.spacing.md,
+    paddingBottom: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+  },
+  proposeButton: {
+    backgroundColor: '#4a90e2',
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  proposeButtonText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: '#fff',
+    textAlign: 'center',
+  },
+  proposedBadge: {
+    backgroundColor: '#28a745',
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  proposedBadgeText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: '#fff',
+    textAlign: 'center',
+  },
+  proposeLimitReached: {
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  proposeLimitReachedText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: '#666',
+    textAlign: 'center',
   },
 });
 

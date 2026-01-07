@@ -40,3 +40,7 @@ Thumbs.db
 firebase-service-account.json
 firebase-debug.log
 
+# Build artifacts
+/dist
+/docs/app
+

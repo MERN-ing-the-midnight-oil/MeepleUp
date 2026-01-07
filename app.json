@@ -21,7 +21,10 @@
       "buildNumber": "1",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Allow MeepleUp to access your photo library to select game images.",
+        "NSPhotoLibraryAddUsageDescription": "Allow MeepleUp to save images to your photo library.",
+        "NSMicrophoneUsageDescription": "Allow MeepleUp to access your microphone for video recording features."
       }
     },
     "android": {

@@ -39,29 +39,39 @@ export const getConversations = async (eventId, userId) => {
     const conversations = [];
     for (const doc of snapshot.docs) {
       const data = doc.data();
-      const otherUserId = data.participants.find(id => id !== userId);
+      const otherUserId = data.participants?.find(id => id !== userId);
+      
+      // Skip if no valid other user (shouldn't happen, but handle edge cases)
+      if (!otherUserId || otherUserId === userId) {
+        console.warn('Skipping conversation with invalid participants:', doc.id, data.participants);
+        continue;
+      }
       
       // Skip if other user is blocked
-      if (otherUserId && blockedUserSet.has(otherUserId)) {
+      if (blockedUserSet.has(otherUserId)) {
         continue;
       }
       
       // Get other user's info
       let otherUser = null;
-      if (otherUserId) {
-        try {
-          const userDoc = await db.collection('users').doc(otherUserId).get();
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            otherUser = {
-              id: otherUserId,
-              name: userData.name || userData.email || 'Unknown User',
-              avatarUrl: userData.avatarUrl || null,
-            };
-          }
-        } catch (error) {
-          console.error('Error fetching user data:', error);
+      try {
+        const userDoc = await db.collection('users').doc(otherUserId).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          otherUser = {
+            id: otherUserId,
+            name: userData.name || userData.email || 'Unknown User',
+            avatarUrl: userData.avatarUrl || null,
+          };
+        } else {
+          // User document doesn't exist - skip this conversation
+          console.warn('Skipping conversation with non-existent user:', otherUserId);
+          continue;
         }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+        // Skip conversation if we can't load user data
+        continue;
       }
 
       conversations.push({

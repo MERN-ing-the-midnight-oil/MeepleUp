@@ -254,8 +254,28 @@ const EventHub = () => {
   const [selectedMemberForAction, setSelectedMemberForAction] = useState(null); // { userId, displayName, role, canShareJoinCode, proposalLimit }
   const [editingProposalLimit, setEditingProposalLimit] = useState(false);
   const [proposalLimitInput, setProposalLimitInput] = useState('');
-  // Collapsible sections state
-  const [isMembersExpanded, setIsMembersExpanded] = useState(false);
+  // Collapsible sections state - all minimized by default
+  const [isInviteMembersExpanded, setIsInviteMembersExpanded] = useState(false);
+  const [isManageMembersExpanded, setIsManageMembersExpanded] = useState(false);
+  const [isPastEventsExpanded, setIsPastEventsExpanded] = useState(false);
+  // Individual event cards collapsed state (dateKey -> boolean)
+  const [collapsedEventCards, setCollapsedEventCards] = useState({}); // All collapsed by default
+  
+  // Wrap setCollapsedEventCards with logging
+  const setCollapsedEventCardsWithLogging = (updater) => {
+    console.log('[EventHub] setCollapsedEventCards called', {
+      currentState: collapsedEventCards,
+      updaterType: typeof updater,
+    });
+    setCollapsedEventCards((prev) => {
+      const newState = typeof updater === 'function' ? updater(prev) : updater;
+      console.log('[EventHub] collapsedEventCards state updated', {
+        prevState: prev,
+        newState,
+      });
+      return newState;
+    });
+  };
   // Past events modal state
   const [showPastEventsModal, setShowPastEventsModal] = useState(false);
   // Calendar view modal state
@@ -2140,8 +2160,10 @@ const EventHub = () => {
       const filename = `${safeName}.ics`;
       const fileUri = `${FileSystem.cacheDirectory}${filename}`;
       
+      // Use encoding with fallback for compatibility
+      const encoding = (FileSystem.EncodingType && FileSystem.EncodingType.UTF8) || 'utf8';
       await FileSystem.writeAsStringAsync(fileUri, icalContent, {
-        encoding: FileSystem.EncodingType.UTF8,
+        encoding: encoding,
       });
 
       const isAvailable = await Sharing.isAvailableAsync();
@@ -2485,6 +2507,84 @@ const EventHub = () => {
     }
   }, [isOrganizerOrCoOrganizer, event, updateEventSchedule, db, userId, user]);
 
+  // Handler for long press on calendar date (shows confirmation for deletion)
+  const handleCalendarDateLongPress = useCallback((date, isSelected, dateInfo) => {
+    if (!isOrganizerOrCoOrganizer) {
+      Alert.alert('Error', 'Only organizers and co-organizers can add or remove dates.');
+      return;
+    }
+
+    if (isSelected) {
+      // Date is selected - show confirmation for deletion
+      const dateStr = formatDate(date.toISOString());
+      Alert.alert(
+        'Delete Event Date?',
+        `Are you sure? Members will be notified that you are no longer meeting on ${dateStr}.`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              // Proceed with deletion by calling toggleDate logic
+              const dateKey = getDateKey(date);
+              const newSelectedDates = calendarDates.filter(cd => {
+                const cdDate = cd.date instanceof Date ? cd.date : new Date(cd.date);
+                return getDateKey(cdDate) !== dateKey;
+              });
+              handleCalendarDatesChange(newSelectedDates);
+            },
+          },
+        ]
+      );
+    } else {
+      // Date is not selected - add it directly (no confirmation needed)
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const day = date.getDate();
+      
+      // Create date at midnight local time
+      const dateObj = new Date(year, month, day, 0, 0, 0, 0);
+      
+      // Create start time: same day at the specified hour
+      let startTime;
+      if (event?.usualStartTime) {
+        const usualStart = new Date(event.usualStartTime);
+        startTime = new Date(year, month, day, usualStart.getHours(), usualStart.getMinutes(), 0, 0);
+      } else {
+        startTime = new Date(year, month, day, 18, 0, 0, 0); // 6 PM default
+      }
+      
+      // Create end time: same day at the specified hour
+      let endTime;
+      if (event?.usualEndTime) {
+        const usualEnd = new Date(event.usualEndTime);
+        endTime = new Date(year, month, day, usualEnd.getHours(), usualEnd.getMinutes(), 0, 0);
+      } else {
+        endTime = new Date(year, month, day, 22, 0, 0, 0); // 10 PM default
+      }
+      
+      const newDateObj = {
+        date: dateObj,
+        startTime,
+        endTime,
+      };
+      
+      const newSelectedDates = [...calendarDates, newDateObj];
+      // Sort dates
+      newSelectedDates.sort((a, b) => {
+        const dateA = a.date instanceof Date ? a.date : new Date(a.date);
+        const dateB = b.date instanceof Date ? b.date : new Date(b.date);
+        return dateA.getTime() - dateB.getTime();
+      });
+      
+      handleCalendarDatesChange(newSelectedDates);
+    }
+  }, [isOrganizerOrCoOrganizer, calendarDates, event, handleCalendarDatesChange]);
+
   // Helper to schedule delayed notification for announcement edits
   const scheduleAnnouncementNotification = useCallback((announcementId, isNew = false) => {
     // Clear any existing timer for this announcement
@@ -2783,98 +2883,126 @@ const EventHub = () => {
         {/* Invite Members Section + All Event Actions */}
         {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
           <View style={styles.section}>
-            {/* Simple button list */}
-            <View style={styles.buttonList}>
-              {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
-                <TouchableOpacity
-                  style={styles.buttonListItem}
-                  onPress={handleInviteMembers}
-                  disabled={addCodeBusy}
-                >
-                  <Text style={[styles.buttonListText, addCodeBusy && styles.buttonListTextDisabled]}>
-                    {addCodeBusy ? '⏳ Creating code...' : '👥 Invite Members'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            
-            <View style={styles.inviteBlock}>
-              <Text style={styles.inviteLabel}>Active join codes</Text>
-              {(event.joinCodes || (event.joinCode ? [event.joinCode] : [])).slice(0, 10).map((code, index) => {
-                const isDeleting = deletingCodes.has(code);
-                return (
-                  <View key={index} style={styles.joinCodeRow}>
-                    <Text style={styles.inviteCode}>{code}</Text>
-                    {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
-                      <TouchableOpacity
-                        onPress={() => handleDeleteJoinCode(code)}
-                        disabled={isDeleting}
-                        style={[styles.deleteCodeButton, isDeleting && styles.deleteCodeButtonDisabled]}
-                      >
-                        <Text style={styles.deleteCodeButtonText}>
-                          {isDeleting ? 'Deleting...' : 'Delete'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
+            <TouchableOpacity
+              style={styles.sectionHeader}
+              onPress={() => setIsInviteMembersExpanded(!isInviteMembersExpanded)}
+            >
+              <Text style={styles.sectionTitle}>👥 Invite Members</Text>
+              <Text style={styles.collapseIcon}>{isInviteMembersExpanded ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {isInviteMembersExpanded && (
+              <>
+                {/* Simple button list */}
+                <View style={styles.buttonList}>
+                  {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
+                    <TouchableOpacity
+                      style={styles.buttonListItem}
+                      onPress={handleInviteMembers}
+                      disabled={addCodeBusy}
+                    >
+                      <Text style={[styles.buttonListText, addCodeBusy && styles.buttonListTextDisabled]}>
+                        {addCodeBusy ? '⏳ Creating code...' : '👥 Invite Members'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                
+                <View style={styles.inviteBlock}>
+                  <Text style={styles.inviteLabel}>Active join codes</Text>
+                  {(event.joinCodes || (event.joinCode ? [event.joinCode] : [])).slice(0, 10).map((code, index) => {
+                    const isDeleting = deletingCodes.has(code);
+                    return (
+                      <View key={index} style={styles.joinCodeRow}>
+                        <Text style={styles.inviteCode}>{code}</Text>
+                        {(isOrganizerOrCoOrganizer || currentUserMember?.canShareJoinCode) && (
+                          <TouchableOpacity
+                            onPress={() => handleDeleteJoinCode(code)}
+                            disabled={isDeleting}
+                            style={[styles.deleteCodeButton, isDeleting && styles.deleteCodeButtonDisabled]}
+                          >
+                            <Text style={styles.deleteCodeButtonText}>
+                              {isDeleting ? 'Deleting...' : 'Delete'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              </>
+            )}
           </View>
         )}
 
         {/* Manage Members Section - Only for Organizers */}
         {isOrganizerOrCoOrganizer && event?.members && event.members.length > 0 && (
           <View style={styles.section}>
-            <View style={styles.sectionHeader}>
+            <TouchableOpacity
+              style={styles.sectionHeader}
+              onPress={() => setIsManageMembersExpanded(!isManageMembersExpanded)}
+            >
               <Text style={styles.sectionTitle}>👥 Manage Members</Text>
-            </View>
-            <View style={styles.membersListContainer}>
-              {event.members
-                .filter((member) => {
-                  // Don't show the organizer in the list (they can't be removed)
-                  return member.userId !== event.organizerId;
-                })
-                .map((member) => {
-                  const memberName = memberNames[member.userId] || member.userName || 'Unknown Member';
-                  const memberAvatar = memberAvatars[member.userId] || member.userAvatarUrl || null;
-                  const isRemoving = removingMembers.has(member.userId);
-                  
-                  return (
-                    <View key={member.userId} style={styles.memberRow}>
-                      <View style={styles.memberInfo}>
-                        {memberAvatar ? (
-                          <Image source={{ uri: memberAvatar }} style={styles.memberAvatar} />
-                        ) : (
-                          <View style={styles.memberAvatarPlaceholder}>
-                            <Text style={styles.memberAvatarText}>
-                              {memberName.charAt(0).toUpperCase()}
-                            </Text>
-                          </View>
-                        )}
-                        <View style={styles.memberDetails}>
-                          <Text style={styles.memberName}>{memberName}</Text>
-                          {member.role === memberRoles?.ORGANIZER && (
-                            <Text style={styles.memberRole}>Co-organizer</Text>
+              <Text style={styles.collapseIcon}>{isManageMembersExpanded ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {isManageMembersExpanded && (
+              <View style={styles.membersListContainer}>
+                {event.members
+                  .filter((member) => {
+                    // Don't show the organizer in the list (they can't be removed)
+                    return member.userId !== event.organizerId;
+                  })
+                  .map((member) => {
+                    const memberName = memberNames[member.userId] || member.userName || 'Unknown Member';
+                    const memberAvatar = memberAvatars[member.userId] || member.userAvatarUrl || null;
+                    const isRemoving = removingMembers.has(member.userId);
+                    
+                    return (
+                      <View key={member.userId} style={styles.memberRow}>
+                        <View style={styles.memberInfo}>
+                          {memberAvatar ? (
+                            <Image source={{ uri: memberAvatar }} style={styles.memberAvatar} />
+                          ) : (
+                            <View style={styles.memberAvatarPlaceholder}>
+                              <Text style={styles.memberAvatarText}>
+                                {memberName.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
                           )}
+                          <View style={styles.memberDetails}>
+                            <Text style={styles.memberName}>{memberName}</Text>
+                            {member.role === memberRoles?.ORGANIZER && (
+                              <Text style={styles.memberRole}>Co-organizer</Text>
+                            )}
+                          </View>
                         </View>
+                        <TouchableOpacity
+                          style={[styles.removeMemberButton, isRemoving && styles.removeMemberButtonDisabled]}
+                          onPress={() => handleRemoveMember(member.userId, memberName)}
+                          disabled={isRemoving}
+                        >
+                          <Text style={[styles.removeMemberText, isRemoving && styles.removeMemberTextDisabled]}>
+                            {isRemoving ? 'Removing...' : 'Remove'}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
-                      <TouchableOpacity
-                        style={[styles.removeMemberButton, isRemoving && styles.removeMemberButtonDisabled]}
-                        onPress={() => handleRemoveMember(member.userId, memberName)}
-                        disabled={isRemoving}
-                      >
-                        <Text style={[styles.removeMemberText, isRemoving && styles.removeMemberTextDisabled]}>
-                          {isRemoving ? 'Removing...' : 'Remove'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              {event.members.filter((m) => m.userId !== event.organizerId).length === 0 && (
-                <Text style={styles.emptyMembersText}>No other members to manage</Text>
-              )}
-            </View>
+                    );
+                  })}
+                {event.members.filter((m) => m.userId !== event.organizerId).length === 0 && (
+                  <Text style={styles.emptyMembersText}>No other members to manage</Text>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* +Create Event Button - Only for Organizers, after Manage Members */}
+        {isOrganizerOrCoOrganizer && (
+          <View style={styles.section}>
+            <Button
+              label="➕ Create Event"
+              onPress={() => setShowCalendarModal(true)}
+              style={styles.createEventButton}
+            />
           </View>
         )}
 
@@ -3101,6 +3229,9 @@ const EventHub = () => {
             handleUpdateDateCardField={handleUpdateDateCardField}
             scrollToDateIndex={scrollToDateIndex}
             parentScrollRef={scheduleScrollRef}
+            currentScrollY={scrollPositionRef.current}
+            collapsedEventCards={collapsedEventCards}
+            setCollapsedEventCards={setCollapsedEventCardsWithLogging}
           />
           
           {(event?.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0) || event?.scheduledFor ? (
@@ -3110,26 +3241,39 @@ const EventHub = () => {
           )}
         </View>
 
-        {/* Past Events Button */}
+        {/* Past Events Section */}
         {pastEvents.length > 0 && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.sectionHeader}
+              onPress={() => setIsPastEventsExpanded(!isPastEventsExpanded)}
+            >
+              <Text style={styles.sectionTitle}>📜 Past Events ({pastEvents.length})</Text>
+              <Text style={styles.collapseIcon}>{isPastEventsExpanded ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {isPastEventsExpanded && (
+              <View style={styles.pastEventsButtonContainer}>
+                <Button
+                  label={`📜 Past Events (${pastEvents.length})`}
+                  onPress={() => setShowPastEventsModal(true)}
+                  variant="outline"
+                  style={styles.pastEventsButton}
+                />
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Export Calendar Section */}
+        <View style={styles.section}>
           <View style={styles.pastEventsButtonContainer}>
             <Button
-              label={`📜 Past Events (${pastEvents.length})`}
-              onPress={() => setShowPastEventsModal(true)}
+              label="📆 Export calendar"
+              onPress={handleExportToCalendar}
               variant="outline"
               style={styles.pastEventsButton}
             />
           </View>
-        )}
-
-        {/* Export Calendar Button */}
-        <View style={styles.pastEventsButtonContainer}>
-          <Button
-            label="📆 Export calendar"
-            onPress={handleExportToCalendar}
-            variant="outline"
-            style={styles.pastEventsButton}
-          />
         </View>
 
       </ScrollView>
@@ -3181,9 +3325,17 @@ const EventHub = () => {
         title="📅 Calendar View"
       >
         <View style={styles.calendarModalContent}>
+          {isOrganizerOrCoOrganizer && (
+            <View style={styles.longPressInstructionBox}>
+              <Text style={styles.longPressInstructionText}>
+                <Text style={styles.longPressInstructionBold}>Long press</Text> on a date to add or delete an event date.
+              </Text>
+            </View>
+          )}
           <CalendarDatePicker
             selectedDates={calendarDates}
             onDatesChange={handleCalendarDatesChange}
+            onDateLongPress={handleCalendarDateLongPress}
             usualStartTime={event?.usualStartTime ? new Date(event.usualStartTime) : null}
             usualEndTime={event?.usualEndTime ? new Date(event.usualEndTime) : null}
             readOnly={!isOrganizerOrCoOrganizer}
@@ -4194,6 +4346,11 @@ const styles = StyleSheet.create({
     margin: theme.spacing.xl,
     marginBottom: theme.spacing.xl,
   },
+  collapseIcon: {
+    fontSize: 16,
+    color: theme.colors.textSecondary,
+    marginLeft: 8,
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -4205,6 +4362,9 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
     flex: 1,
+  },
+  createEventButton: {
+    marginTop: theme.spacing.md,
   },
   collapsibleHeader: {
     flexDirection: 'row',

@@ -36,13 +36,23 @@ const decodeHTML = (text) => {
 };
 
 /**
- * Pre-calculate all matches for all games (~200ms)
- * Returns a map of gameId -> preCalculatedMatches
+ * Pre-calculate all matches for all games (async, chunked to prevent UI blocking)
+ * Returns a Promise that resolves to a map of gameId -> preCalculatedMatches
+ * Processes games in chunks to keep UI responsive
  */
-export const preCalculateAllMatches = (games, userCollection) => {
+export const preCalculateAllMatches = async (games, userCollection, onProgress = null) => {
+  const startTime = performance.now();
+  console.log('[optimizedRecommendations] ========== preCalculateAllMatches START ==========');
+  console.log('[optimizedRecommendations] Input:', {
+    gamesCount: games.length,
+    userCollectionCount: userCollection.length,
+    timestamp: new Date().toISOString(),
+  });
+  
   const preCalculated = new Map();
 
   // Normalize user collection data once
+  const normalizationStartTime = performance.now();
   // BGG data can be in _bggData or directly on the game object
   const normalizedUserCollection = userCollection.map(game => {
     const bggData = game._bggData || game;
@@ -105,8 +115,26 @@ export const preCalculateAllMatches = (games, userCollection) => {
     }
   }
 
-  // Pre-calculate matches for each game
-  games.forEach((game, index) => {
+  const normalizationDuration = performance.now() - normalizationStartTime;
+  console.log('[optimizedRecommendations] Normalization complete:', {
+    normalizedCount: normalizedUserCollection.length,
+    favoritedCount: normalizedUserCollection.filter(g => g.isFavorite).length,
+    timeMs: normalizationDuration.toFixed(2),
+  });
+
+  // Process games in chunks to prevent UI blocking
+  // Use smaller chunks for better responsiveness
+  const CHUNK_SIZE = 50; // Process 50 games at a time
+  const totalGames = games.length;
+  
+  console.log('[optimizedRecommendations] Starting chunk processing:', {
+    totalGames,
+    chunkSize: CHUNK_SIZE,
+    totalChunks: Math.ceil(totalGames / CHUNK_SIZE),
+  });
+  
+  // Helper function to process a single game
+  const processGame = (game, index) => {
     const gameId = game.bggId || game.id;
     if (!gameId) {
       // Still add to map with empty matches if no gameId
@@ -208,6 +236,82 @@ export const preCalculateAllMatches = (games, userCollection) => {
 
     // Always add to map, even if matches are empty
     preCalculated.set(String(gameId), matches);
+  };
+
+  // Process games in chunks with yield points
+  let chunkStartTime = performance.now();
+  for (let i = 0; i < totalGames; i += CHUNK_SIZE) {
+    const chunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
+    const totalChunks = Math.ceil(totalGames / CHUNK_SIZE);
+    const chunk = games.slice(i, i + CHUNK_SIZE);
+    
+    const chunkProcessStartTime = performance.now();
+    
+    // Process chunk synchronously
+    chunk.forEach((game, chunkIndex) => {
+      processGame(game, i + chunkIndex);
+    });
+    
+    const chunkProcessDuration = performance.now() - chunkProcessStartTime;
+    const elapsedTotal = performance.now() - startTime;
+    const gamesProcessed = i + chunk.length;
+    const progressPercent = Math.floor((gamesProcessed / totalGames) * 100);
+    const rate = gamesProcessed / (elapsedTotal / 1000); // games per second
+    const remaining = totalGames - gamesProcessed;
+    const estimatedSecondsRemaining = rate > 0 ? remaining / rate : null;
+    
+    // Log every chunk or every 10%
+    if (chunkIndex % 10 === 0 || progressPercent % 10 === 0 || chunkProcessDuration > 1000) {
+      console.log('[optimizedRecommendations] Chunk processed:', {
+        chunkIndex,
+        totalChunks,
+        gamesProcessed,
+        totalGames,
+        progressPercent: `${progressPercent}%`,
+        chunkTimeMs: chunkProcessDuration.toFixed(2),
+        elapsedSeconds: (elapsedTotal / 1000).toFixed(1),
+        ratePerSecond: rate.toFixed(1),
+        estimatedSecondsRemaining: estimatedSecondsRemaining ? estimatedSecondsRemaining.toFixed(1) : 'calculating...',
+      });
+    }
+    
+    // Yield to event loop after each chunk
+    if (i + CHUNK_SIZE < totalGames) {
+      const yieldStartTime = performance.now();
+      await new Promise(resolve => {
+        // Use requestIdleCallback if available (web), otherwise setTimeout
+        if (typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(resolve, { timeout: 16 });
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
+      const yieldDuration = performance.now() - yieldStartTime;
+      
+      // Warn if yield takes too long
+      if (yieldDuration > 100) {
+        console.warn('[optimizedRecommendations] Long yield detected:', {
+          yieldTimeMs: yieldDuration.toFixed(2),
+          chunkIndex,
+        });
+      }
+      
+      // Report progress if callback provided
+      if (onProgress) {
+        onProgress(i + chunk.length, totalGames);
+      }
+    }
+  }
+  
+  const totalDuration = performance.now() - startTime;
+  console.log('[optimizedRecommendations] ========== preCalculateAllMatches COMPLETE ==========');
+  console.log('[optimizedRecommendations] Summary:', {
+    totalGames,
+    totalUserGames: normalizedUserCollection.length,
+    totalTimeMs: totalDuration.toFixed(2),
+    totalTimeSeconds: (totalDuration / 1000).toFixed(2),
+    averageTimePerGameMs: (totalDuration / totalGames).toFixed(2),
+    gamesPerSecond: (totalGames / (totalDuration / 1000)).toFixed(1),
   });
 
   // Debug logging - only in development mode and only for significant batches

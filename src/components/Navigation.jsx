@@ -29,7 +29,7 @@ const ReactNativeNavigation = ({ navigationRef, currentRouteName }) => {
 
   const navItems = [
     { name: 'MeepleUps', route: 'Onboarding' },
-    { name: 'Your Games', route: 'Collection' },
+    { name: 'List/Import', route: 'Collection' },
     { name: 'Profile', route: 'Profile', showGear: true },
   ];
 

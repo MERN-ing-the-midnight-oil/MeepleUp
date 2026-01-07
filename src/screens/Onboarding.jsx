@@ -19,6 +19,7 @@ import JoinForm from '../components/JoinForm';
 import EventCard from '../components/EventCard';
 import UserProfileModal from '../components/UserProfileModal';
 import MeepleupPurchaseModal from '../components/MeepleupPurchaseModal';
+import AppTour, { useTour } from '../components/AppTour';
 
 const Onboarding = () => {
   const navigation = useNavigation();
@@ -60,6 +61,8 @@ const Onboarding = () => {
   const scrollY = useRef(new Animated.Value(0)).current;
   const selectedDatesRef = useRef(selectedDates);
   const scrollPositionRef = useRef(0); // Track scroll position to prevent jumps
+  const [showTour, setShowTour] = useState(false);
+  const { shouldShowTour } = useTour();
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -102,6 +105,16 @@ const Onboarding = () => {
   }, [selectedDates.length]);
   
   // Reduced logging - removed editingDateIndex change log
+
+  // Show tour for new users
+  useEffect(() => {
+    if (shouldShowTour && mode === 'choice' && !hasCheckedRedirect) {
+      const timer = setTimeout(() => {
+        setShowTour(true);
+      }, 1500); // Wait a bit for screen to render
+      return () => clearTimeout(timer);
+    }
+  }, [shouldShowTour, mode, hasCheckedRedirect]);
 
   // Check if user is member of exactly one meepleUp and redirect to logistics tab
   // Also redirects to collection if user has no games
@@ -151,8 +164,8 @@ const Onboarding = () => {
     const userEvents = getUserEvents();
     // Reduced logging - removed redirect check logs
     
-    // Filter to only active events (not archived)
-    const activeEvents = userEvents.filter(event => event.isActive !== false);
+    // Filter to only active events (not archived) - explicitly check for isActive === true
+    const activeEvents = userEvents.filter(event => event.isActive === true);
 
     // If user is a member of exactly one active meepleUp, redirect to its logistics tab
     if (activeEvents.length === 1) {
@@ -174,8 +187,8 @@ const Onboarding = () => {
       console.log('[Onboarding] Waiting for Firestore sync...');
       redirectTimeoutRef.current = setTimeout(() => {
         const delayedUserEvents = getUserEvents();
-        const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive !== false);
-        console.log('[Onboarding] Delayed check - active events:', delayedActiveEvents.length);
+        const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive === true);
+        console.log('[Onboarding] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
         
         if (delayedActiveEvents.length === 1) {
           const eventId = delayedActiveEvents[0].id;
@@ -448,17 +461,20 @@ const Onboarding = () => {
 
   // Get user's events and sort by creation date (newest first)
   const userIdentifier = user?.uid || user?.id;
-  let userEvents = [];
+  let allUserEvents = [];
   try {
     if (userIdentifier && getUserEvents) {
       // getUserEvents doesn't take parameters - it uses user from context
       const events = getUserEvents();
-      userEvents = Array.isArray(events) ? events : [];
+      allUserEvents = Array.isArray(events) ? events : [];
     }
   } catch (error) {
     console.error('Error getting user events:', error);
-    userEvents = [];
+    allUserEvents = [];
   }
+  
+  // Filter to only active events (not archived) - explicitly check for isActive === true
+  const userEvents = allUserEvents.filter(event => event.isActive === true);
   
   const sortedEvents = Array.isArray(userEvents) && userEvents.length > 0
     ? [...userEvents].sort((a, b) => {
@@ -630,7 +646,7 @@ const Onboarding = () => {
           </View>
     
           {/* User's MeepleUps */}
-          <View style={styles.eventsSection}>
+          <View style={styles.eventsSection} testID="events-section">
             <View style={styles.membershipsToken}>
               <Text style={styles.membershipsTokenText}>Your MeepleUps</Text>
             </View>
@@ -742,7 +758,7 @@ const Onboarding = () => {
           })()}
           
           {/* Join an existing MeepleUp Section */}
-          <View style={styles.joinSection}>
+          <View style={styles.joinSection} testID="join-section">
             <JoinForm
               joinCodeWord1={joinCodeWord1}
               joinCodeWord2={joinCodeWord2}
@@ -755,7 +771,7 @@ const Onboarding = () => {
           </View>
 
           <View style={styles.options}>
-            <View style={styles.organizeCard}>
+            <View style={styles.organizeCard} testID="create-section">
               <View style={styles.organizeTitleContainer}>
                 <Text style={styles.organizeTitle}>Host a MeepleUp</Text>
               </View>
@@ -781,6 +797,11 @@ const Onboarding = () => {
           avatarUrl={selectedUserForProfile.avatarUrl}
         />
       )}
+      <AppTour
+        isOpen={showTour}
+        onClose={() => setShowTour(false)}
+        currentScreen="Onboarding"
+      />
       </>
     );
   }

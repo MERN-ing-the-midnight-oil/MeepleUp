@@ -222,6 +222,7 @@ service cloud.firestore {
         function canCreateConversation() {
           let participants = request.resource.data.participants || [];
           return isGroupMember(groupId) && (
+            request.auth.uid in participants ||
             isBeeple(participants[0]) || isBeeple(participants[1])
           );
         }

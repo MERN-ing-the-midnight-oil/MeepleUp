@@ -177,6 +177,33 @@ body {
   border-radius: 8px;
 }
 
+/* Web App Container */
+.web-app-container {
+  display: flex;
+  justify-content: center;
+  margin: 2rem 0;
+}
+
+.web-app-button {
+  display: inline-block;
+  padding: 1.25rem 2.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-light);
+  text-decoration: none;
+  background-color: var(--primary-color);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+}
+
+.web-app-button:hover {
+  background-color: #c04d4d;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
 /* Badges Container */
 .badges-container {
   display: flex;
@@ -349,6 +376,15 @@ body {
 
   .value-prop {
     text-align: center;
+  }
+
+  .web-app-container {
+    margin: 1.5rem 0;
+  }
+
+  .web-app-button {
+    width: 100%;
+    max-width: 400px;
   }
 
   .badges-container {

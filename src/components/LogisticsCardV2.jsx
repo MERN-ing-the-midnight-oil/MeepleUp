@@ -66,6 +66,11 @@ const LogisticsCardV2 = ({
   // Scroll to date props
   scrollToDateIndex = null,
   parentScrollRef = null,
+  // Current scroll position (from parent) to restore on collapse
+  currentScrollY = 0,
+  // Collapsible event cards
+  collapsedEventCards = {},
+  setCollapsedEventCards = null,
 }) => {
   // State for text inputs - one per card
   const [inputs, setInputs] = useState({}); // { [index]: text }
@@ -229,6 +234,18 @@ const LogisticsCardV2 = ({
         const inputValue = inputs[index] || '';
         const originalIndex = ed.originalIndex !== undefined ? ed.originalIndex : index;
         const dateKey = getDateKey(date);
+        const isCollapsed = collapsedEventCards[dateKey] !== false; // Default to collapsed (true)
+        
+        // Debug logging for collapse state
+        if (__DEV__) {
+          console.log(`[LogisticsCardV2] Event card ${index} (dateKey: ${dateKey}):`, {
+            dateKey,
+            isCollapsed,
+            collapsedEventCards,
+            hasSetCollapsedEventCards: !!setCollapsedEventCards,
+            dateStr,
+          });
+        }
         
         // Get location and address
         const location = ed.location || ed.generalLocation || event?.location || event?.generalLocation || '';
@@ -316,7 +333,82 @@ const LogisticsCardV2 = ({
                 borderColor: theme.colors.woodDark,
               }}
             >
-              {/* Date */}
+              {/* Date Header with Collapse Button */}
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
+                onPress={(e) => {
+                  if (e && e.stopPropagation) {
+                    e.stopPropagation();
+                  }
+
+                  const wasCollapsed = isCollapsed;
+                  const willBeCollapsed = !isCollapsed;
+
+                  if (setCollapsedEventCards) {
+                    // Determine target scroll behavior BEFORE state update
+                    if (!willBeCollapsed && parentScrollRef?.current) {
+                      // Expanding: scroll so the card's top aligns near the top
+                      const storedPosition = dateCardPositions.current[originalIndex];
+                      let targetY = storedPosition?.y;
+                      if (typeof targetY !== 'number') {
+                        // Fallback to index-based estimation if position not yet measured
+                        const futureEventIndex = futureEvents.findIndex(
+                          fe => fe.originalIndex === originalIndex
+                        );
+                        if (futureEventIndex !== -1) {
+                          const estimatedCardHeight = 350;
+                          const headerHeight = 200;
+                          targetY = headerHeight + (futureEventIndex * estimatedCardHeight);
+                        } else {
+                          targetY = 0;
+                        }
+                      }
+                      // Apply a small offset so header isn't flush against the very top
+                      const offsetY = Math.max((targetY || 0) - 12, 0);
+                      // Schedule scroll after layout updates
+                      requestAnimationFrame(() => {
+                        if (parentScrollRef?.current) {
+                          parentScrollRef.current.scrollTo({
+                            y: offsetY,
+                            animated: true,
+                          });
+                        }
+                      });
+                    }
+
+                    if (willBeCollapsed && parentScrollRef?.current) {
+                      // Collapsing: preserve current scroll position to prevent jump
+                      const savedY = typeof currentScrollY === 'number' ? currentScrollY : 0;
+                      // Restore immediately after state change without animation
+                      requestAnimationFrame(() => {
+                        if (parentScrollRef?.current) {
+                          parentScrollRef.current.scrollTo({
+                            y: savedY,
+                            animated: false,
+                          });
+                        }
+                      });
+                    }
+
+                    setCollapsedEventCards(prev => ({
+                      ...prev,
+                      [dateKey]: willBeCollapsed,
+                    }));
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 18, fontWeight: 'bold', color: theme.colors.textPrimary, flex: 1 }}>
+                  {dateStr}
+                </Text>
+                <Text style={{ fontSize: 14, color: theme.colors.textSecondary, marginLeft: 8 }}>
+                  {isCollapsed ? '▶' : '▼'}
+                </Text>
+              </TouchableOpacity>
+              
+              {!isCollapsed && (
+                <>
+              {/* Date Edit (only shown when expanded) */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                 {editingDateCardField?.dateKey === dateKey && editingDateCardField?.field === 'date' ? (
                   <View style={{ flex: 1 }}>
@@ -381,9 +473,6 @@ const LogisticsCardV2 = ({
                   </View>
                 ) : (
                   <>
-                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: theme.colors.textPrimary }}>
-                      {dateStr}
-                    </Text>
                     {isOrganizerOrCoOrganizer && (
                       <TouchableOpacity
                         onPress={(e) => {
@@ -1353,6 +1442,8 @@ const LogisticsCardV2 = ({
                   </View>
                 )}
               </View>
+                </>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         );

@@ -144,17 +144,33 @@ const CollectionScreen = () => {
   const gamescannerIconSize = width > 768 ? Math.round(72 * 3.5) : Math.round(64 * 3.5);
   
   const userIdentifier = user?.uid || user?.id;
-  console.log('[CollectionScreen] User identifier:', userIdentifier ? 'found' : 'missing');
+  console.log('[CollectionScreen] User identifier:', {
+    found: !!userIdentifier,
+    userId: userIdentifier,
+    email: user?.email,
+    userObject: user ? { uid: user.uid, id: user.id, email: user.email } : null,
+  });
   
   // Memoize rawCollection to prevent infinite loops - only recalculate when collections or userIdentifier changes
   const rawCollection = useMemo(() => {
-    if (!userIdentifier) return [];
+    if (!userIdentifier) {
+      console.log('[CollectionScreen] No userIdentifier, returning empty collection');
+      return [];
+    }
     const collection = collections[userIdentifier] || [];
+    console.log('[CollectionScreen] Raw collection from memo', {
+      userId: userIdentifier,
+      collectionLength: collection.length,
+      hasCollections: !!collections[userIdentifier],
+      allUserIds: Object.keys(collections),
+    });
     return collection;
   }, [collections, userIdentifier]);
-  console.log('[CollectionScreen] Raw collection length:', rawCollection.length);
+  console.log('[CollectionScreen] Raw collection length:', rawCollection.length, {
+    userId: userIdentifier,
+    email: user?.email,
+  });
   
-  const [sortedCollection, setSortedCollection] = useState([]);
   const [bggDataCache, setBggDataCache] = useState({}); // { gameId: bggData }
   const enrichingRef = useRef(false); // Prevent concurrent enrichment
   const enrichedGameIdsRef = useRef(new Set()); // Track which games have been enriched (use ref to avoid dependency issues)
@@ -330,11 +346,6 @@ const CollectionScreen = () => {
     });
   }, [enrichedGames, searchQuery]);
 
-  // Update sortedCollection when filteredGames changes
-  useEffect(() => {
-    setSortedCollection(filteredGames);
-  }, [filteredGames]);
-
   // Lazy enrichment: Enrich games in batches
   const enrichGamesBatch = useCallback(async (gameIdsToEnrich) => {
     if (enrichingRef.current) return; // Already enriching
@@ -352,8 +363,45 @@ const CollectionScreen = () => {
       const BATCH_SIZE = 50;
       for (let i = 0; i < gamesToEnrich.length; i += BATCH_SIZE) {
         const batch = gamesToEnrich.slice(i, i + BATCH_SIZE);
-        const enrichPromises = batch.map(game => enrichGame(game));
-        await Promise.all(enrichPromises);
+        
+        // Enrich all games in batch and collect results
+        const enrichResults = await Promise.all(
+          batch.map(async (game) => {
+            const gameId = game.bggId || game.id;
+            if (!gameId || enrichedGameIdsRef.current.has(gameId)) {
+              return null; // Already enriched or no ID
+            }
+
+            try {
+              // Check if already in cache
+              if (bggDataCache[gameId]) {
+                enrichedGameIdsRef.current.add(gameId);
+                return { gameId, bggData: bggDataCache[gameId] };
+              }
+
+              const bggData = await getGameDetails(gameId);
+              if (bggData) {
+                enrichedGameIdsRef.current.add(gameId);
+                return { gameId, bggData };
+              }
+            } catch (error) {
+              console.error(`[CollectionScreen] Error enriching game ${gameId}:`, error);
+            }
+            return null;
+          })
+        );
+
+        // Batch update cache once per batch to reduce re-renders
+        const cacheUpdates = enrichResults
+          .filter(result => result !== null)
+          .reduce((acc, { gameId, bggData }) => {
+            acc[gameId] = bggData;
+            return acc;
+          }, {});
+
+        if (Object.keys(cacheUpdates).length > 0) {
+          setBggDataCache(prev => ({ ...prev, ...cacheUpdates }));
+        }
         
         // Conservative delay between batches (3 seconds) to be gentle on BGG API
         if (i + BATCH_SIZE < gamesToEnrich.length) {
@@ -365,7 +413,7 @@ const CollectionScreen = () => {
     } finally {
       enrichingRef.current = false;
     }
-  }, [rawCollection, enrichGame]);
+  }, [rawCollection, bggDataCache]);
 
   // Handle visible items changed for lazy enrichment
   // Conservative: Only enrich visible items + one page ahead (since we have pagination)
@@ -438,6 +486,52 @@ const CollectionScreen = () => {
     }
   }, [sortedGames, sortBy, selectedCategory, hasCategoryData]);
 
+  // Group games by category when sortBy is 'category'
+  const gamesByCategory = useMemo(() => {
+    if (sortBy !== 'category') {
+      return {};
+    }
+
+    const grouped = {};
+    ALL_CATEGORIES.forEach(cat => {
+      grouped[cat] = [];
+    });
+    // Add "Uncategorized" group for games without category data
+    grouped['Uncategorized'] = [];
+
+    // Use filteredGames instead of sortedCollection to respect search query
+    filteredGames.forEach(game => {
+      const category = game._primaryCategory || 'Uncategorized';
+      if (!grouped[category]) {
+        grouped[category] = [];
+      }
+      grouped[category].push(game);
+    });
+
+    // Sort each category based on user preference
+    [...ALL_CATEGORIES, 'Uncategorized'].forEach(cat => {
+      const games = grouped[cat] || [];
+      const sortMode = categorySortPreference[cat] || 'rating';
+      
+      games.sort((a, b) => {
+        if (sortMode === 'rating') {
+          const aRating = a._rating || 0;
+          const bRating = b._rating || 0;
+          if (aRating !== bRating) {
+            return bRating - aRating;
+          }
+          // Fallback to title sort if ratings are same
+          return (a.title || '').localeCompare(b.title || '');
+        } else {
+          // title sort (A-Z)
+          return (a.title || '').localeCompare(b.title || '');
+        }
+      });
+    });
+
+    return grouped;
+  }, [filteredGames, sortBy, categorySortPreference]);
+
   // Enrich games for thumbnails (not for category determination - games already have categories)
   useEffect(() => {
     if (sortedGames.length === 0) return;
@@ -490,52 +584,6 @@ const CollectionScreen = () => {
       setCategoriesDetermined(true);
     }
   }, [sortBy]);
-
-  // Group games by category when sortBy is 'category'
-  const gamesByCategory = useMemo(() => {
-    if (sortBy !== 'category') {
-      return {};
-    }
-
-    const grouped = {};
-    ALL_CATEGORIES.forEach(cat => {
-      grouped[cat] = [];
-    });
-    // Add "Uncategorized" group for games without category data
-    grouped['Uncategorized'] = [];
-
-    // Use filteredGames instead of sortedCollection to respect search query
-    filteredGames.forEach(game => {
-      const category = game._primaryCategory || 'Uncategorized';
-      if (!grouped[category]) {
-        grouped[category] = [];
-      }
-      grouped[category].push(game);
-    });
-
-    // Sort each category based on user preference
-    [...ALL_CATEGORIES, 'Uncategorized'].forEach(cat => {
-      const games = grouped[cat] || [];
-      const sortMode = categorySortPreference[cat] || 'rating';
-      
-      games.sort((a, b) => {
-        if (sortMode === 'rating') {
-          const aRating = a._rating || 0;
-          const bRating = b._rating || 0;
-          if (aRating !== bRating) {
-            return bRating - aRating;
-          }
-          // Fallback to title sort if ratings are same
-          return (a.title || '').localeCompare(b.title || '');
-        } else {
-          // title sort (A-Z)
-          return (a.title || '').localeCompare(b.title || '');
-        }
-      });
-    });
-
-    return grouped;
-  }, [filteredGames, sortBy, categorySortPreference]);
 
   // Toggle category sort preference
   const toggleCategorySort = useCallback((category) => {
@@ -647,7 +695,7 @@ const CollectionScreen = () => {
       <View style={styles.menuOptionContent}>
         <Text style={styles.menuOptionIcon}>📝</Text>
         <View style={styles.menuOptionText}>
-          <Text style={styles.menuOptionTitle}>Import game titles by typing or pasting them</Text>
+          <Text style={styles.menuOptionTitle}>Import game titles by typing or dictating, or pasting them from another source</Text>
         </View>
         <Text style={styles.menuOptionArrow}>→</Text>
       </View>
@@ -668,7 +716,7 @@ const CollectionScreen = () => {
         </View>
         <View style={styles.menuContainer}>
           <Text style={styles.menuTitle}>
-            {sortedCollection.length === 0 
+            {filteredGames.length === 0 
               ? 'Please choose a method to create a games inventory. A games inventory will allow your group members to see what you have in common and discuss what to play at the next get-together.'
               : 'Add more games to your collection using any of these methods:'}
           </Text>
@@ -684,7 +732,7 @@ const CollectionScreen = () => {
           <Pressable
             style={styles.menuOption}
             onPress={() => {
-              if (sortedCollection.length > 0) {
+              if (filteredGames.length > 0) {
                 setShowBGGImportModal(true);
               } else {
                 setActiveView('import');
@@ -707,7 +755,7 @@ const CollectionScreen = () => {
 
         {/* Inventory title will be shown by GameCollectionView */}
 
-        {sortedCollection.length === 0 && loading && (
+        {filteredGames.length === 0 && loading && (
           <View style={styles.emptyCollection}>
             <Text style={styles.emptyTitle}>Loading your games...</Text>
             <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />
@@ -720,10 +768,10 @@ const CollectionScreen = () => {
   // Memoize header component to prevent re-renders
   // Always show import methods, even when games exist
   const headerComponent = useMemo(() => {
-    console.log('[CollectionScreen] Creating headerComponent with useMemo', { sortedCollectionLength: sortedCollection.length });
+    console.log('[CollectionScreen] Creating headerComponent with useMemo', { filteredGamesLength: filteredGames.length });
     // Always show the import menu, regardless of showMenu state
     return renderHeader();
-  }, [sortedCollection.length, width, iconSize, gamescannerIconSize]);
+  }, [filteredGames.length, width, iconSize, gamescannerIconSize]);
 
   const renderGameCard = useCallback(({ item }) => {
     const hasBggData = !!item._bggData;
@@ -910,7 +958,7 @@ const CollectionScreen = () => {
   console.log('[CollectionScreen] Render state:', {
     showMenu,
     activeView,
-    sortedCollectionLength: sortedCollection.length,
+    filteredGamesLength: filteredGames.length,
     rawCollectionLength: rawCollection.length,
     userIdentifier: userIdentifier ? 'present' : 'missing'
   });
@@ -922,7 +970,19 @@ const CollectionScreen = () => {
   const hasCachedGames = userIdentifier && (collections[userIdentifier]?.length > 0);
   const shouldShowLoading = !initialised || (loading && !hasCachedGames);
   
+  console.log('[CollectionScreen] Loading state check', {
+    initialised,
+    loading,
+    hasCachedGames,
+    shouldShowLoading,
+    userId: userIdentifier,
+    email: user?.email,
+    collectionsKeys: Object.keys(collections),
+    userCollectionLength: userIdentifier ? (collections[userIdentifier]?.length || 0) : 0,
+  });
+  
   if (shouldShowLoading) {
+    console.log('[CollectionScreen] Showing loading spinner');
     return (
       <View style={styles.container}>
         <LoadingSpinner />
@@ -932,11 +992,11 @@ const CollectionScreen = () => {
 
   return (
     <View style={styles.container}>
-      {showMenu && sortedCollection.length > 0 ? (
+      {showMenu && filteredGames.length > 0 ? (
         (() => {
           console.log('[CollectionScreen] Rendering GameCollectionView', {
             rawCollectionLength: rawCollection.length,
-            sortedCollectionLength: sortedCollection.length,
+            filteredGamesLength: filteredGames.length,
             hasHeaderComponent: !!headerComponent,
           });
           return (
@@ -989,7 +1049,7 @@ const CollectionScreen = () => {
                     <Pressable
                       style={styles.menuOption}
                       onPress={() => {
-                        if (sortedCollection.length > 0) {
+                        if (filteredGames.length > 0) {
                           setShowBGGImportModal(true);
                         } else {
                           setActiveView('import');
@@ -1010,7 +1070,7 @@ const CollectionScreen = () => {
                     </Pressable>
                   </View>
 
-              {sortedCollection.length === 0 && loading && (
+              {filteredGames.length === 0 && loading && (
                 <View style={styles.emptyCollection}>
                   <Text style={styles.emptyTitle}>Loading your games...</Text>
                   <ActivityIndicator size="large" color={theme.colors.meepleRed} style={{ marginTop: 20 }} />

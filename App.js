@@ -18,6 +18,8 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import LoadingSpinner from './src/components/common/LoadingSpinner';
 import Navigation from './src/components/Navigation';
 import AnimatedBackground from './src/components/AnimatedBackground';
+import ErrorBoundary from './src/components/ErrorBoundary';
+import { ToastProvider } from './src/components/common/Toast';
 // Fonts are now loaded on-demand, no need to load all at startup
 
 const Stack = createNativeStackNavigator();
@@ -58,6 +60,37 @@ const AuthWrapper = () => (
   <AnimatedBackground>
     <AuthScreen />
   </AnimatedBackground>
+);
+
+// Wrapper components with ErrorBoundary to avoid inline functions
+const OnboardingWrapper = () => (
+  <ErrorBoundary name="Onboarding">
+    <OnboardingScreen />
+  </ErrorBoundary>
+);
+
+const EventHubWrapper = (props) => (
+  <ErrorBoundary name="EventHub">
+    <EventHubScreen {...props} />
+  </ErrorBoundary>
+);
+
+const BrowseAndProposeWrapper = (props) => (
+  <ErrorBoundary name="BrowseAndPropose">
+    <BrowseAndProposeScreen {...props} />
+  </ErrorBoundary>
+);
+
+const CollectionWrapper = () => (
+  <ErrorBoundary name="Collection">
+    <CollectionScreen />
+  </ErrorBoundary>
+);
+
+const ProfileWrapper = () => (
+  <ErrorBoundary name="Profile">
+    <ProfileScreen />
+  </ErrorBoundary>
 );
 
 function AppNavigator() {
@@ -107,11 +140,26 @@ function AppNavigator() {
         )}
         {isAuthenticated && isVerified && (
           <>
-            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-            <Stack.Screen name="EventHub" component={EventHubScreen} />
-            <Stack.Screen name="BrowseAndPropose" component={BrowseAndProposeScreen} />
-            <Stack.Screen name="Collection" component={CollectionScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen 
+              name="Onboarding" 
+              component={OnboardingWrapper} 
+            />
+            <Stack.Screen 
+              name="EventHub" 
+              component={EventHubWrapper} 
+            />
+            <Stack.Screen 
+              name="BrowseAndPropose" 
+              component={BrowseAndProposeWrapper} 
+            />
+            <Stack.Screen 
+              name="Collection" 
+              component={CollectionWrapper} 
+            />
+            <Stack.Screen 
+              name="Profile" 
+              component={ProfileWrapper} 
+            />
           </>
         )}
       </Stack.Navigator>
@@ -121,10 +169,12 @@ function AppNavigator() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <StatusBar style="auto" />
-      <AppContent />
-    </AuthProvider>
+    <ErrorBoundary name="App Root">
+      <AuthProvider>
+        <StatusBar style="auto" />
+        <AppContent />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -142,13 +192,17 @@ function AppContent() {
   }
 
   return (
-    <AvailabilityProvider>
-      <EventsProvider>
-        <CollectionsProvider>
-          <AppNavigator />
-        </CollectionsProvider>
-      </EventsProvider>
-    </AvailabilityProvider>
+    <ErrorBoundary name="AppContent">
+      <ToastProvider>
+        <AvailabilityProvider>
+          <EventsProvider>
+            <CollectionsProvider>
+              <AppNavigator />
+            </CollectionsProvider>
+          </EventsProvider>
+        </AvailabilityProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

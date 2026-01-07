@@ -7,7 +7,30 @@
  * It uses expo-in-app-purchases for cross-platform support.
  */
 
-import * as InAppPurchases from 'expo-in-app-purchases';
+// Conditionally import InAppPurchases - may not be available in Expo Go
+let InAppPurchases = null;
+try {
+  InAppPurchases = require('expo-in-app-purchases');
+} catch (error) {
+  console.warn('expo-in-app-purchases module not available (likely running in Expo Go):', error.message);
+  // Create a mock object to prevent errors
+  InAppPurchases = {
+    isAvailableAsync: async () => false,
+    connectAsync: async () => {},
+    disconnectAsync: async () => {},
+    getProductsAsync: async () => ({ results: [] }),
+    purchaseItemAsync: async () => { throw new Error('In-app purchases not available'); },
+    getPurchaseHistoryAsync: async () => ({ results: [] }),
+    setPurchaseListener: () => ({ remove: () => {} }),
+    finishTransactionAsync: async () => {},
+    IAPResponseCode: {
+      OK: 0,
+      USER_CANCELED: 1,
+      ERROR: 2,
+    },
+  };
+}
+
 import { Platform } from 'react-native';
 import { db, functions } from '../config/firebase';
 import firebase from '../config/firebase';
@@ -23,6 +46,37 @@ export const MEEPLEUP_PURCHASE_PRODUCTS = {
 // Get product ID for current platform
 export const getMeepleupProductId = () => {
   return Platform.OS === 'ios' ? MEEPLEUP_PURCHASE_PRODUCTS.ios : MEEPLEUP_PURCHASE_PRODUCTS.android;
+};
+
+/**
+ * Initialize the in-app purchase connection
+ * Must be called before any purchase operations
+ */
+export const initializePurchases = async () => {
+  try {
+    if (Platform.OS === 'web') {
+      console.warn('In-app purchases are not supported on web');
+      return { success: false, error: 'Web platform not supported' };
+    }
+
+    // Check if InAppPurchases module is available
+    if (!InAppPurchases || typeof InAppPurchases.isAvailableAsync !== 'function') {
+      console.warn('In-app purchases module is not available');
+      return { success: false, error: 'In-app purchases module is not available' };
+    }
+
+    const isAvailable = await InAppPurchases.isAvailableAsync();
+    if (!isAvailable) {
+      return { success: false, error: 'In-app purchases are not available on this device' };
+    }
+
+    // Connect to the store
+    await InAppPurchases.connectAsync();
+    return { success: true };
+  } catch (error) {
+    console.error('Error initializing purchases:', error);
+    return { success: false, error: error.message };
+  }
 };
 
 /**

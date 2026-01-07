@@ -30,6 +30,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   const [personalMatchText, setPersonalMatchText] = useState(null);
   const [showPersonalMatchSettings, setShowPersonalMatchSettings] = useState(false);
   const [matchScore, setMatchScore] = useState(null);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const isMountedRef = useRef(true);
   const userId = user?.uid || user?.id;
   
@@ -59,6 +60,9 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
 
     // Use isFavorite from user's collection if available, otherwise from game object
     setIsFavorite(userGame?.isFavorite || game?.isFavorite || false);
+    
+    // Reset description expanded state when game changes
+    setDescriptionExpanded(false);
   }, [game?.id, game?.bggId, game?.isFavorite, userId, collections]);
 
   // Shimmer animation for favorite hearts - glitter effect
@@ -558,6 +562,30 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               )}
             </View>
 
+            {/* BGG Rank and Statistics */}
+            {(bggData?.rank || bggData?.usersRated || bggData?.bayesAverage) && (
+              <View style={styles.modalMetaRow}>
+                {bggData?.rank && typeof bggData.rank === 'number' && (
+                  <View style={styles.modalMetaItem}>
+                    <Text style={styles.modalMetaLabel}>BGG Rank:</Text>
+                    <Text style={styles.modalMetaValue}>#{bggData.rank}</Text>
+                  </View>
+                )}
+                {bggData?.usersRated && typeof bggData.usersRated === 'number' && (
+                  <View style={styles.modalMetaItem}>
+                    <Text style={styles.modalMetaLabel}>Users Rated:</Text>
+                    <Text style={styles.modalMetaValue}>{bggData.usersRated.toLocaleString()}</Text>
+                  </View>
+                )}
+                {bggData?.bayesAverage && typeof bggData.bayesAverage === 'number' && !isNaN(bggData.bayesAverage) && (
+                  <View style={styles.modalMetaItem}>
+                    <Text style={styles.modalMetaLabel}>Bayes Average:</Text>
+                    <Text style={styles.modalMetaValue}>{bggData.bayesAverage.toFixed(2)}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* Players */}
             {(bggData?.minPlayers || bggData?.maxPlayers) && (
               <View style={styles.modalMetaItem}>
@@ -570,11 +598,34 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
+            {/* Best Played With */}
+            {(bggData?.bestPlayerCount || game?.bestPlayerCount) && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Best played with:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {(bggData?.bestPlayerCount || game?.bestPlayerCount)} players
+                </Text>
+              </View>
+            )}
+
             {/* Playing Time */}
-            {bggData?.playingTime && typeof bggData.playingTime === 'number' && (
+            {bggData?.playingTime && typeof bggData.playingTime === 'number' ? (
               <View style={styles.modalMetaItem}>
                 <Text style={styles.modalMetaLabel}>Playing Time:</Text>
                 <Text style={styles.modalMetaValue}>{bggData.playingTime} min</Text>
+              </View>
+            ) : (bggData?.minPlayTime || bggData?.maxPlayTime) && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Playing Time:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {bggData.minPlayTime && bggData.maxPlayTime
+                    ? (bggData.minPlayTime === bggData.maxPlayTime 
+                        ? `${bggData.minPlayTime} min`
+                        : `${bggData.minPlayTime}-${bggData.maxPlayTime} min`)
+                    : bggData.minPlayTime 
+                      ? `${bggData.minPlayTime}+ min`
+                      : `up to ${bggData.maxPlayTime} min`}
+                </Text>
               </View>
             )}
 
@@ -602,6 +653,57 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                       }
                     })
                     .filter(Boolean)}
+                </View>
+              </View>
+            )}
+
+            {/* Category Ranks */}
+            {(bggData?.strategyGamesRank || bggData?.familyGamesRank || bggData?.partyGamesRank || 
+              bggData?.abstractsRank || bggData?.thematicRank || bggData?.wargamesRank || 
+              bggData?.childrensGamesRank || bggData?.cgsRank) && (
+              <View style={styles.modalBadgesContainer}>
+                <Text style={[styles.modalMetaLabel, { marginBottom: 8 }]}>Category Rankings:</Text>
+                <View style={styles.modalBadges}>
+                  {bggData?.strategyGamesRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>Strategy: #{bggData.strategyGamesRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.familyGamesRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>Family: #{bggData.familyGamesRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.partyGamesRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>Party: #{bggData.partyGamesRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.abstractsRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>Abstract: #{bggData.abstractsRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.thematicRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>Thematic: #{bggData.thematicRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.wargamesRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>War: #{bggData.wargamesRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.childrensGamesRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>Children's: #{bggData.childrensGamesRank}</Text>
+                    </View>
+                  )}
+                  {bggData?.cgsRank && (
+                    <View style={styles.modalBadgeItem}>
+                      <Text style={styles.modalBadgeText}>CCG: #{bggData.cgsRank}</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             )}
@@ -640,6 +742,16 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
+            {/* Artists */}
+            {bggData?.artists && Array.isArray(bggData.artists) && bggData.artists.length > 0 && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Artist:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {bggData.artists.join(', ')}
+                </Text>
+              </View>
+            )}
+
             {/* Complexity/Weight */}
             {bggData?.averageWeight && typeof bggData.averageWeight === 'number' && (
               <View style={styles.modalMetaItem}>
@@ -650,13 +762,77 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
-            {/* Description */}
+            {/* Suggested Player Age */}
+            {bggData?.suggestedPlayerAge && typeof bggData.suggestedPlayerAge === 'number' && bggData.suggestedPlayerAge !== bggData?.minAge && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Suggested Age:</Text>
+                <Text style={styles.modalMetaValue}>{bggData.suggestedPlayerAge}+</Text>
+              </View>
+            )}
+
+            {/* Language Dependence */}
+            {bggData?.languageDependence && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Language Dependence:</Text>
+                <Text style={styles.modalMetaValue}>{bggData.languageDependence}</Text>
+              </View>
+            )}
+
+            {/* Owned Count */}
+            {bggData?.ownedCount && typeof bggData.ownedCount === 'number' && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Owned:</Text>
+                <Text style={styles.modalMetaValue}>{bggData.ownedCount.toLocaleString()} users</Text>
+              </View>
+            )}
+
+            {/* Alternate Names */}
+            {bggData?.alternateNames && Array.isArray(bggData.alternateNames) && bggData.alternateNames.length > 0 && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Also known as:</Text>
+                <Text style={styles.modalMetaValue}>
+                  {bggData.alternateNames.map(n => typeof n === 'object' ? n.value : n).join(', ')}
+                </Text>
+              </View>
+            )}
+
+            {/* Dimensions */}
+            {bggData?.dimensions && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Dimensions:</Text>
+                <Text style={styles.modalMetaValue}>{bggData.dimensions}</Text>
+              </View>
+            )}
+
+            {/* Weight */}
+            {bggData?.weight && typeof bggData.weight === 'number' && (
+              <View style={styles.modalMetaItem}>
+                <Text style={styles.modalMetaLabel}>Weight:</Text>
+                <Text style={styles.modalMetaValue}>{bggData.weight.toFixed(2)} lbs</Text>
+              </View>
+            )}
+
+            {/* Description - Collapsible */}
             {(bggData?.description || game?.description) && typeof (bggData?.description || game?.description) === 'string' && (
               <View style={styles.modalDescription}>
-                <Text style={[styles.modalMetaLabel, { marginBottom: 8 }]}>Description:</Text>
-                <Text style={styles.modalDescriptionText}>
-                  {(bggData?.description || game?.description || '').replace(/<[^>]*>/g, '')}
-                </Text>
+                <TouchableOpacity
+                  onPress={() => setDescriptionExpanded(!descriptionExpanded)}
+                  style={styles.descriptionHeader}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.modalMetaLabel, { marginBottom: 0, flex: 1 }]}>Description:</Text>
+                  <FontAwesome5
+                    name={descriptionExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={14}
+                    color={theme.colors.textSecondary}
+                    style={styles.descriptionChevron}
+                  />
+                </TouchableOpacity>
+                {descriptionExpanded && (
+                  <Text style={styles.modalDescriptionText}>
+                    {(bggData?.description || game?.description || '').replace(/<[^>]*>/g, '')}
+                  </Text>
+                )}
               </View>
             )}
 
@@ -891,6 +1067,15 @@ const styles = StyleSheet.create({
   modalDescription: {
     marginTop: 8,
     marginBottom: 16,
+  },
+  descriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  descriptionChevron: {
+    marginLeft: 8,
   },
   modalDescriptionText: {
     fontSize: 14,

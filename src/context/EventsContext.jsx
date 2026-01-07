@@ -239,11 +239,16 @@ export const EventsProvider = ({ children }) => {
           return;
         }
 
-        console.log(`[EventsContext] Syncing events for user: ${userId}`);
+        console.log(`[EventsContext] 🔍 SYNC START: Syncing events for user: ${userId}`);
 
         const memberDoc = await db.collection('users').doc(userId).get();
         const userData = memberDoc.data();
         const groupIds = userData?.groupIds || [];
+
+        console.log(`[EventsContext] 🔍 SYNC: User's groupIds from Firestore:`, {
+          count: groupIds.length,
+          groupIds: groupIds
+        });
 
         if (groupIds.length === 0) {
           console.log('[EventsContext] User has no group memberships');
@@ -253,11 +258,21 @@ export const EventsProvider = ({ children }) => {
 
         const groupPromises = groupIds.map(async (groupId) => {
           try {
+            console.log(`[EventsContext] 🔍 SYNC: Fetching group ${groupId}`);
             const groupDoc = await db.collection('gamingGroups').doc(groupId).get();
             
-            if (!groupDoc.exists) return null;
+            if (!groupDoc.exists) {
+              console.log(`[EventsContext] 🔍 SYNC: Group ${groupId} does not exist in Firestore`);
+              return null;
+            }
 
             const firestoreData = groupDoc.data();
+            console.log(`[EventsContext] 🔍 SYNC: Group ${groupId} data:`, {
+              id: groupId,
+              name: firestoreData.name,
+              isActive: firestoreData.isActive,
+              organizerId: firestoreData.organizerId
+            });
             
             let members = [];
             try {
@@ -358,8 +373,27 @@ export const EventsProvider = ({ children }) => {
           .map(normalizeEvent)
           .filter(Boolean);
 
+        console.log(`[EventsContext] 🔍 SYNC: Processed events from Firestore:`, {
+          count: firestoreEvents.length,
+          events: firestoreEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive }))
+        });
+
+        // Check specifically for "Bobs MeepleUp"
+        const bobsMeepleUp = firestoreEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
+        if (bobsMeepleUp) {
+          console.log('[EventsContext] 🔍 SYNC: "Bobs MeepleUp" found in firestoreEvents:', {
+            id: bobsMeepleUp.id,
+            name: bobsMeepleUp.name,
+            isActive: bobsMeepleUp.isActive
+          });
+        } else {
+          console.log('[EventsContext] 🔍 SYNC: "Bobs MeepleUp" NOT found in firestoreEvents');
+        }
+
         if (firestoreEvents.length > 0) {
           setEvents((prevEvents) => {
+            console.log(`[EventsContext] 🔍 SYNC: Merging events. Previous count: ${prevEvents.length}, New events: ${firestoreEvents.length}`);
+            
             const merged = new Map();
             
             prevEvents.forEach(event => {
@@ -370,8 +404,14 @@ export const EventsProvider = ({ children }) => {
               merged.set(event.id, event);
             });
             
-            return Array.from(merged.values());
+            const finalEvents = Array.from(merged.values());
+            console.log(`[EventsContext] 🔍 SYNC: Final merged events count: ${finalEvents.length}`);
+            console.log(`[EventsContext] 🔍 SYNC: Final events:`, finalEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive })));
+            
+            return finalEvents;
           });
+        } else {
+          console.log('[EventsContext] 🔍 SYNC: No events to merge (firestoreEvents.length === 0)');
         }
       } catch (error) {
         console.error('Error syncing events from Firestore:', error);
@@ -987,11 +1027,23 @@ export const EventsProvider = ({ children }) => {
   );
 
   const getUserEvents = useCallback(() => {
-    if (!user) return [];
+    if (!user) {
+      console.log('[EventsContext] getUserEvents: No user, returning empty array');
+      return [];
+    }
     const userId = user.uid || user.id;
-    return events.filter((event) =>
+    console.log('[EventsContext] getUserEvents: Looking for events for user:', userId, 'Total events:', events.length);
+    
+    const userEvents = events.filter((event) =>
       event.members.some((member) => member.userId === userId),
     );
+    
+    console.log('[EventsContext] getUserEvents: Found', userEvents.length, 'events for user', userId);
+    if (userEvents.length > 0) {
+      console.log('[EventsContext] getUserEvents: Event names:', userEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive })));
+    }
+    
+    return userEvents;
   }, [events, user]);
 
   const leaveEvent = useCallback(

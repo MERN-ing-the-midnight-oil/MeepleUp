@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, ScrollView, useWindowDimensions, PanResponder, Animated } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, useTransition } from 'react';
+import { View, Text, StyleSheet, FlatList, Pressable, ScrollView, useWindowDimensions, PanResponder, Animated, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
@@ -25,7 +25,7 @@ const getStarRating = (average) => {
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
 
 // Simple Slider Component
-const SimpleSlider = ({ value, onValueChange, min = 0, max = 5, step = 0.1, label, disabled = false, screenWidth }) => {
+const SimpleSlider = ({ value, onValueChange, min = 0, max = 5, step = 0.1, label, disabled = false, screenWidth, fillToRight = false }) => {
   // Use 4/6 of screen width on mobile, with a minimum of 200px
   const sliderWidth = screenWidth ? Math.max(200, (screenWidth * 4) / 6) : 200;
   const handleSize = 20;
@@ -135,6 +135,26 @@ const SimpleSlider = ({ value, onValueChange, min = 0, max = 5, step = 0.1, labe
               );
             })}
           </View>
+          {/* Fill indicator - fills to the right for minimum ratings */}
+          {fillToRight && (
+            <Animated.View
+              style={[
+                styles.sliderFill,
+                {
+                  left: position.interpolate({
+                    inputRange: [0, maxPosition],
+                    outputRange: [handleSize / 2, maxPosition + handleSize / 2],
+                    extrapolate: 'clamp',
+                  }),
+                  width: position.interpolate({
+                    inputRange: [0, maxPosition],
+                    outputRange: [sliderWidth - handleSize / 2, sliderWidth - maxPosition - handleSize / 2],
+                    extrapolate: 'clamp',
+                  }),
+                },
+              ]}
+            />
+          )}
           <Animated.View
             style={[
               styles.sliderHandle,
@@ -444,7 +464,24 @@ const GameCollectionView = ({
   headerTitle,
   headerComponent, // Optional component to render above games (e.g., menu)
   showSearch = true,
+  // Owner filter props (for avatar-based filtering)
+  uniqueOwnersForFilter = [], // Array of { userId, name, avatarUrl }
+  selectedOwner = null, // userId of selected owner
+  onOwnerFilterChange = null, // (userId) => void
 }) => {
+  const renderStartTime = useRef(performance.now());
+  
+  useEffect(() => {
+    const renderTime = performance.now() - renderStartTime.current;
+    if (renderTime > 16) { // Log if render takes longer than one frame (16ms)
+      console.warn('[GameCollectionView] Slow render detected', {
+        renderTimeMs: renderTime.toFixed(2),
+        gamesCount: Array.isArray(games) ? games.length : 0,
+      });
+    }
+    renderStartTime.current = performance.now();
+  });
+  
   console.log('[GameCollectionView] Component rendering', {
     gamesCount: Array.isArray(games) ? games.length : 0,
     showMatchScores,
@@ -464,6 +501,8 @@ const GameCollectionView = ({
   const [showResults, setShowResults] = useState(false);
   const [browseAllMode, setBrowseAllMode] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false); // Default to collapsed
+  const filtersAnimation = useRef(new Animated.Value(0)).current; // 0 = collapsed, 1 = expanded
   const scrollViewRef = useRef(null);
   const flatListRef = useRef(null);
   const resultsContainerRef = useRef(null);
@@ -487,9 +526,28 @@ const GameCollectionView = ({
   const [minPlayers, setMinPlayers] = useState(1); // Minimum player count (1-10, where 10 = 10+)
   const [maxPlayers, setMaxPlayers] = useState(10); // Maximum player count (1-10, where 10 = 10+)
   const [minBggRating, setMinBggRating] = useState(0); // Minimum BGG rating (0-10)
-  const [minMatchRating, setMinMatchRating] = useState(0); // Minimum match rating (0-1000)
+  const [minMatchRating, setMinMatchRating] = useState(0); // Minimum match rating (0-50, slider zooms in on lower range)
   const [minPlayTime, setMinPlayTime] = useState(0); // Minimum play time in minutes (0-300)
   const [maxPlayTime, setMaxPlayTime] = useState(300); // Maximum play time in minutes (0-300)
+  const [minComplexity, setMinComplexity] = useState(0); // Minimum complexity/weight (0-5)
+  const [maxComplexity, setMaxComplexity] = useState(5); // Maximum complexity/weight (0-5)
+  const [favoritesOnly, setFavoritesOnly] = useState(false); // Show only favorited games
+
+  // Use deferred values for filter inputs to prevent blocking UI during filtering
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const deferredSelectedCategories = useDeferredValue(selectedCategories);
+  const deferredSelectedOwners = useDeferredValue(selectedOwners);
+  const deferredMinPlayers = useDeferredValue(minPlayers);
+  const deferredMaxPlayers = useDeferredValue(maxPlayers);
+  const deferredMinBggRating = useDeferredValue(minBggRating);
+  const deferredMinMatchRating = useDeferredValue(minMatchRating);
+  const deferredMinPlayTime = useDeferredValue(minPlayTime);
+  const deferredMaxPlayTime = useDeferredValue(maxPlayTime);
+  const deferredMinComplexity = useDeferredValue(minComplexity);
+  const deferredMaxComplexity = useDeferredValue(maxComplexity);
+  const deferredFavoritesOnly = useDeferredValue(favoritesOnly);
+  const deferredBrowseAllMode = useDeferredValue(browseAllMode);
+  const [isPending, startTransition] = useTransition();
 
   // Get unique owners from games
   const uniqueOwners = useMemo(() => {
@@ -507,6 +565,7 @@ const GameCollectionView = ({
 
   // Enrich games with category data
   const enrichedGames = useMemo(() => {
+    const startTime = performance.now();
     console.log('[GameCollectionView] enrichingGames useMemo running', { gamesCount: Array.isArray(games) ? games.length : 0 });
     if (!Array.isArray(games) || games.length === 0) {
       console.log('[GameCollectionView] No games to enrich');
@@ -547,23 +606,29 @@ const GameCollectionView = ({
       };
     });
     
-    console.log('[GameCollectionView] enrichedGames complete', { count: enriched.length });
+    const enrichTime = performance.now() - startTime;
+    console.log('[GameCollectionView] enrichedGames complete', { 
+      count: enriched.length,
+      timeMs: enrichTime.toFixed(2),
+    });
     return enriched;
   }, [games]);
 
-  // Filter games based on all filters
+  // Filter games based on all filters (using deferred values to prevent blocking)
   const filteredGames = useMemo(() => {
+    const startTime = performance.now();
     console.log('[GameCollectionView] filteredGames useMemo running', {
       enrichedGamesCount: Array.isArray(enrichedGames) ? enrichedGames.length : 0,
-      searchQuery,
-      selectedCategoriesCount: selectedCategories.length,
-      selectedOwnersCount: selectedOwners.length,
-      minPlayers,
-      maxPlayers,
-      minBggRating,
-      minMatchRating,
-      minPlayTime,
-      maxPlayTime,
+      searchQuery: deferredSearchQuery,
+      selectedCategoriesCount: deferredSelectedCategories.length,
+      selectedOwnersCount: deferredSelectedOwners.length,
+      minPlayers: deferredMinPlayers,
+      maxPlayers: deferredMaxPlayers,
+      minBggRating: deferredMinBggRating,
+      minMatchRating: deferredMinMatchRating,
+      minPlayTime: deferredMinPlayTime,
+      maxPlayTime: deferredMaxPlayTime,
+      browseAllMode: deferredBrowseAllMode,
     });
     
     if (!Array.isArray(enrichedGames) || enrichedGames.length === 0) {
@@ -574,20 +639,23 @@ const GameCollectionView = ({
     let filtered = enrichedGames;
 
     // If in browse all mode, skip all filters and just sort by rank
-    if (browseAllMode) {
-      filtered = filtered.sort((a, b) => {
+    if (deferredBrowseAllMode) {
+      // Use a more efficient sort - create a copy first to avoid mutating the original
+      filtered = [...enrichedGames].sort((a, b) => {
         const rankA = parseInt(a.rank || '999999') || 999999;
         const rankB = parseInt(b.rank || '999999') || 999999;
         return rankA - rankB; // Ascending order (lower rank = better)
       });
+      const filterTime = performance.now() - startTime;
       console.log('[GameCollectionView] Browse all mode - showing all games sorted by rank', { 
-        count: filtered.length 
+        count: filtered.length,
+        timeMs: filterTime.toFixed(2),
       });
       return filtered;
     }
 
     // Search query filter - keyword search that omits common words
-    if (searchQuery.trim()) {
+    if (deferredSearchQuery.trim()) {
       // Common stop words to omit from search
       const stopWords = new Set([
         'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
@@ -601,7 +669,7 @@ const GameCollectionView = ({
       ]);
       
       // Split query into words, normalize, and filter out stop words
-      const queryWords = searchQuery
+      const queryWords = deferredSearchQuery
         .toLowerCase()
         .trim()
         .replace(/\s+/g, ' ')
@@ -609,7 +677,7 @@ const GameCollectionView = ({
         .filter(word => word.length > 0 && !stopWords.has(word));
       
       // If all words were stop words, use the original query
-      const searchKeywords = queryWords.length > 0 ? queryWords : [searchQuery.toLowerCase().trim()];
+      const searchKeywords = queryWords.length > 0 ? queryWords : [deferredSearchQuery.toLowerCase().trim()];
       
       filtered = filtered.filter(game => {
         // Get title from multiple possible fields
@@ -626,55 +694,55 @@ const GameCollectionView = ({
     }
 
     // Category filter - games must belong to ALL selected categories (AND logic)
-    if (selectedCategories.length > 0) {
+    if (deferredSelectedCategories.length > 0) {
       filtered = filtered.filter(game => {
         const gameCategories = game._categories || ['Other'];
         // Check that ALL selected categories are in the game's categories
-        return selectedCategories.every(selectedCat => gameCategories.includes(selectedCat));
+        return deferredSelectedCategories.every(selectedCat => gameCategories.includes(selectedCat));
       });
     }
 
     // Owner filter
-    if (selectedOwners.length > 0 && showOwners) {
+    if (deferredSelectedOwners.length > 0 && showOwners) {
       filtered = filtered.filter(game => {
         const gameId = String(game.bggId || game.id);
         const owners = ownersMap[gameId] || [];
-        return selectedOwners.some(owner => owners.includes(owner));
+        return deferredSelectedOwners.some(owner => owners.includes(owner));
       });
     }
 
     // Player count filter (range)
-    if (minPlayers > 1 || maxPlayers < 10) {
+    if (deferredMinPlayers > 1 || deferredMaxPlayers < 10) {
       filtered = filtered.filter(game => {
         const gameMinPlayers = game.minPlayers || 1;
         const gameMaxPlayers = game.maxPlayers || 999;
         // Check if game's player range overlaps with filter range
         // Game is included if its range overlaps with [minPlayers, maxPlayers]
         // For maxPlayers = 10 (10+), treat as 10+
-        const filterMax = maxPlayers >= 10 ? 999 : maxPlayers;
-        return gameMinPlayers <= filterMax && gameMaxPlayers >= minPlayers;
+        const filterMax = deferredMaxPlayers >= 10 ? 999 : deferredMaxPlayers;
+        return gameMinPlayers <= filterMax && gameMaxPlayers >= deferredMinPlayers;
       });
     }
 
     // BGG rating filter
-    if (minBggRating > 0) {
+    if (deferredMinBggRating > 0) {
       filtered = filtered.filter(game => {
         const rating = parseFloat(game.average || game.bggRating || 0);
-        return rating >= minBggRating;
+        return rating >= deferredMinBggRating;
       });
     }
 
     // Match rating filter
-    if (minMatchRating > 0 && showMatchScores) {
+    if (deferredMinMatchRating > 0 && showMatchScores) {
       filtered = filtered.filter(game => {
         const gameId = String(game.bggId || game.id);
         const matchScore = matchScores[gameId] || 0;
-        return matchScore >= minMatchRating;
+        return matchScore >= deferredMinMatchRating;
       });
     }
 
     // Play time filter (range with overlap check)
-    if (minPlayTime > 0 || maxPlayTime < 300) {
+    if (deferredMinPlayTime > 0 || deferredMaxPlayTime < 300) {
       filtered = filtered.filter(game => {
         // Get game's play time range (if available) or single value
         const gameMinTime = game.minPlayTime || game.playingTime || null;
@@ -687,74 +755,156 @@ const GameCollectionView = ({
         const gameMin = gameMinTime || 0;
         const gameMax = gameMaxTime || 300;
         
-        return gameMin <= maxPlayTime && gameMax >= minPlayTime;
+        return gameMin <= deferredMaxPlayTime && gameMax >= deferredMinPlayTime;
       });
     }
 
+    // Complexity/weight filter
+    if (deferredMinComplexity > 0 || deferredMaxComplexity < 5) {
+      filtered = filtered.filter(game => {
+        const complexity = game.averageWeight || game.complexity || game.weight;
+        if (!complexity) return true; // Include games without complexity data
+        const complexityNum = typeof complexity === 'string' ? parseFloat(complexity) : complexity;
+        if (isNaN(complexityNum)) return true;
+        return complexityNum >= deferredMinComplexity && complexityNum <= deferredMaxComplexity;
+      });
+    }
+
+    // Favorites only filter
+    if (deferredFavoritesOnly) {
+      filtered = filtered.filter(game => game.isFavorite === true);
+    }
+
+    const filterTime = performance.now() - startTime;
     console.log('[GameCollectionView] filteredGames complete', { 
       originalCount: enrichedGames.length,
       filteredCount: filtered.length,
-      browseAllMode,
-      sortedByRank: browseAllMode
+      browseAllMode: deferredBrowseAllMode,
+      sortedByRank: deferredBrowseAllMode,
+      timeMs: filterTime.toFixed(2),
     });
     return filtered;
-  }, [enrichedGames, searchQuery, selectedCategories, selectedOwners, minPlayers, maxPlayers, minBggRating, minMatchRating, minPlayTime, maxPlayTime, showOwners, ownersMap, showMatchScores, matchScores, browseAllMode]);
+  }, [enrichedGames, deferredSearchQuery, deferredSelectedCategories, deferredSelectedOwners, deferredMinPlayers, deferredMaxPlayers, deferredMinBggRating, deferredMinMatchRating, deferredMinPlayTime, deferredMaxPlayTime, deferredMinComplexity, deferredMaxComplexity, deferredFavoritesOnly, showOwners, ownersMap, showMatchScores, matchScores, deferredBrowseAllMode]);
 
 
-  // Toggle category selection
+  // Toggle category selection (use transition for non-urgent updates)
   const toggleCategory = useCallback((category) => {
-    setSelectedCategories(prev => {
-      if (prev.includes(category)) {
-        return prev.filter(c => c !== category);
-      } else {
-        return [...prev, category];
-      }
+    startTransition(() => {
+      setSelectedCategories(prev => {
+        if (prev.includes(category)) {
+          return prev.filter(c => c !== category);
+        } else {
+          return [...prev, category];
+        }
+      });
     });
-  }, []);
+  }, [startTransition]);
 
-  // Toggle owner selection
+  // Toggle owner selection (use transition for non-urgent updates)
   const toggleOwner = useCallback((owner) => {
-    setSelectedOwners(prev => {
-      if (prev.includes(owner)) {
-        return prev.filter(o => o !== owner);
-      } else {
-        return [...prev, owner];
-      }
+    startTransition(() => {
+      setSelectedOwners(prev => {
+        if (prev.includes(owner)) {
+          return prev.filter(o => o !== owner);
+        } else {
+          return [...prev, owner];
+        }
+      });
     });
-  }, []);
+  }, [startTransition]);
 
 
-  // Reset filters
+  // Reset filters (use transition for non-urgent updates)
   const resetFilters = useCallback(() => {
-    setSelectedCategories([]);
-    setSelectedOwners([]);
-    setMinPlayers(1);
-    setMaxPlayers(10);
-    setMinBggRating(0);
-    setMinMatchRating(0);
-    setMinPlayTime(0);
-    setMaxPlayTime(300);
+    startTransition(() => {
+      setSelectedCategories([]);
+      setSelectedOwners([]);
+      setMinPlayers(1);
+      setMaxPlayers(10);
+      setMinBggRating(0);
+      setMinMatchRating(0);
+      setMinPlayTime(0);
+      setMaxPlayTime(300);
+      setMinComplexity(0);
+      setMaxComplexity(5);
+      setFavoritesOnly(false);
+      setBrowseAllMode(false);
+      setSearchQuery('');
+    });
     setShowResults(false);
-    setBrowseAllMode(false);
-    setSearchQuery('');
     setDisplayedGamesCount(50); // Reset pagination when filters reset
-  }, []);
+  }, [startTransition]);
 
-  // Handle browse all games
+  // Toggle filters panel
+  const toggleFilters = useCallback(() => {
+    const toValue = filtersExpanded ? 0 : 1;
+    Animated.timing(filtersAnimation, {
+      toValue,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+    setFiltersExpanded(!filtersExpanded);
+  }, [filtersExpanded, filtersAnimation]);
+
+  // Calculate max height for filters animation
+  const filtersMaxHeight = filtersAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 3000], // Adjust based on content height
+  });
+
+  // Handle browse all games (use transition for non-urgent updates)
   const handleBrowseAll = useCallback(() => {
-    setSearchQuery('');
-    setSelectedCategories([]);
-    setSelectedOwners([]);
-    setMinPlayers(1);
-    setMaxPlayers(10);
-    setMinBggRating(0);
-    setMinMatchRating(0);
-    setMinPlayTime(0);
-    setMaxPlayTime(300);
-    setBrowseAllMode(true);
-    setShowResults(true);
-    setDisplayedGamesCount(50); // Reset pagination when browsing all
-  }, []);
+    console.log('[GameCollectionView] handleBrowseAll called');
+    const startTime = performance.now();
+    
+    // Use requestIdleCallback or setTimeout to prevent blocking
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(() => {
+        startTransition(() => {
+          setSearchQuery('');
+          setSelectedCategories([]);
+          setSelectedOwners([]);
+          setMinPlayers(1);
+          setMaxPlayers(10);
+          setMinBggRating(0);
+          setMinMatchRating(0);
+          setMinPlayTime(0);
+          setMaxPlayTime(300);
+          setMinComplexity(0);
+          setMaxComplexity(5);
+          setFavoritesOnly(false);
+          setBrowseAllMode(true);
+        });
+        setShowResults(true);
+        setDisplayedGamesCount(50); // Reset pagination when browsing all
+        const time = performance.now() - startTime;
+        console.log('[GameCollectionView] handleBrowseAll completed', { timeMs: time.toFixed(2) });
+      }, { timeout: 100 });
+    } else {
+      // Fallback for environments without requestIdleCallback
+      setTimeout(() => {
+        startTransition(() => {
+          setSearchQuery('');
+          setSelectedCategories([]);
+          setSelectedOwners([]);
+          setMinPlayers(1);
+          setMaxPlayers(10);
+          setMinBggRating(0);
+          setMinMatchRating(0);
+          setMinPlayTime(0);
+          setMaxPlayTime(300);
+          setMinComplexity(0);
+          setMaxComplexity(5);
+          setFavoritesOnly(false);
+          setBrowseAllMode(true);
+        });
+        setShowResults(true);
+        setDisplayedGamesCount(50); // Reset pagination when browsing all
+        const time = performance.now() - startTime;
+        console.log('[GameCollectionView] handleBrowseAll completed', { timeMs: time.toFixed(2) });
+      }, 0);
+    }
+  }, [startTransition]);
   
   // Scroll to results when browseAllMode is activated
   useEffect(() => {
@@ -816,7 +966,7 @@ const GameCollectionView = ({
     if (showResults) {
       setDisplayedGamesCount(50); // Reset to first page when showing results
     }
-  }, [showResults, searchQuery, selectedCategories, selectedOwners, minPlayers, maxPlayers, minBggRating, minMatchRating, minPlayTime, maxPlayTime, browseAllMode]);
+  }, [showResults, searchQuery, selectedCategories, selectedOwners, minPlayers, maxPlayers, minBggRating, minMatchRating, minPlayTime, maxPlayTime, minComplexity, maxComplexity, favoritesOnly, browseAllMode]);
 
   // Render filter chip/pill
   const renderChip = useCallback((label, isSelected, onPress, count = null) => {
@@ -877,13 +1027,40 @@ const GameCollectionView = ({
     );
   }, [showMatchScores, matchScores, onGameDelete, onGamePress, width]);
 
-  // Render games grid
+  // Memoize the games grid to prevent unnecessary re-renders
+  const gamesGridElement = useMemo(() => {
+    const startTime = performance.now();
+    const result = (
+      <View style={styles.gamesGrid}>
+        {paginatedGames.map((game, index) => renderGameCard(game, index))}
+      </View>
+    );
+    const renderTime = performance.now() - startTime;
+    if (renderTime > 50) {
+      console.warn('[GameCollectionView] Slow paginated games render', {
+        gamesCount: paginatedGames.length,
+        timeMs: renderTime.toFixed(2),
+      });
+    }
+    return result;
+  }, [paginatedGames, renderGameCard]);
+
+  // Render games grid - memoized to prevent unnecessary re-renders
   const renderGamesGrid = useCallback((gamesToRender) => {
-    return (
+    const startTime = performance.now();
+    const result = (
       <View style={styles.gamesGrid}>
         {gamesToRender.map((game, index) => renderGameCard(game, index))}
       </View>
     );
+    const renderTime = performance.now() - startTime;
+    if (renderTime > 50) {
+      console.warn('[GameCollectionView] Slow games grid render', {
+        gamesCount: gamesToRender.length,
+        timeMs: renderTime.toFixed(2),
+      });
+    }
+    return result;
   }, [renderGameCard]);
 
   // Render list item for FlatList
@@ -920,6 +1097,7 @@ const GameCollectionView = ({
     showResults,
     filteredGamesCount: filteredGames.length,
     hasHeaderComponent: !!headerComponent,
+    isPending,
   });
 
   useEffect(() => {
@@ -952,52 +1130,27 @@ const GameCollectionView = ({
         })()}
         {headerTitle && <Text style={styles.headerTitle}>{headerTitle}</Text>}
         
-        {/* Search Input */}
-        {showSearch && (
-          <>
-            <View style={styles.searchContainer}>
-              <Input
-                placeholder="Search By Title"
-                value={searchQuery}
-                onChangeText={(text) => {
-                  setSearchQuery(text);
-                  setBrowseAllMode(false); // Clear browse all mode when searching
-                }}
-                style={styles.searchInput}
-                autoCapitalize="none"
-                autoCorrect={false}
-                onSubmitEditing={() => {
-                  // Search is already happening in real-time, but this allows Enter key to confirm
-                }}
-              />
-              <Pressable
-                style={styles.searchButton}
-                onPress={() => {
-                  // Search is already happening in real-time, but this provides visual confirmation
-                  // Could also be used to focus results or scroll to them
-                }}
-              >
-                <Text style={styles.searchButtonText}>Search</Text>
-              </Pressable>
-            </View>
-            <View style={styles.browseAllButtonContainer}>
-              <Pressable
-                style={[styles.browseAllButton, browseAllMode && styles.browseAllButtonActive]}
-                onPress={handleBrowseAll}
-              >
-                <Text style={[styles.browseAllButtonText, browseAllMode && styles.browseAllButtonTextActive]}>
-                  Browse All My Games
-                </Text>
-              </Pressable>
-            </View>
-          </>
-        )}
-
         {/* Filter Panel */}
         <View style={styles.filterPanel}>
-        <Text style={styles.filterPanelTitle}>Filters</Text>
-        
-        {/* Category Chips */}
+          <Pressable 
+            style={styles.filterPanelHeader}
+            onPress={toggleFilters}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.filterPanelTitle}>Filters</Text>
+            <Text style={styles.filterPanelIcon}>{filtersExpanded ? '▼' : '▶'}</Text>
+          </Pressable>
+          
+          <Animated.View 
+            style={[
+              styles.filterPanelContent,
+              { 
+                maxHeight: filtersMaxHeight,
+                opacity: filtersAnimation 
+              }
+            ]}
+          >
+            {/* Category Chips */}
         <View style={styles.filterSection}>
           <Text style={styles.filterSectionLabel}>Category</Text>
           <View style={styles.chipsContainer}>
@@ -1029,6 +1182,69 @@ const GameCollectionView = ({
           </View>
         )}
 
+        {/* Filter By Owner (Avatar-based) */}
+        {showOwners && uniqueOwnersForFilter.length > 0 && onOwnerFilterChange && (
+          <View style={styles.filterSection}>
+            <Text style={styles.filterSectionLabel}>Filter by owner</Text>
+            <View style={styles.ownerButtonsContainer}>
+              {uniqueOwnersForFilter.map((owner) => {
+                const isSelected = selectedOwner === owner.userId;
+                return (
+                  <Pressable
+                    key={owner.userId}
+                    style={[
+                      styles.ownerButtonWrapper,
+                      isSelected && styles.ownerButtonWrapperSelected
+                    ]}
+                    onPress={() => {
+                      onOwnerFilterChange(isSelected ? null : owner.userId);
+                    }}
+                  >
+                    <View style={[
+                      styles.ownerButton,
+                      isSelected && styles.ownerButtonSelected
+                    ]}>
+                      {owner.avatarUrl ? (
+                        <Image
+                          source={{ uri: owner.avatarUrl }}
+                          style={styles.ownerButtonAvatar}
+                        />
+                      ) : (
+                        <View style={styles.ownerButtonAvatarPlaceholder}>
+                          <Text style={styles.ownerButtonAvatarInitial}>
+                            {owner.name.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      {isSelected && (
+                        <View style={styles.ownerButtonCheckmark}>
+                          <Text style={styles.ownerButtonCheckmarkText}>✓</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[
+                      styles.ownerButtonName,
+                      isSelected && styles.ownerButtonNameSelected
+                    ]}>
+                      {owner.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {selectedOwner && (
+              <Pressable
+                style={styles.clearOwnerFilterButton}
+                onPress={() => onOwnerFilterChange(null)}
+              >
+                <Text style={styles.clearOwnerFilterButtonText}>
+                  Show all owners
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
         {/* Player Count Double Slider */}
         <View style={styles.filterSection}>
           <DoubleSlider
@@ -1055,6 +1271,7 @@ const GameCollectionView = ({
             max={10}
             step={1.25}
             screenWidth={width}
+            fillToRight={true}
           />
         </View>
 
@@ -1066,9 +1283,10 @@ const GameCollectionView = ({
               value={minMatchRating}
               onValueChange={setMinMatchRating}
               min={0}
-              max={1000}
-              step={1}
+              max={50}
+              step={5}
             screenWidth={width}
+            fillToRight={true}
             />
           </View>
         )}
@@ -1081,7 +1299,7 @@ const GameCollectionView = ({
               onPress={() => navigation.navigate('Collection')}
             >
               <Text style={styles.placeholderText}>
-                "Heart" at least 8 games to unlock beeple match ratings
+                Favorite (heart) at least 8 games to unlock beeple match ratings
               </Text>
             </Pressable>
           </View>
@@ -1114,6 +1332,34 @@ const GameCollectionView = ({
           />
         </View>
 
+        {/* Complexity/Weight Double Slider */}
+        <View style={styles.filterSection}>
+          <DoubleSlider
+            label="Complexity (Weight)"
+            minValue={minComplexity}
+            maxValue={maxComplexity}
+            onMinChange={setMinComplexity}
+            onMaxChange={setMaxComplexity}
+            min={0}
+            max={5}
+            step={0.5}
+            formatValue={(val) => val.toFixed(1)}
+            screenWidth={width}
+          />
+        </View>
+
+        {/* Favorites Only Toggle */}
+        <View style={styles.filterSection}>
+          <Pressable
+            style={[styles.chip, favoritesOnly && styles.chipSelected]}
+            onPress={() => setFavoritesOnly(!favoritesOnly)}
+          >
+            <Text style={[styles.chipText, favoritesOnly && styles.chipTextSelected]}>
+              {favoritesOnly ? '✓ ' : ''}Favorites Only
+            </Text>
+          </Pressable>
+        </View>
+
         {/* Results Count and Actions */}
         <View style={styles.filterActions}>
           <Text style={styles.resultsCount}>
@@ -1137,7 +1383,63 @@ const GameCollectionView = ({
             </Pressable>
           </View>
         </View>
-      </View>
+          </Animated.View>
+        </View>
+
+        {/* Search Input */}
+        {showSearch && (
+          <>
+            <View style={styles.searchContainer}>
+              <Input
+                placeholder="Search By Title"
+                value={searchQuery}
+                onChangeText={(text) => {
+                  setSearchQuery(text);
+                  setBrowseAllMode(false); // Clear browse all mode when searching
+                }}
+                style={styles.searchInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                onSubmitEditing={() => {
+                  // Search is already happening in real-time, but this allows Enter key to confirm
+                }}
+              />
+              <Pressable
+                style={[styles.searchButton, !searchQuery.trim() && styles.searchButtonDisabled]}
+                onPress={() => {
+                  if (searchQuery.trim()) {
+                    setShowResults(true);
+                    setBrowseAllMode(false);
+                    // Scroll to results after a short delay to allow layout
+                    setTimeout(() => {
+                      if (scrollViewRef.current && resultsContainerY.current > 0) {
+                        scrollViewRef.current.scrollTo({
+                          y: resultsContainerY.current - 20,
+                          animated: true,
+                        });
+                      }
+                    }, 200);
+                  }
+                }}
+                disabled={!searchQuery.trim()}
+              >
+                <Text style={[styles.searchButtonText, !searchQuery.trim() && styles.searchButtonTextDisabled]}>
+                  Search for title keyword
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.browseAllButtonContainer}>
+              <Pressable
+                style={[styles.browseAllButton, browseAllMode && styles.browseAllButtonActive]}
+                onPress={handleBrowseAll}
+              >
+                <Text style={[styles.browseAllButtonText, browseAllMode && styles.browseAllButtonTextActive]}>
+                  Browse all {enrichedGames.length} of {headerTitle === "Everyone's Games" ? "everyone's games" : "my Games"}
+                </Text>
+              </Pressable>
+            </View>
+          </>
+        )}
 
         {/* Results Display */}
         {showResults && filteredGames.length > 0 && (
@@ -1159,9 +1461,7 @@ const GameCollectionView = ({
             )}
             
             {/* Games Grid - only render paginated games */}
-            <View style={styles.gamesGrid}>
-              {paginatedGames.map((game, index) => renderGameCard(game, index))}
-            </View>
+            {gamesGridElement}
             
             {/* Load More Button */}
             {hasMoreGames && (
@@ -1188,7 +1488,7 @@ const GameCollectionView = ({
         {/* Empty State */}
         {showResults && filteredGames.length === 0 && (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>No games match your filters</Text>
+            <Text style={styles.emptyStateText}>No results</Text>
             <Pressable style={styles.resetButton} onPress={resetFilters}>
               <Text style={styles.resetButtonText}>Reset Filters</Text>
             </Pressable>
@@ -1263,13 +1563,20 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  searchButtonDisabled: {
+    backgroundColor: theme.colors.woodMedium,
+    opacity: 0.5,
+  },
   searchButtonText: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: theme.typography.fontWeight.semibold,
     color: '#fff',
   },
+  searchButtonTextDisabled: {
+    color: theme.colors.textSecondary,
+  },
   browseAllButtonContainer: {
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: theme.spacing.md,
   },
   browseAllButton: {
@@ -1306,12 +1613,28 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
     borderWidth: 1,
     borderColor: theme.colors.woodMedium,
+    overflow: 'hidden',
+  },
+  filterPanelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.woodMedium,
   },
   filterPanelTitle: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.md,
+  },
+  filterPanelIcon: {
+    fontSize: theme.typography.fontSize.lg,
+    color: theme.colors.textSecondary,
+  },
+  filterPanelContent: {
+    overflow: 'hidden',
+    paddingTop: theme.spacing.md,
   },
   filterSection: {
     marginBottom: theme.spacing.lg,
@@ -1366,6 +1689,14 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     position: 'relative',
     marginBottom: theme.spacing.xs,
+  },
+  sliderFill: {
+    height: 6,
+    backgroundColor: theme.colors.meepleRed,
+    borderRadius: 3,
+    position: 'absolute',
+    top: 0,
+    zIndex: 1,
   },
   sliderActiveRange: {
     height: 6,
@@ -1611,6 +1942,93 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.semibold,
     color: '#fff',
     marginTop: -2,
+  },
+  ownerButtonsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.md,
+    marginBottom: theme.spacing.xs,
+  },
+  ownerButtonWrapper: {
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  ownerButtonWrapperSelected: {
+    // Additional styling for selected wrapper if needed
+  },
+  ownerButton: {
+    position: 'relative',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: theme.colors.woodMedium,
+    backgroundColor: theme.colors.bgColor,
+  },
+  ownerButtonSelected: {
+    borderColor: theme.colors.meepleRed,
+    borderWidth: 3,
+  },
+  ownerButtonAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  ownerButtonAvatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: theme.colors.woodMedium,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ownerButtonAvatarInitial: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.textPrimary,
+  },
+  ownerButtonCheckmark: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: theme.colors.meepleRed,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.bgColor,
+  },
+  ownerButtonCheckmarkText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: theme.typography.fontWeight.bold,
+  },
+  ownerButtonName: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
+    textAlign: 'center',
+    maxWidth: 60,
+  },
+  ownerButtonNameSelected: {
+    color: theme.colors.meepleRed,
+    fontWeight: theme.typography.fontWeight.semibold,
+  },
+  clearOwnerFilterButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.bgColor,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    marginTop: theme.spacing.xs,
+  },
+  clearOwnerFilterButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.medium,
   },
 });
 

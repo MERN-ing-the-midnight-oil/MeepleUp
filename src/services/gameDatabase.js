@@ -82,11 +82,13 @@ export async function searchGamesByName(query, limit = 10) {
     
     // Add timeout wrapper to prevent hanging
     // Increased to 7s to give Firestore more time for legitimate slow queries
-    // This helps avoid premature timeouts when Firestore is just slow (not broken)
+    // Reduced timeout for faster fallback to BGG API during bulk imports
+    // 3 seconds is enough for most queries, and faster fallback improves bulk import speed
+    const QUERY_TIMEOUT_MS = 3000; // Reduced from 7000ms to 3000ms for faster bulk imports
     const queryWithTimeout = (queryPromise, queryName, searchTermForLog = null) => {
       const searchInfo = searchTermForLog ? ` (search term: "${searchTermForLog}")` : '';
       if (__DEV__) {
-        console.log(`[Game Database] Starting ${queryName} with 7s timeout${searchInfo}`);
+        console.log(`[Game Database] Starting ${queryName} with ${QUERY_TIMEOUT_MS/1000}s timeout${searchInfo}`);
       }
       return Promise.race([
         queryPromise.then((result) => {
@@ -99,10 +101,10 @@ export async function searchGamesByName(query, limit = 10) {
           setTimeout(() => {
             if (__DEV__) {
               // Use warn instead of error - timeouts are expected for games that don't exist
-              console.warn(`[Game Database] ${queryName} timed out after 7 seconds${searchInfo}`);
+              console.warn(`[Game Database] ${queryName} timed out after ${QUERY_TIMEOUT_MS/1000} seconds${searchInfo}`);
             }
-            reject(new Error(`Firestore query timeout after 7 seconds: ${queryName}${searchInfo}`));
-          }, 7000);
+            reject(new Error(`Firestore query timeout after ${QUERY_TIMEOUT_MS/1000} seconds: ${queryName}${searchInfo}`));
+          }, QUERY_TIMEOUT_MS);
         })
       ]);
     };

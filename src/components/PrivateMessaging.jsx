@@ -198,17 +198,6 @@ const PrivateMessaging = ({ eventId, members, onBackToTabletalk, initialOtherUse
     }
   }, [messageText, selectedConversation, eventId, userId]);
 
-  const otherMembers = useMemo(() => {
-    if (!members || !userId) return [];
-    return members
-      .filter(m => m.userId && m.userId !== userId)
-      .map(m => ({
-        userId: m.userId,
-        name: memberData[m.userId]?.name || m.userName || 'Unknown User',
-        avatarUrl: memberData[m.userId]?.avatarUrl || m.userAvatarUrl || null,
-      }));
-  }, [members, userId, memberData]);
-
   // If no conversation selected, show conversation list
   if (!selectedConversation) {
     return (
@@ -272,31 +261,6 @@ const PrivateMessaging = ({ eventId, members, onBackToTabletalk, initialOtherUse
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>No conversations yet</Text>
             </View>
-          }
-          ListHeaderComponent={
-            otherMembers.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Start a conversation</Text>
-                {otherMembers.map((member) => {
-                  const existingConvo = conversations.find(
-                    c => c.otherUser?.id === member.userId
-                  );
-                  if (existingConvo) return null;
-
-                  return (
-                    <TouchableOpacity
-                      key={member.userId}
-                      style={styles.memberItem}
-                      onPress={() => handleStartConversation(member.userId)}
-                      disabled={loading}
-                    >
-                      <Text style={styles.memberName}>{member.name}</Text>
-                      <Text style={styles.memberAction}>Message</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )
           }
         />
       </View>
@@ -464,17 +428,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  section: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 12,
-  },
   conversationItem: {
     flexDirection: 'row',
     padding: 16,
@@ -514,24 +467,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  memberItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  memberName: {
-    fontSize: 16,
-    color: '#333',
-  },
-  memberAction: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '600',
   },
   emptyContainer: {
     padding: 32,

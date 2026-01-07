@@ -5,12 +5,16 @@
  * API Documentation: https://boardgamegeek.com/using_the_xml_api
  */
 
-const BGG_API_BASE = 'https://boardgamegeek.com/xmlapi2';
+import logger from '../utils/logger';
+import { BGG_API } from '../utils/constants';
+
+const BGG_API_BASE = BGG_API.BASE_URL;
 
 // Rate limiting: Track API calls to avoid being flagged as heavy user
+// BGG API recommendation: 1 request per 5 seconds for bulk operations
 let lastApiCallTime = 0;
-const MIN_API_CALL_INTERVAL_BULK = 2000; // 2 seconds for bulk operations (increased from 1.5s)
-const MIN_API_CALL_INTERVAL_NORMAL = 500; // 0.5 seconds for normal operations
+const MIN_API_CALL_INTERVAL_BULK = BGG_API.RATE_LIMIT.BULK_OPERATION_MS;
+const MIN_API_CALL_INTERVAL_NORMAL = BGG_API.RATE_LIMIT.NORMAL_OPERATION_MS;
 
 /**
  * Rate limiter for BGG API calls
@@ -25,8 +29,8 @@ async function rateLimitAPI(isBulkOperation = false) {
   
   if (timeSinceLastCall < minInterval) {
     const waitTime = minInterval - timeSinceLastCall;
-    if (__DEV__ && isBulkOperation) {
-      console.log(`[BGG API] Rate limiting bulk operation: waiting ${waitTime}ms`);
+    if (isBulkOperation) {
+      logger.debug(`[BGG API] Rate limiting bulk operation: waiting ${waitTime}ms`);
     }
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
@@ -42,22 +46,18 @@ async function rateLimitAPI(isBulkOperation = false) {
  * @param {number} maxRetries - Maximum number of retries (default: 2, reduced to fail faster)
  * @returns {Promise<Response>} The response after retries
  */
-async function handle429WithRetry(response, retryFn, retryCount = 0, maxRetries = 2) {
-  if (response.status === 429 && retryCount < maxRetries) {
+async function handle429WithRetry(response, retryFn, retryCount = 0, maxRetries = BGG_API.RATE_LIMIT.MAX_RETRIES) {
+  if (response.status === BGG_API.HTTP_STATUS.RATE_LIMITED && retryCount < maxRetries) {
     // Exponential backoff: 5s, 10s (reduced from 3 retries to 2 to fail faster)
-    const backoffMs = 5000 * Math.pow(2, retryCount);
-    if (__DEV__) {
-      console.log(`[BGG API] Rate limited (429), waiting ${backoffMs}ms before retry ${retryCount + 1}/${maxRetries}`);
-    }
+    const backoffMs = BGG_API.RATE_LIMIT.RETRY_BACKOFF_BASE_MS * Math.pow(2, retryCount);
+    logger.warn(`[BGG API] Rate limited (429), waiting ${backoffMs}ms before retry ${retryCount + 1}/${maxRetries}`);
     await new Promise(resolve => setTimeout(resolve, backoffMs));
     try {
       const retryResponse = await retryFn();
       return handle429WithRetry(retryResponse, retryFn, retryCount + 1, maxRetries);
     } catch (error) {
       // If retry fails, return the original response to avoid infinite loops
-      if (__DEV__) {
-        console.warn(`[BGG API] Retry failed:`, error);
-      }
+      logger.warn(`[BGG API] Retry failed:`, error);
       return response;
     }
   }
@@ -85,21 +85,19 @@ function getBGGToken() {
       token = API_CONFIG.BGG_API_TOKEN || null;
     }
     
-    if (__DEV__) {
-      if (token) {
-        console.log('[BGG API] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
-      } else {
-        console.warn('[BGG API] No token found. Checked:', {
-          EXPO_PUBLIC_BGG_API_TOKEN: !!process.env.EXPO_PUBLIC_BGG_API_TOKEN,
-          EXPO_PUBLIC_BGGbearerToken: !!process.env.EXPO_PUBLIC_BGGbearerToken,
-          BGGbearerToken: !!process.env.BGGbearerToken,
-          REACT_APP_BGG_API_TOKEN: !!process.env.REACT_APP_BGG_API_TOKEN,
-        });
-      }
+    if (token) {
+      logger.debug('[BGG API] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
+    } else {
+      logger.warn('[BGG API] No token found. Checked:', {
+        EXPO_PUBLIC_BGG_API_TOKEN: !!process.env.EXPO_PUBLIC_BGG_API_TOKEN,
+        EXPO_PUBLIC_BGGbearerToken: !!process.env.EXPO_PUBLIC_BGGbearerToken,
+        BGGbearerToken: !!process.env.BGGbearerToken,
+        REACT_APP_BGG_API_TOKEN: !!process.env.REACT_APP_BGG_API_TOKEN,
+      });
     }
     return token;
   } catch (error) {
-    console.warn('[BGG API] Error loading API config:', error);
+    logger.error('[BGG API] Error loading API config:', error);
     return null;
   }
 }
@@ -143,9 +141,7 @@ export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
     
     // If header auth fails with 401, try token as query parameter
     if (response.status === 401 && token) {
-      if (__DEV__) {
-        console.log('[BGG API] Header auth failed, trying token as query parameter');
-      }
+      logger.debug('[BGG API] Header auth failed, trying token as query parameter');
       const urlWithToken = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame&token=${token}`;
       const fetchWithTokenRetry = async () => await fetch(urlWithToken);
       response = await fetch(urlWithToken);
@@ -153,9 +149,7 @@ export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
       
       // If still fails, try without authentication
       if (response.status === 401 || response.status === 403) {
-        if (__DEV__) {
-          console.log('[BGG API] Token query param also failed, trying without auth');
-        }
+        logger.debug('[BGG API] Token query param also failed, trying without auth');
         const urlNoAuth = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame`;
         const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
         response = await fetch(urlNoAuth);
@@ -163,9 +157,7 @@ export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
       }
     } else if (response.status === 401 && !token) {
       // No token configured, try without auth
-      if (__DEV__) {
-        console.log('[BGG API] No token configured, trying without auth');
-      }
+      logger.debug('[BGG API] No token configured, trying without auth');
       const urlNoAuth = `${BGG_API_BASE}/search?query=${encodedQuery}&type=boardgame`;
       const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
       response = await fetch(urlNoAuth);
@@ -174,14 +166,10 @@ export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
     
     if (!response.ok) {
       // If we still have errors after all fallbacks and retries, log and return empty array
-      if (__DEV__) {
-        console.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
-      }
+      logger.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
       // For 429 errors specifically, log a more helpful message
       if (response.status === 429) {
-        if (__DEV__) {
-          console.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
-        }
+        logger.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
         // Throw an error so the caller knows to retry
         throw new Error(`BGG API rate limited (429) for search: "${query}"`);
       }
@@ -197,12 +185,10 @@ export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
       throw error;
     }
     
-    console.error('[BGG API] Error searching games:', error);
+    logger.error('[BGG API] Error searching games:', error);
     // Try one more time without authentication as a last resort
     try {
-      if (__DEV__) {
-        console.log('[BGG API] Trying final fallback without authentication for search');
-      }
+      logger.debug('[BGG API] Trying final fallback without authentication for search');
       const urlNoAuth = `${BGG_API_BASE}/search?query=${encodeURIComponent(query.trim())}&type=boardgame`;
       const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
       const finalResponse = await fetch(urlNoAuth);
@@ -215,9 +201,7 @@ export async function searchBGGAPI(query, limit = 10, maxRetries = 3) {
         throw new Error(`BGG API rate limited (429) for search: "${query}"`);
       }
     } catch (finalError) {
-      if (__DEV__) {
-        console.warn('[BGG API] Final fallback also failed:', finalError);
-      }
+      logger.warn('[BGG API] Final fallback also failed:', finalError);
       // Re-throw 429 errors
       if (finalError.message && finalError.message.includes('rate limited')) {
         throw finalError;
@@ -271,7 +255,7 @@ function parseBGGSearchXML(xmlText, limit = 10) {
     
     return results;
   } catch (error) {
-    console.error('[BGG API] Error parsing search XML:', error);
+    logger.error('[BGG API] Error parsing search XML:', error);
     return [];
   }
 }
@@ -287,8 +271,9 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
     return [];
   }
 
-  // BGG API has a practical limit of ~50 IDs per call
-  const BATCH_SIZE = 50;
+  // BGG API: Recommended up to 20 games per request (we use 20 for safety and better rate limit compliance)
+  // Using smaller batches reduces risk of timeouts and rate limiting
+  const BATCH_SIZE = BGG_API.RATE_LIMIT.BATCH_SIZE;
   const results = [];
 
   for (let i = 0; i < gameIds.length; i += BATCH_SIZE) {
@@ -307,9 +292,7 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      if (__DEV__) {
-        console.log(`[BGG API] Batch fetching ${batch.length} games`);
-      }
+      logger.debug(`[BGG API] Batch fetching ${batch.length} games`);
       
       // Helper function to retry the fetch
       const fetchWithRetry = async () => {
@@ -344,15 +327,11 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
       }
       
       if (!response.ok) {
-        if (__DEV__) {
-          console.warn(`[BGG API] Batch fetch failed with status ${response.status} after retries`);
-        }
+        logger.warn(`[BGG API] Batch fetch failed with status ${response.status} after retries`);
         // If we're being rate-limited heavily (429), add extra delay before next batch
-        if (response.status === 429) {
-          if (__DEV__) {
-            console.log(`[BGG API] Rate limited, adding extra 10s delay before next batch`);
-          }
-          await new Promise(resolve => setTimeout(resolve, 10000));
+        if (response.status === BGG_API.HTTP_STATUS.RATE_LIMITED) {
+          logger.debug(`[BGG API] Rate limited, adding extra delay before next batch`);
+          await new Promise(resolve => setTimeout(resolve, BGG_API.RATE_LIMIT.EXTRA_DELAY_ON_429_MS));
         }
         // If still failing after retries, skip this batch and continue
         continue;
@@ -385,14 +364,12 @@ export async function fetchBGGGameDetailsBatch(gameIds) {
         }
       }
       
-      // Wait 3 seconds between batches (increased from 1.5s to be more conservative)
+      // Wait between batches to respect rate limits
       if (i + BATCH_SIZE < gameIds.length) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, BGG_API.RATE_LIMIT.BATCH_DELAY_MS));
       }
     } catch (error) {
-      if (__DEV__) {
-        console.error(`[BGG API] Error in batch fetch:`, error);
-      }
+      logger.error(`[BGG API] Error in batch fetch:`, error);
       // Continue with next batch even if one fails
     }
   }
@@ -434,18 +411,12 @@ export async function fetchBGGGameDetails(gameId) {
     // Use Bearer token in Authorization header (confirmed working via curl test)
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-      if (__DEV__) {
-        console.log('[BGG API] Using Bearer token in Authorization header');
-      }
+      logger.debug('[BGG API] Using Bearer token in Authorization header');
     } else {
-      if (__DEV__) {
-        console.warn('[BGG API] No token available');
-      }
+      logger.warn('[BGG API] No token available');
     }
     
-    if (__DEV__) {
-      console.log('[BGG API] Fetching:', url);
-    }
+    logger.debug('[BGG API] Fetching:', url);
     
     // Helper function to retry the fetch
     const fetchWithRetry = async () => {
@@ -456,66 +427,48 @@ export async function fetchBGGGameDetails(gameId) {
     
     let response = await fetchWithRetry();
     
-    if (__DEV__) {
-      console.log('[BGG API] Initial response status:', response.status);
-    }
+    logger.debug('[BGG API] Initial response status:', response.status);
     
     // Handle 429 rate limit errors with exponential backoff
     response = await handle429WithRetry(response, fetchWithRetry);
     
     // If header auth fails with 401, try token as query parameter
     if (response.status === 401 && token) {
-      if (__DEV__) {
-        console.log('[BGG API] Header auth failed (401), trying token as query parameter');
-      }
+      logger.debug('[BGG API] Header auth failed (401), trying token as query parameter');
       const urlWithToken = `${BGG_API_BASE}/thing?id=${gameId}&stats=1&token=${token}`;
       const fetchWithTokenRetry = async () => await fetch(urlWithToken);
       response = await fetch(urlWithToken);
       response = await handle429WithRetry(response, fetchWithTokenRetry);
       
-      if (__DEV__) {
-        console.log('[BGG API] Query param response status:', response.status);
-      }
+      logger.debug('[BGG API] Query param response status:', response.status);
       
       // If still fails, try without authentication
       if (response.status === 401 || response.status === 403) {
-        if (__DEV__) {
-          console.log('[BGG API] Token query param also failed, trying without auth');
-        }
+        logger.debug('[BGG API] Token query param also failed, trying without auth');
         const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
         const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
         response = await fetch(urlNoAuth);
         response = await handle429WithRetry(response, fetchNoAuthRetry);
         
-        if (__DEV__) {
-          console.log('[BGG API] No auth response status:', response.status);
-        }
+        logger.debug('[BGG API] No auth response status:', response.status);
       }
     } else if (response.status === 401 && !token) {
       // No token configured, try without auth
-      if (__DEV__) {
-        console.log('[BGG API] No token configured, trying without auth');
-      }
+      logger.debug('[BGG API] No token configured, trying without auth');
       const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
       const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
       response = await fetch(urlNoAuth);
       response = await handle429WithRetry(response, fetchNoAuthRetry);
       
-      if (__DEV__) {
-        console.log('[BGG API] No auth response status:', response.status);
-      }
+      logger.debug('[BGG API] No auth response status:', response.status);
     }
     
     if (!response.ok) {
       // If we still have errors after all fallbacks and retries, log and return null
-      if (__DEV__) {
-        console.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
-      }
+      logger.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
       // For 429 errors specifically, log a more helpful message
       if (response.status === 429) {
-        if (__DEV__) {
-          console.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
-        }
+        logger.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
       }
       // Don't throw - return null so the app can continue
       return null;
@@ -523,33 +476,27 @@ export async function fetchBGGGameDetails(gameId) {
 
     const xmlText = await response.text();
     
-    if (__DEV__) {
-      console.log('[BGG API] XML response length:', xmlText.length);
-      // Log a snippet to verify we got XML
-      if (xmlText.length > 0) {
-        console.log('[BGG API] XML starts with:', xmlText.substring(0, 200));
-      }
+    logger.debug('[BGG API] XML response length:', xmlText.length);
+    // Log a snippet to verify we got XML
+    if (xmlText.length > 0) {
+      logger.debug('[BGG API] XML starts with:', xmlText.substring(0, 200));
     }
     
     const gameData = parseBGGXML(xmlText);
     
-    if (__DEV__) {
-      console.log('[BGG API] Parsed game data:', gameData ? {
-        id: gameData.id,
-        name: gameData.name,
-        hasThumbnail: !!gameData.thumbnail,
-        thumbnail: gameData.thumbnail ? gameData.thumbnail.substring(0, 50) + '...' : null
-      } : 'null');
-    }
+    logger.debug('[BGG API] Parsed game data:', gameData ? {
+      id: gameData.id,
+      name: gameData.name,
+      hasThumbnail: !!gameData.thumbnail,
+      thumbnail: gameData.thumbnail ? gameData.thumbnail.substring(0, 50) + '...' : null
+    } : 'null');
     
     return gameData;
   } catch (error) {
-    console.error('[BGG API] Error fetching game details:', error);
+    logger.error('[BGG API] Error fetching game details:', error);
     // Try one more time without authentication as a last resort
     try {
-      if (__DEV__) {
-        console.log('[BGG API] Trying final fallback without authentication');
-      }
+      logger.debug('[BGG API] Trying final fallback without authentication');
       const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
       const finalResponse = await fetch(urlNoAuth);
       if (finalResponse.ok) {
@@ -558,9 +505,7 @@ export async function fetchBGGGameDetails(gameId) {
         return gameData;
       }
     } catch (finalError) {
-      if (__DEV__) {
-        console.warn('[BGG API] Final fallback also failed:', finalError);
-      }
+      logger.warn('[BGG API] Final fallback also failed:', finalError);
     }
     return null;
   }
@@ -590,7 +535,7 @@ function parseBGGXML(xmlText) {
     // Check for parsing errors
     const parserError = doc.querySelector('parsererror');
     if (parserError) {
-      console.warn('[BGG API] XML parsing error, using regex fallback');
+      logger.warn('[BGG API] XML parsing error, using regex fallback');
       return parseBGGXMLRegex(xmlText);
     }
 
@@ -950,7 +895,7 @@ function parseBGGXML(xmlText) {
       weight: weight ? parseFloat(weight) : null,
     };
   } catch (error) {
-    console.error('[BGG API] Error parsing XML:', error);
+    logger.error('[BGG API] Error parsing XML:', error);
     return null;
   }
 }
@@ -1231,7 +1176,7 @@ function parseBGGXMLRegex(xmlText) {
       weight,
     };
   } catch (error) {
-    console.error('[BGG API] Error in regex parsing:', error);
+    logger.error('[BGG API] Error in regex parsing:', error);
     return null;
   }
 }

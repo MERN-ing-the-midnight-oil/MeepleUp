@@ -16,6 +16,9 @@ import BrowseAndProposeScreen from './screens/BrowseAndProposeScreen';
 import CollectionScreen from './screens/CollectionScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import SubscriptionScreen from './components/SubscriptionScreen';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/common/Toast';
+import { TIMEOUTS } from './utils/constants';
 
 // Wrapper to pass URL search params to Auth component as route params
 const AuthWrapper = () => {
@@ -134,9 +137,9 @@ const SmartEventsRedirect = () => {
     const userEvents = getUserEvents();
     console.log('📊 [SmartEventsRedirect] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
     
-    // Filter to only active events (not archived)
-    const activeEvents = userEvents.filter(event => event.isActive !== false);
-    console.log('[SmartEventsRedirect] Active events:', activeEvents.length);
+    // Filter to only active events (not archived) - explicitly check for isActive === true
+    const activeEvents = userEvents.filter(event => event.isActive === true);
+    console.log('[SmartEventsRedirect] Active events:', activeEvents.length, 'of', userEvents.length, 'total user events');
 
     // If user is a member of exactly one active meepleUp, redirect to its logistics tab
     if (activeEvents.length === 1) {
@@ -160,8 +163,8 @@ const SmartEventsRedirect = () => {
       console.log('[SmartEventsRedirect] Waiting for Firestore sync...');
       checkTimeoutRef.current = setTimeout(() => {
         const delayedUserEvents = getUserEvents();
-        const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive !== false);
-        console.log('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length);
+        const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive === true);
+        console.log('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
         
         if (delayedActiveEvents.length === 1) {
           const eventId = delayedActiveEvents[0].id;
@@ -174,7 +177,7 @@ const SmartEventsRedirect = () => {
           setHasFinishedChecking(true);
         }
         checkTimeoutRef.current = null;
-      }, 2000); // Wait 2 seconds for Firestore to sync
+      }, TIMEOUTS.FIRESTORE_SYNC_MS); // Wait for Firestore to sync
 
       return () => {
         if (checkTimeoutRef.current) {
@@ -232,7 +235,9 @@ const AppContent = () => {
             path="/events"
             element={
               <ProtectedRoute>
-                <SmartEventsRedirect />
+                <ErrorBoundary name="EventsScreen">
+                  <SmartEventsRedirect />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -240,7 +245,9 @@ const AppContent = () => {
             path="/event/:eventId"
             element={
               <ProtectedRoute>
-                <EventHub />
+                <ErrorBoundary name="EventHub">
+                  <EventHub />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -248,7 +255,9 @@ const AppContent = () => {
             path="/event/:eventId/browse/:dateIndex"
             element={
               <ProtectedRoute>
-                <BrowseAndProposeScreen />
+                <ErrorBoundary name="BrowseAndPropose">
+                  <BrowseAndProposeScreen />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -256,7 +265,9 @@ const AppContent = () => {
             path="/collection"
             element={
               <ProtectedRoute>
-                <CollectionScreen />
+                <ErrorBoundary name="Collection">
+                  <CollectionScreen />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -264,7 +275,9 @@ const AppContent = () => {
             path="/profile"
             element={
               <ProtectedRoute>
-                <ProfileScreen />
+                <ErrorBoundary name="Profile">
+                  <ProfileScreen />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -285,19 +298,23 @@ const AppContent = () => {
 
 const App = () => {
   return (
-    <AuthProvider>
-      <SubscriptionProvider>
-        <AvailabilityProvider>
-          <EventsProvider>
-            <CollectionsProvider>
-              <NotificationProvider>
-                <AppContent />
-              </NotificationProvider>
-            </CollectionsProvider>
-          </EventsProvider>
-        </AvailabilityProvider>
-      </SubscriptionProvider>
-    </AuthProvider>
+    <ErrorBoundary name="App Root">
+      <AuthProvider>
+        <SubscriptionProvider>
+          <AvailabilityProvider>
+            <EventsProvider>
+              <CollectionsProvider>
+                <NotificationProvider>
+                  <ToastProvider>
+                    <AppContent />
+                  </ToastProvider>
+                </NotificationProvider>
+              </CollectionsProvider>
+            </EventsProvider>
+          </AvailabilityProvider>
+        </SubscriptionProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 };
 

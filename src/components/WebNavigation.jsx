@@ -23,7 +23,7 @@ const WebNavigation = () => {
 
   const navItems = [
     { name: 'MeepleUps', path: '/events' },
-    { name: 'Your Games', path: '/collection' },
+    { name: 'List/Import', path: '/collection' },
     { name: 'Profile', path: '/profile', showGear: true },
   ];
 

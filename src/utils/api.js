@@ -403,31 +403,47 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       }
       
       // Retry BGG search with exponential backoff if rate limited
-      // User said it's okay if it takes a few minutes - we'll keep trying until we get results
+      // Keep trying until we get results - don't give up on rate-limited errors
       // Exponential backoff prevents overwhelming the API - delays get progressively longer
-      const maxBggRetries = 8; // More retries for bulk imports (with exponential backoff: up to ~21 min total wait time)
+      const maxBggRetries = 30; // Increased retries - keep trying for rate-limited errors
       const maxEmptyResultRetries = 4; // More retries for empty results (might be temporary issues, not wrong query format)
       let bggRetryCount = 0;
       let emptyResultCount = 0;
       let bggResults = null;
       let lastError = null;
+      const searchStartTime = Date.now();
+      
+      console.log(`[Game Search → BGG API] ⏱️ Starting search for "${query}"`, {
+        timestamp: new Date().toISOString(),
+      });
       
       while (bggRetryCount <= maxBggRetries) {
         try {
           if (bggRetryCount > 0) {
             // Exponential backoff: 10s, 20s, 40s, 80s, 160s, 320s, 640s (10.7 min), 1280s (21.3 min)
-            const backoffMs = 10000 * Math.pow(2, bggRetryCount - 1);
-            console.log(`[Game Search → BGG API] Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`);
+            // Cap at 80 seconds to avoid extremely long waits
+            const backoffMs = Math.min(10000 * Math.pow(2, Math.min(bggRetryCount - 1, 4)), 80000);
+            const elapsed = ((Date.now() - searchStartTime) / 1000).toFixed(1);
+            console.log(`[Game Search → BGG API] 🔄 Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`, {
+              elapsedSeconds: elapsed,
+            });
             await new Promise(resolve => setTimeout(resolve, backoffMs));
           } else {
-            console.log(`[Game Search → BGG API] Sending search query to BGG: "${query}"`);
+            console.log(`[Game Search → BGG API] 📡 Sending search query to BGG: "${query}"`);
           }
           
+          const attemptStartTime = Date.now();
           const { searchBGGAPI } = await import('../services/bggApi');
           bggResults = await searchBGGAPI(query, 50, 3); // 3 retries per attempt
+          const attemptDuration = ((Date.now() - attemptStartTime) / 1000).toFixed(2);
           
           if (bggResults && bggResults.length > 0) {
-            console.log(`[Game Search → BGG API] BGG returned ${bggResults.length} result(s) for "${query}"`);
+            const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+            console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}"`, {
+              attemptDurationSeconds: attemptDuration,
+              totalDurationSeconds: totalDuration,
+              attempts: bggRetryCount + 1,
+            });
             if (__DEV__) {
               console.log(`[BGG API] Found ${bggResults.length} games`);
             }
@@ -439,33 +455,46 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             
             return bggResults;
           } else {
-            // No results - could be the game doesn't exist, wrong query format, or transient issue
-            emptyResultCount++;
-            if (emptyResultCount <= maxEmptyResultRetries && bggRetryCount < maxBggRetries) {
-              console.warn(`[Game Search → BGG API] BGG returned no results for "${query}" (attempt ${emptyResultCount}/${maxEmptyResultRetries}), will retry...`);
-              bggRetryCount++;
-              continue;
-            } else {
-              console.warn(`[Game Search → BGG API] BGG returned no results for "${query}" after ${emptyResultCount} attempts`);
-              break;
-            }
+            // No results - BGG successfully returned empty array (game doesn't exist)
+            // Don't retry - accept it immediately to save time during bulk imports
+            const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+            console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (game doesn't exist in BGG)`, {
+              attemptDurationSeconds: attemptDuration,
+              totalDurationSeconds: totalDuration,
+              attempts: bggRetryCount + 1,
+            });
+            // Return empty array immediately - don't waste time retrying
+            return [];
           }
         } catch (bggError) {
           lastError = bggError;
-          // Check if it's a rate limit error
-          if (bggError.message && bggError.message.includes('rate limited')) {
+          const attemptDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+          const isRateLimited = bggError.message && bggError.message.includes('rate limited');
+          
+          // Check if it's a rate limit error - keep retrying
+          if (isRateLimited) {
             if (bggRetryCount < maxBggRetries) {
-              console.warn(`[Game Search → BGG API] Rate limited for "${query}", will retry (attempt ${bggRetryCount + 1}/${maxBggRetries})...`);
+              console.warn(`[Game Search → BGG API] ⚠️ Rate limited for "${query}", will retry (attempt ${bggRetryCount + 1}/${maxBggRetries})...`, {
+                elapsedSeconds: attemptDuration,
+              });
               bggRetryCount++;
-              continue;
+              continue; // Keep retrying
             } else {
-              console.error(`[Game Search → BGG API] Rate limited for "${query}" after ${maxBggRetries} retries. Giving up.`);
-              break;
+              console.error(`[Game Search → BGG API] ❌ Rate limited for "${query}" after ${maxBggRetries} retries. Throwing error to allow caller to retry.`, {
+                totalDurationSeconds: attemptDuration,
+              });
+              // Throw error so caller can handle it (TextListGameIdentifier will keep retrying)
+              const rateLimitError = new Error(`BGG API rate limited for "${query}" after ${maxBggRetries} retries`);
+              rateLimitError.isRateLimited = true;
+              throw rateLimitError;
             }
           } else {
-            // Other error - log and retry once more, then break
-            console.error(`[Game Search → BGG API] BGG search failed for "${query}":`, bggError);
-            if (bggRetryCount < maxBggRetries) {
+            // Other error - log and retry a few times, then break
+            console.error(`[Game Search → BGG API] ❌ BGG search failed for "${query}":`, {
+              error: bggError.message,
+              elapsedSeconds: attemptDuration,
+            });
+            if (bggRetryCount < 3) { // Retry up to 3 times for non-rate-limit errors
               console.warn(`[Game Search → BGG API] Will retry after error...`);
               bggRetryCount++;
               continue;
@@ -481,7 +510,10 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       
       // If we exhausted retries and still have an error, throw it so caller can handle it
       if (lastError && lastError.message && lastError.message.includes('rate limited')) {
-        console.error(`[Game Search → BGG API] Exhausted all retries for "${query}" due to rate limiting. Game may exist but BGG API is overloaded.`);
+        const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+        console.error(`[Game Search → BGG API] ❌ Exhausted all retries for "${query}" due to rate limiting. Game may exist but BGG API is overloaded.`, {
+          totalDurationSeconds: totalDuration,
+        });
         // Throw a specific error so the caller knows this is rate-limited, not a definitive "no results"
         const rateLimitError = new Error(`BGG API rate limited for "${query}" after exhausting retries`);
         rateLimitError.isRateLimited = true;
