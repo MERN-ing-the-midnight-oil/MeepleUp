@@ -33,6 +33,9 @@ const parseProfile = (profile) => {
         discussion: true,
         discussionEmail: false,
         discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
+        mentionAlert: true, // Default: yes to device alerts
+        mentionEmail: false, // Default: no email
+        mentionSMS: false, // Default: no SMS
       },
       personalMatchWeights: {
         publisher: 3,
@@ -58,6 +61,9 @@ const parseProfile = (profile) => {
       discussion: true,
       discussionEmail: false,
       discussionFrequency: 'all',
+      mentionAlert: true,
+      mentionEmail: false,
+      mentionSMS: false,
     },
     personalMatchWeights: profile.personalMatchWeights || {
       publisher: 3,

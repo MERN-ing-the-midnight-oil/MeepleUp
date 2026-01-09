@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, Alert, Animated } from 'react-native';
+import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView, Platform, Pressable, TouchableOpacity, Alert, Animated, TextInput } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import DottedHeart from './DottedHeart';
@@ -16,8 +16,10 @@ import PersonalMatchSettings from '../components/PersonalMatchSettings';
 import BeepleAvatar from '../components/BeepleAvatar';
 import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
+import Input from './common/Input';
+import Button from './common/Button';
 
-const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = new Set(), userProposalLimit = 5 }) => {
+const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = new Set(), userProposalLimit = 5, proposalId = null, selectedDate = null }) => {
   const navigation = useNavigation();
   const { user } = useAuth();
   const { updateGameInCollection, addGameToCollection, collections } = useCollections();
@@ -33,6 +35,12 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const isMountedRef = useRef(true);
   const userId = user?.uid || user?.id;
+  
+  // Comments state for proposed games
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [memberAvatars, setMemberAvatars] = useState({});
   
   // Animation values for favorite heart shimmer effect
   const shimmerOpacity = useRef(new Animated.Value(1)).current;
@@ -253,6 +261,59 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
     };
   }, []);
 
+  // Load member avatars for comments
+  useEffect(() => {
+    if (!eventId || !db || !eventMembers) return;
+
+    const loadMemberAvatars = async () => {
+      const avatars = {};
+      const memberIds = Array.isArray(eventMembers) ? eventMembers.map(m => m.userId || m.id) : [];
+      
+      for (const memberId of memberIds) {
+        if (!memberId) continue;
+        try {
+          const userDoc = await db.collection('users').doc(memberId).get();
+          if (userDoc.exists) { // exists is a property, not a function
+            const userData = userDoc.data();
+            if (userData && userData.avatarUrl) {
+              avatars[memberId] = userData.avatarUrl;
+            }
+          }
+        } catch (error) {
+          console.warn(`[GameDetailsModal] Error loading avatar for ${memberId}:`, error);
+        }
+      }
+      
+      setMemberAvatars(avatars);
+    };
+
+    loadMemberAvatars();
+  }, [eventId, eventMembers, db]);
+
+  // Load comments for proposed games
+  useEffect(() => {
+    if (!proposalId || !eventId || !db) {
+      setComments([]);
+      return;
+    }
+
+    const unsubscribe = db.collection('gamingGroups').doc(eventId)
+      .collection('nominations').doc(proposalId)
+      .collection('comments')
+      .orderBy('createdAt', 'asc')
+      .onSnapshot((snapshot) => {
+        const loadedComments = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setComments(loadedComments);
+      }, (error) => {
+        console.error('[GameDetailsModal] Error loading comments:', error);
+      });
+
+    return () => unsubscribe();
+  }, [proposalId, eventId, db]);
+
   // Prefer larger image from BGG data, fallback to thumbnail
   const imageUrl = useMemo(() => {
     // First try to get the larger image from BGG data
@@ -388,6 +449,122 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
     setShowPersonalMatch(true);
   };
 
+  // Handle submitting a comment
+  const handleSubmitComment = async () => {
+    console.log('[GameDetailsModal] handleSubmitComment called', {
+      proposalId,
+      eventId,
+      userId,
+      hasNewComment: !!newComment.trim(),
+      hasDb: !!db,
+    });
+
+    if (!proposalId || !eventId || !userId || !newComment.trim() || !db) {
+      console.warn('[GameDetailsModal] Missing required data for comment submission', {
+        proposalId: !!proposalId,
+        eventId: !!eventId,
+        userId: !!userId,
+        hasNewComment: !!newComment.trim(),
+        hasDb: !!db,
+      });
+      return;
+    }
+
+    setSubmittingComment(true);
+    try {
+      const commentData = {
+        userId,
+        userName: memberNames[userId] || user?.name || 'Unknown',
+        text: newComment.trim(),
+        createdAt: firebase.firestore.Timestamp.now(),
+        updatedAt: firebase.firestore.Timestamp.now(),
+      };
+
+      console.log('[GameDetailsModal] Attempting to submit comment', {
+        eventId,
+        proposalId,
+        userId,
+        userName: commentData.userName,
+        textLength: commentData.text.length,
+        commentData: {
+          ...commentData,
+          createdAt: commentData.createdAt.toString(),
+          updatedAt: commentData.updatedAt.toString(),
+        },
+      });
+
+      // Check if user has member document (for debugging)
+      try {
+        const memberDoc = await db.collection('gamingGroups').doc(eventId)
+          .collection('members').doc(userId).get();
+        console.log('[GameDetailsModal] Member document check', {
+          exists: memberDoc.exists,
+          data: memberDoc.exists ? memberDoc.data() : null,
+        });
+      } catch (memberCheckError) {
+        console.warn('[GameDetailsModal] Error checking member document:', memberCheckError);
+      }
+
+      // Check group data for memberIds
+      let groupMembershipInfo = null;
+      try {
+        const groupDoc = await db.collection('gamingGroups').doc(eventId).get();
+        if (groupDoc.exists) {
+          const groupData = groupDoc.data();
+          const memberIds = groupData.memberIds || [];
+          const isInMemberIds = memberIds.includes(userId);
+          const isOrganizer = groupData.organizerId === userId;
+          groupMembershipInfo = {
+            isInMemberIds,
+            isOrganizer,
+            memberIdsCount: memberIds.length,
+            organizerId: groupData.organizerId,
+            memberIds: memberIds.slice(0, 5), // First 5 for logging
+          };
+          console.log('[GameDetailsModal] Group membership check', groupMembershipInfo);
+        } else {
+          console.warn('[GameDetailsModal] Group document does not exist!', { eventId });
+        }
+      } catch (groupCheckError) {
+        console.warn('[GameDetailsModal] Error checking group data:', groupCheckError);
+      }
+
+      console.log('[GameDetailsModal] About to submit comment to Firestore', {
+        path: `gamingGroups/${eventId}/nominations/${proposalId}/comments`,
+        commentData: {
+          userId,
+          userName: commentData.userName,
+          textLength: commentData.text.length,
+        },
+        groupMembershipInfo,
+      });
+
+      const commentRef = await db.collection('gamingGroups').doc(eventId)
+        .collection('nominations').doc(proposalId)
+        .collection('comments')
+        .add(commentData);
+
+      console.log('[GameDetailsModal] Comment submitted successfully', {
+        commentId: commentRef.id,
+      });
+
+      setNewComment('');
+    } catch (error) {
+      console.error('[GameDetailsModal] Error submitting comment:', error);
+      console.error('[GameDetailsModal] Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+        eventId,
+        proposalId,
+        userId,
+      });
+      Alert.alert('Error', `Failed to post comment: ${error.message || 'Please try again.'}`);
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
   // Guard against invalid game data
   if (!game || (typeof game !== 'object')) {
     console.log('[GameDetailsModal] Guard clause: game is invalid', { game, isOpen });
@@ -482,6 +659,61 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                 </Text>
               </TouchableOpacity>
             )}
+            {/* Owner Information - Overlay on Image (Upper Left) */}
+            {owners && Array.isArray(owners) && owners.length > 0 && (
+              <>
+                <Text style={[
+                  styles.ownerOverlayLabel,
+                  { 
+                    left: userId && game && userOwnsGame ? 110 : 12,
+                    top: 12
+                  }
+                ]}>
+                  Owned by:
+                </Text>
+                {owners.map((ownerName, index) => {
+                  // Try to find user ID by matching owner name to memberNames
+                  const ownerUserId = Object.keys(memberNames).find(
+                    userId => memberNames[userId] === ownerName
+                  );
+                  const ownerAvatar = ownerUserId ? memberAvatars[ownerUserId] : null;
+                  const baseLeft = userId && game && userOwnsGame ? 110 : 12;
+                  const itemsPerRow = 2;
+                  const itemWidth = 140;
+                  const row = Math.floor(index / itemsPerRow);
+                  const col = index % itemsPerRow;
+                  
+                  return (
+                    <View 
+                      key={index} 
+                      style={[
+                        styles.ownerOverlayItem,
+                        { 
+                          left: baseLeft + (col * itemWidth),
+                          top: 36 + (row * 40) // Start below the "Owned by:" label
+                        }
+                      ]}
+                    >
+                      {ownerAvatar ? (
+                        <Image 
+                          source={{ uri: ownerAvatar }} 
+                          style={styles.ownerOverlayAvatar} 
+                        />
+                      ) : (
+                        <View style={styles.ownerOverlayAvatarPlaceholder}>
+                          <Text style={styles.ownerOverlayAvatarText}>
+                            {ownerName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={styles.ownerOverlayText} numberOfLines={1}>
+                        {ownerName}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </>
+            )}
           </View>
 
           {/* Propose Game Button - Just Below Image */}
@@ -528,7 +760,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
             {/* Match Score */}
             {matchScore !== null && matchScore !== undefined && userId && !isFavorite && (
               <View style={styles.matchScoreContainer}>
-                <Text style={styles.matchScoreLabel}>💘 Match Score</Text>
+                <Text style={styles.matchScoreLabel}>💘 Your Personal Match Score</Text>
                 <Text style={styles.matchScoreValue}>{Math.round(matchScore)}</Text>
                 <Text style={styles.matchScoreDescription}>
                   Based on your collection and preferences
@@ -536,15 +768,9 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
-            {/* Year and Rating */}
-            <View style={styles.modalMetaRow}>
-              {year && (
-                <View style={styles.modalMetaItem}>
-                  <Text style={styles.modalMetaLabel}>Published:</Text>
-                  <Text style={styles.modalMetaValue}>{year}</Text>
-                </View>
-              )}
-              {rating > 0 && typeof rating === 'number' && !isNaN(rating) && (
+            {/* Rating */}
+            {rating > 0 && typeof rating === 'number' && !isNaN(rating) && (
+              <View style={styles.modalMetaRow}>
                 <View style={styles.modalMetaItem}>
                   <Text style={styles.modalMetaLabel}>Rating:</Text>
                   <View style={styles.ratingContainer}>
@@ -559,8 +785,8 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                     )}
                   </View>
                 </View>
-              )}
-            </View>
+              </View>
+            )}
 
             {/* BGG Rank and Statistics */}
             {(bggData?.rank || bggData?.usersRated || bggData?.bayesAverage) && (
@@ -598,10 +824,10 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
-            {/* Best Played With */}
+            {/* Best Played By */}
             {(bggData?.bestPlayerCount || game?.bestPlayerCount) && (
               <View style={styles.modalMetaItem}>
-                <Text style={styles.modalMetaLabel}>Best played with:</Text>
+                <Text style={styles.modalMetaLabel}>Best played by:</Text>
                 <Text style={styles.modalMetaValue}>
                   {(bggData?.bestPlayerCount || game?.bestPlayerCount)} players
                 </Text>
@@ -609,22 +835,29 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
             )}
 
             {/* Playing Time */}
-            {bggData?.playingTime && typeof bggData.playingTime === 'number' ? (
+            {(bggData?.playingTime && typeof bggData.playingTime === 'number') || (game?.playingTime && typeof game.playingTime === 'number') ? (
               <View style={styles.modalMetaItem}>
                 <Text style={styles.modalMetaLabel}>Playing Time:</Text>
-                <Text style={styles.modalMetaValue}>{bggData.playingTime} min</Text>
+                <Text style={styles.modalMetaValue}>{(bggData?.playingTime || game?.playingTime)} min</Text>
               </View>
-            ) : (bggData?.minPlayTime || bggData?.maxPlayTime) && (
+            ) : (bggData?.minPlayTime || bggData?.maxPlayTime || game?.minPlayTime || game?.maxPlayTime) && (
               <View style={styles.modalMetaItem}>
                 <Text style={styles.modalMetaLabel}>Playing Time:</Text>
                 <Text style={styles.modalMetaValue}>
-                  {bggData.minPlayTime && bggData.maxPlayTime
-                    ? (bggData.minPlayTime === bggData.maxPlayTime 
-                        ? `${bggData.minPlayTime} min`
-                        : `${bggData.minPlayTime}-${bggData.maxPlayTime} min`)
-                    : bggData.minPlayTime 
-                      ? `${bggData.minPlayTime}+ min`
-                      : `up to ${bggData.maxPlayTime} min`}
+                  {(() => {
+                    const minTime = bggData?.minPlayTime || game?.minPlayTime;
+                    const maxTime = bggData?.maxPlayTime || game?.maxPlayTime;
+                    if (minTime && maxTime) {
+                      return minTime === maxTime 
+                        ? `${minTime} min`
+                        : `${minTime}-${maxTime} min`;
+                    } else if (minTime) {
+                      return `${minTime}+ min`;
+                    } else if (maxTime) {
+                      return `up to ${maxTime} min`;
+                    }
+                    return '';
+                  })()}
                 </Text>
               </View>
             )}
@@ -753,11 +986,14 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
             )}
 
             {/* Complexity/Weight */}
-            {bggData?.averageWeight && typeof bggData.averageWeight === 'number' && (
+            {((bggData?.averageWeight && typeof bggData.averageWeight === 'number') || (game?.averageWeight && typeof game.averageWeight === 'number') || (game?.complexity && typeof game.complexity === 'number')) && (
               <View style={styles.modalMetaItem}>
                 <Text style={styles.modalMetaLabel}>Complexity:</Text>
                 <Text style={styles.modalMetaValue}>
-                  {bggData.averageWeight.toFixed(1)} / 5.0
+                  {(() => {
+                    const weight = bggData?.averageWeight || game?.averageWeight || game?.complexity;
+                    return weight ? `${weight.toFixed(1)} / 5.0` : '';
+                  })()}
                 </Text>
               </View>
             )}
@@ -822,7 +1058,7 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
                 >
                   <Text style={[styles.modalMetaLabel, { marginBottom: 0, flex: 1 }]}>Description:</Text>
                   <FontAwesome5
-                    name={descriptionExpanded ? 'chevron-up' : 'chevron-down'}
+                    name={descriptionExpanded ? 'chevron-down' : 'chevron-right'}
                     size={14}
                     color={theme.colors.textSecondary}
                     style={styles.descriptionChevron}
@@ -836,17 +1072,88 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
               </View>
             )}
 
-            {/* Owner Information - Show who owns this game */}
-            {owners && Array.isArray(owners) && owners.length > 0 && (
-              <View style={styles.modalOwnerSection}>
-                <Text style={[styles.modalMetaLabel, { marginBottom: 8 }]}>Owned by:</Text>
-                <View style={styles.modalOwnersList}>
-                  {owners.map((owner, index) => (
-                    <View key={index} style={styles.modalOwnerItem}>
-                      <Text style={styles.modalOwnerText}>{owner}</Text>
-                    </View>
-                  ))}
-                </View>
+
+            {/* Comments Section - Only show for proposed games */}
+            {proposalId && eventId && (
+              <View style={styles.modalCommentsSection}>
+                <Text style={[styles.modalMetaLabel, { marginBottom: 12 }]}>Comments:</Text>
+                
+                {/* Comments List */}
+                {comments.length > 0 ? (
+                  <View style={styles.commentsList}>
+                    {comments.map((comment) => {
+                      const commentUserName = comment.userName || memberNames[comment.userId] || 'Unknown';
+                      const commentUserAvatar = memberAvatars[comment.userId] || null;
+                      const commentDate = comment.createdAt?.toDate ? comment.createdAt.toDate() : new Date(comment.createdAt?.seconds * 1000 || Date.now());
+                      const isOwnComment = comment.userId === userId;
+                      
+                      return (
+                        <View key={comment.id} style={styles.commentItem}>
+                          <View style={styles.commentHeader}>
+                            {commentUserAvatar ? (
+                              <Image source={{ uri: commentUserAvatar }} style={styles.commentAvatar} />
+                            ) : (
+                              <View style={styles.commentAvatarPlaceholder}>
+                                <Text style={styles.commentAvatarText}>
+                                  {commentUserName.charAt(0).toUpperCase()}
+                                </Text>
+                              </View>
+                            )}
+                            <View style={styles.commentContent}>
+                              <View style={styles.commentHeaderRow}>
+                                <Text style={styles.commentUserName}>{commentUserName}</Text>
+                                <Text style={styles.commentDate}>
+                                  {commentDate.toLocaleDateString()} {commentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                              </View>
+                              <Text style={styles.commentText}>{comment.text}</Text>
+                            </View>
+                            {isOwnComment && (
+                              <TouchableOpacity
+                                style={styles.commentDeleteButton}
+                                onPress={async () => {
+                                  try {
+                                    await db.collection('gamingGroups').doc(eventId)
+                                      .collection('nominations').doc(proposalId)
+                                      .collection('comments').doc(comment.id)
+                                      .delete();
+                                  } catch (error) {
+                                    console.error('[GameDetailsModal] Error deleting comment:', error);
+                                    Alert.alert('Error', 'Failed to delete comment. Please try again.');
+                                  }
+                                }}
+                              >
+                                <Text style={styles.commentDeleteButtonText}>×</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <Text style={styles.noCommentsText}>No comments yet. Be the first to comment!</Text>
+                )}
+
+                {/* Comment Input */}
+                {userId && (
+                  <View style={styles.commentInputContainer}>
+                    <Input
+                      value={newComment}
+                      onChangeText={setNewComment}
+                      placeholder="Add a comment..."
+                      multiline
+                      numberOfLines={3}
+                      style={styles.commentInput}
+                    />
+                    <Button
+                      label="Post Comment"
+                      onPress={handleSubmitComment}
+                      disabled={!newComment.trim() || submittingComment}
+                      style={styles.commentSubmitButton}
+                    />
+                  </View>
+                )}
               </View>
             )}
 
@@ -1223,6 +1530,50 @@ const styles = StyleSheet.create({
   favoriteButtonOverlayTextActive: {
     color: '#333333',
   },
+  ownerOverlayLabel: {
+    position: 'absolute',
+    fontSize: 13,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    zIndex: 5,
+  },
+  ownerOverlayItem: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    zIndex: 5,
+    gap: 8,
+  },
+  ownerOverlayAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  ownerOverlayAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ownerOverlayAvatarText: {
+    fontSize: 14,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: '#333333',
+  },
+  ownerOverlayText: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontWeight: theme.typography.fontWeight.semibold,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
   modalOwnerSection: {
     marginTop: 16,
     marginBottom: 16,
@@ -1390,6 +1741,95 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  modalCommentsSection: {
+    marginTop: 16,
+    marginBottom: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  commentsList: {
+    marginBottom: 16,
+    gap: 12,
+  },
+  commentItem: {
+    marginBottom: 12,
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  commentAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  commentAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.meepleRed || '#d32f2f',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commentAvatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  commentUserName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+  },
+  commentDate: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+  },
+  commentText: {
+    fontSize: 14,
+    color: theme.colors.textPrimary,
+    lineHeight: 20,
+  },
+  commentDeleteButton: {
+    padding: 4,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commentDeleteButtonText: {
+    fontSize: 20,
+    color: '#999',
+    fontWeight: 'bold',
+  },
+  noCommentsText: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic',
+    marginBottom: 16,
+  },
+  commentInputContainer: {
+    marginTop: 12,
+  },
+  commentInput: {
+    marginBottom: 8,
+  },
+  commentSubmitButton: {
+    alignSelf: 'flex-start',
   },
 });
 

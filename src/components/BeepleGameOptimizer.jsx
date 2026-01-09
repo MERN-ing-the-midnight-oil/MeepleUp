@@ -3,10 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { optimizeGameSchedule, generateScheduleSummary } from '../utils/gameOptimizer';
 import { getGameDetails } from '../utils/api';
-import { getOrCreateConversation, sendMessage } from '../services/messaging';
-import { BEEPLE_USER_ID } from '../utils/constants';
 import { theme } from '../utils/theme';
 import BeepleAvatar from './BeepleAvatar';
+import { db } from '../config/firebase';
+import firebase from '../config/firebase';
+import { BEEPLE_USER_ID } from '../utils/constants';
+import { notifyMentions } from '../utils/notifications';
 
 /**
  * Maps rating value (3, 2, 1, 0, -1) to interest level string
@@ -204,7 +206,7 @@ const BeepleGameOptimizer = ({
 
   // Handle nudging players
   const handleNudge = async (players, type) => {
-    if (!eventId || !userId || players.length === 0) {
+    if (!eventId || !userId || players.length === 0 || !db) {
       return;
     }
 
@@ -215,31 +217,65 @@ const BeepleGameOptimizer = ({
       : 'this event';
 
     try {
-      const nudgePromises = players.map(async (player) => {
-        try {
-          const conversation = await getOrCreateConversation(eventId, BEEPLE_USER_ID, player.userId);
-          if (!conversation) return;
+      const postsRef = db.collection('gamingGroups').doc(eventId).collection('posts');
+      const createdPosts = [];
 
+      // Create a post for each player being nudged
+      for (const player of players) {
+        try {
           let message = '';
           if (type === 'rsvp') {
-            message = `Hi ${player.name}! Just a friendly reminder that we're still waiting to hear if you'll be joining us for ${eventNameDisplay} on ${dateStr}. Could you please RSVP?`;
+            message = `@${player.name} Just a friendly reminder that we're still waiting to hear if you'll be joining us for ${eventNameDisplay} on ${dateStr}. Could you please RSVP?`;
           } else if (type === 'vote') {
-            message = `Hi ${player.name}! We've got some games proposed for ${eventNameDisplay} on ${dateStr}, but we haven't heard your thoughts yet. Could you please weigh in on the proposed games? Your input helps us pick the best games to play!`;
+            message = `@${player.name} We've got some games proposed for ${eventNameDisplay} on ${dateStr}, but we haven't heard your thoughts yet. Could you please weigh in on the proposed games? Your input helps us pick the best games to play!`;
           }
 
           if (message) {
-            await sendMessage(eventId, conversation.id, BEEPLE_USER_ID, message);
+            const postData = {
+              userId: BEEPLE_USER_ID,
+              userName: 'Beeple',
+              userAvatarUrl: null,
+              content: message,
+              photoUrl: null,
+              likeCount: 0,
+              commentCount: 0,
+              createdAt: firebase.firestore.Timestamp.now(),
+              updatedAt: firebase.firestore.Timestamp.now(),
+              edited: false,
+              deleted: false,
+              pinned: false,
+            };
+
+            const postDocRef = await postsRef.add(postData);
+            const postId = postDocRef.id;
+            createdPosts.push({ postId, playerName: player.name });
+
+            // Notify the mentioned user
+            try {
+              await notifyMentions(
+                eventId,
+                postId,
+                message,
+                BEEPLE_USER_ID,
+                'Beeple',
+                eventName || 'MeepleUp'
+              );
+            } catch (mentionError) {
+              console.error(`[BeepleGameOptimizer] Error notifying mention for ${player.name}:`, mentionError);
+            }
           }
         } catch (error) {
-          console.error(`[BeepleGameOptimizer] Error sending nudge to ${player.userId}:`, error);
+          console.error(`[BeepleGameOptimizer] Error creating nudge post for ${player.userId}:`, error);
         }
-      });
+      }
 
-      await Promise.all(nudgePromises);
-      
-      const playerNames = players.map(p => p.name).join(', ');
-      const action = type === 'rsvp' ? 'RSVP reminders' : 'voting reminders';
-      Alert.alert('Nudge sent!', `I've sent ${action} to ${playerNames}.`);
+      if (createdPosts.length > 0) {
+        const playerNames = createdPosts.map(p => p.playerName).join(', ');
+        const action = type === 'rsvp' ? 'RSVP reminders' : 'voting reminders';
+        Alert.alert('Nudge sent!', `I've posted ${action} mentioning ${playerNames} in Tabletalk.`);
+      } else {
+        Alert.alert('Error', 'Failed to create nudge posts. Please try again.');
+      }
     } catch (error) {
       console.error('[BeepleGameOptimizer] Error sending nudges:', error);
       Alert.alert('Error', 'Failed to send nudges. Please try again.');
@@ -301,7 +337,7 @@ const BeepleGameOptimizer = ({
                   day: 'numeric',
                   year: 'numeric'
                 });
-                return `I'm currently suggesting your group start gameplay on ${weekday}, ${dateFormatted} with the following games:`;
+                return `I'm currently suggesting your group start gameplay on ${weekday}, ${dateFormatted} with the following game(s):`;
               })()}
             </Text>
             

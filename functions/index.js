@@ -801,68 +801,6 @@ async function verifyAndroidOneTimePurchase(packageName, productId, purchaseToke
 }
 
 /**
- * HTTP Function: Send Direct Message Email
- * Called when a user sends a direct message
- */
-exports.sendDirectMessageEmail = functions.https.onRequest(async (req, res) => {
-  // CORS headers
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
-
-  if (req.method !== "POST") {
-    res.status(405).send("Method Not Allowed");
-    return;
-  }
-
-  try {
-    const {
-      to,
-      subject,
-      senderName,
-      messagePreview,
-      groupName,
-      groupId,
-    } = req.body;
-
-    if (!to || !subject || !senderName || !messagePreview) {
-      res.status(400).json({error: "Missing required fields"});
-      return;
-    }
-
-    console.log("Direct Message Email:", {
-      to,
-      subject,
-      senderName,
-      messagePreview,
-      groupName,
-      groupId,
-    });
-
-    // TODO: Implement actual email sending using your preferred service
-    // Example with Nodemailer:
-    // const nodemailer = require('nodemailer');
-    // const transporter = nodemailer.createTransport({...});
-    // const emailBody = `
-    //   <h2>New Message from ${senderName}</h2>
-    //   <p>${messagePreview}</p>
-    //   <p>MeepleUp: ${groupName || 'Your MeepleUp'}</p>
-    // `;
-    // await transporter.sendMail({to, subject, html: emailBody});
-
-    res.status(200).json({success: true, message: "Email sent successfully"});
-  } catch (error) {
-    console.error("Error sending direct message email:", error);
-    res.status(500).json({error: error.message});
-  }
-});
-
-/**
  * Cloud Function: Verify Apple Sign-In Token and Create Custom Firebase Token
  * This is needed because Firebase compat mode's OAuthProvider doesn't support native Apple Sign-In
  */
@@ -955,6 +893,129 @@ exports.verifyAppleSignIn = functions.https.onCall(async (data, context) => {
     }
 
     // Create a custom token for the user
+/**
+ * HTTP Function: Send @Mention Email
+ * Called when a user is @mentioned in a post
+ */
+exports.sendMentionEmail = functions.https.onRequest(async (req, res) => {
+  // CORS headers
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  try {
+    const {
+      to,
+      subject,
+      senderName,
+      postContent,
+      groupName,
+      groupId,
+      postId,
+    } = req.body;
+
+    if (!to || !subject || !senderName || !postContent) {
+      res.status(400).json({error: "Missing required fields"});
+      return;
+    }
+
+    console.log("Mention Email:", {
+      to,
+      subject,
+      senderName,
+      postContent: postContent.substring(0, 100),
+      groupName,
+      groupId,
+      postId,
+    });
+
+    // TODO: Implement actual email sending using your preferred service
+    // Example with Nodemailer:
+    // const nodemailer = require('nodemailer');
+    // const transporter = nodemailer.createTransport({...});
+    // const emailBody = `
+    //   <h2>${senderName} mentioned you in ${groupName || 'MeepleUp'}</h2>
+    //   <p>${postContent}</p>
+    //   <p><a href="https://meepleup.com/event/${groupId}?post=${postId}">View post</a></p>
+    // `;
+    // await transporter.sendMail({to, subject, html: emailBody});
+
+    res.status(200).json({success: true, message: "Email sent successfully"});
+  } catch (error) {
+    console.error("Error sending mention email:", error);
+    res.status(500).json({error: error.message});
+  }
+});
+
+/**
+ * HTTP Function: Send @Mention SMS
+ * Called when a user is @mentioned in a post and has SMS notifications enabled
+ */
+exports.sendMentionSMS = functions.https.onRequest(async (req, res) => {
+  // CORS headers
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  try {
+    const {
+      to,
+      message,
+      senderName,
+      groupName,
+      groupId,
+    } = req.body;
+
+    if (!to || !message) {
+      res.status(400).json({error: "Missing required fields"});
+      return;
+    }
+
+    console.log("Mention SMS:", {
+      to,
+      message: message.substring(0, 50),
+      senderName,
+      groupName,
+      groupId,
+    });
+
+    // TODO: Implement actual SMS sending using your preferred service
+    // Example with Twilio:
+    // const twilio = require('twilio');
+    // const client = twilio(accountSid, authToken);
+    // await client.messages.create({
+    //   body: message,
+    //   to: to,
+    //   from: twilioPhoneNumber
+    // });
+
+    res.status(200).json({success: true, message: "SMS sent successfully"});
+  } catch (error) {
+    console.error("Error sending mention SMS:", error);
+    res.status(500).json({error: error.message});
+  }
+});
+
     const customToken = await admin.auth().createCustomToken(uid, {
       provider: "apple.com",
       appleUserId: appleUserId,

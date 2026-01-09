@@ -3,7 +3,6 @@ import { useAuth } from './AuthContext';
 import { useEvents } from './EventsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
-import { getUnreadCount } from '../services/messaging';
 import NotificationPopup from '../components/NotificationPopup';
 
 const NotificationContext = createContext();
@@ -83,40 +82,6 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [userId, isAuthenticated]);
 
-  // Fetch unread DMs and convert to notifications
-  const fetchUnreadDMs = useCallback(async () => {
-    if (!userId || !db || !isAuthenticated) return [];
-
-    try {
-      const events = getUserEvents();
-      const dmNotifications = [];
-
-      for (const event of events) {
-        try {
-          const unreadCount = await getUnreadCount(event.id, userId);
-          if (unreadCount > 0) {
-            dmNotifications.push({
-              id: `dm_${event.id}`,
-              type: 'new_message',
-              title: 'New Messages',
-              message: `You have ${unreadCount} unread message${unreadCount > 1 ? 's' : ''} in ${event.name || 'this MeepleUp'}`,
-              groupId: event.id,
-              groupName: event.name,
-              read: false,
-              createdAt: new Date().toISOString(),
-            });
-          }
-        } catch (error) {
-          console.error(`Error fetching unread count for event ${event.id}:`, error);
-        }
-      }
-
-      return dmNotifications;
-    } catch (error) {
-      console.error('Error fetching unread DMs:', error);
-      return [];
-    }
-  }, [userId, isAuthenticated, getUserEvents]);
 
   // Check for new game additions in meepleups
   const checkGameAdditions = useCallback(async () => {
@@ -205,9 +170,6 @@ export const NotificationProvider = ({ children }) => {
       const firestoreNotifications = await fetchNotifications();
       const fetchedNotifications = firestoreNotifications || [];
 
-      // Fetch unread DMs
-      const dmNotifications = await fetchUnreadDMs();
-
       // Initialize game counts on first check
       if (!lastCheckedRef.current) {
         const events = getUserEvents();
@@ -247,7 +209,6 @@ export const NotificationProvider = ({ children }) => {
       // Combine all notifications
       const allNotifications = [
         ...fetchedNotifications,
-        ...dmNotifications,
         ...gameNotifications,
       ];
 
@@ -266,7 +227,7 @@ export const NotificationProvider = ({ children }) => {
     } catch (error) {
       console.error('Error loading notifications:', error);
     }
-  }, [userId, isAuthenticated, fetchNotifications, fetchUnreadDMs, checkGameAdditions, getUserEvents, showNextNotification]);
+  }, [userId, isAuthenticated, fetchNotifications, checkGameAdditions, getUserEvents, showNextNotification]);
 
   // Show next notification from queue
   const showNextNotification = useCallback(() => {
@@ -284,7 +245,7 @@ export const NotificationProvider = ({ children }) => {
     if (!currentNotification) return;
 
     // Mark as read if it's a Firestore notification
-    if (currentNotification.id && !currentNotification.id.startsWith('dm_') && !currentNotification.id.startsWith('game_added_')) {
+    if (currentNotification.id && !currentNotification.id.startsWith('game_added_')) {
       try {
         if (db && userId) {
           await db

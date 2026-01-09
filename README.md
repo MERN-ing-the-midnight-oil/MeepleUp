@@ -36,7 +36,7 @@ The app is organized around events - recurring game nights at breweries, game st
 - [Managing Your Game Collection](#managing-your-game-collection)
 - [Event Hub Features](#event-hub-features)
 - [RSVP Management](#rsvp-management)
-- [Discussion & Messaging](#discussion--messaging)
+- [Discussion](#discussion)
 - [Profile & Settings](#profile--settings)
 - [Troubleshooting](#troubleshooting)
 
@@ -162,8 +162,6 @@ App
 - `BeepleAvatar.jsx` - User avatar component
 - `PersonalMatchSettings.jsx` - Personal match preferences
 
-### Messaging Components
-- `PrivateMessaging.jsx` - Direct messaging between users
 
 ### UI Components
 - `ParallaxBackground.jsx` - Animated background (web)
@@ -197,9 +195,6 @@ App
    - Firestore game caching
    - Game search and retrieval
 
-4. **Messaging** (`messaging.js`)
-   - Private messaging between users
-   - Firestore message management
 
 5. **Blocking** (`blocking.js`)
    - User blocking functionality
@@ -1034,24 +1029,6 @@ The Event Hub is the central place for each gaming group. It has three main tabs
 - Propose games you want to play
 - Rate games others propose
 - See which games are popular
-
-### Private Messaging
-
-**Sending Messages:**
-1. Open a user's profile
-2. Tap "Send Message"
-3. Enter your message
-4. Send - message appears in both users' inboxes
-
-**Receiving Messages:**
-- Notifications for new messages
-- View messages in messaging interface
-- Reply directly from message view
-
-**Blocking Users:**
-- Block users from messaging you
-- Blocked users cannot contact you
-- Manage blocked users in settings
 
 ## Profile & Settings
 

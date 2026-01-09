@@ -14,6 +14,9 @@ const NotificationSettings = ({ inModal = false }) => {
     discussion: true,
     discussionEmail: false,
     discussionFrequency: 'all', // 'all', 'daily', 'mentions', 'responses'
+    mentionAlert: true, // Default: yes to device alerts
+    mentionEmail: false, // Default: no email
+    mentionSMS: false, // Default: no SMS
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -29,6 +32,9 @@ const NotificationSettings = ({ inModal = false }) => {
         discussion: user.notificationPreferences.discussion !== false && user.notificationPreferences.gameMarking !== false,
         discussionEmail: user.notificationPreferences.discussionEmail === true || user.notificationPreferences.gameMarkingEmail === true,
         discussionFrequency: user.notificationPreferences.discussionFrequency || user.notificationPreferences.gameMarkingFrequency || 'all',
+        mentionAlert: user.notificationPreferences.mentionAlert !== false,
+        mentionEmail: user.notificationPreferences.mentionEmail === true,
+        mentionSMS: user.notificationPreferences.mentionSMS === true,
       });
     }
   }, [user]);
@@ -119,6 +125,9 @@ const NotificationSettings = ({ inModal = false }) => {
         discussion: preferences.discussion,
         discussionEmail: preferences.discussionEmail,
         discussionFrequency: preferences.discussionFrequency,
+        mentionAlert: preferences.mentionAlert,
+        mentionEmail: preferences.mentionEmail,
+        mentionSMS: preferences.mentionSMS,
       });
       setMessage('Notification preferences saved successfully!');
     } catch (error) {
@@ -298,6 +307,48 @@ const NotificationSettings = ({ inModal = false }) => {
               {preferences.discussionFrequency === 'mentions' && 'Only get notified when someone mentions you'}
               {preferences.discussionFrequency === 'responses' && 'Only get notified when someone replies to your comments'}
             </Text>
+          </View>
+        </>
+      )}
+
+      {/* @Mention Notifications */}
+      <View style={styles.settingItem}>
+        <View style={styles.settingContent}>
+          <Text style={styles.settingLabel}>@Mention Notifications</Text>
+          <Text style={styles.settingDescription}>
+            Get notified when someone mentions you in a post using @YourName
+          </Text>
+        </View>
+        <Switch
+          value={preferences.mentionAlert}
+          onValueChange={(value) => handlePreferenceChange('mentionAlert', value)}
+          trackColor={{ false: '#ddd', true: '#d45d5d' }}
+          thumbColor="#fff"
+        />
+      </View>
+      {preferences.mentionAlert && (
+        <>
+          <View style={styles.emailSettingItem}>
+            <View style={styles.settingContent}>
+              <Text style={styles.emailSettingLabel}>Also send email notifications</Text>
+            </View>
+            <Switch
+              value={preferences.mentionEmail}
+              onValueChange={(value) => handlePreferenceChange('mentionEmail', value)}
+              trackColor={{ false: '#ddd', true: '#d45d5d' }}
+              thumbColor="#fff"
+            />
+          </View>
+          <View style={styles.emailSettingItem}>
+            <View style={styles.settingContent}>
+              <Text style={styles.emailSettingLabel}>Also send text (SMS) alerts</Text>
+            </View>
+            <Switch
+              value={preferences.mentionSMS}
+              onValueChange={(value) => handlePreferenceChange('mentionSMS', value)}
+              trackColor={{ false: '#ddd', true: '#d45d5d' }}
+              thumbColor="#fff"
+            />
           </View>
         </>
       )}

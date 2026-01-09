@@ -17,8 +17,6 @@ import BeepleGameOptimizer from '../components/BeepleGameOptimizer';
 import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 import { createNotification } from '../utils/notifications';
-import { getOrCreateConversation, sendMessage } from '../services/messaging';
-import { BEEPLE_USER_ID } from '../utils/constants';
 
 // Platform-specific navigation hooks
 let useNavigationHook;
@@ -107,6 +105,7 @@ const BrowseAndProposeScreen = () => {
   const [loading, setLoading] = useState(true);
   const [selectedGame, setSelectedGame] = useState(null);
   const [showGameDetails, setShowGameDetails] = useState(false);
+  const [selectedProposalId, setSelectedProposalId] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [memberNames, setMemberNames] = useState({});
   const [memberAvatars, setMemberAvatars] = useState({});
@@ -1258,13 +1257,18 @@ const BrowseAndProposeScreen = () => {
   
   const handleOpenGameDetails = useCallback((game) => {
     setSelectedGame(game);
+    setSelectedProposalId(null); // Clear proposalId when opening from regular game list
     setShowGameDetails(true);
   }, []);
   
   // Helper to convert a proposal to a game object for the details modal
   const handleOpenProposedGameDetails = useCallback(async (proposal) => {
     const gameId = proposal.gameId;
-    if (!gameId) return;
+    if (!gameId || !selectedDate) return;
+    
+    // Calculate proposalId (same format as used when creating proposals)
+    const dateKey = getDateKey(selectedDate.date);
+    const proposalId = `${dateKey}_${gameId}`;
     
     // First, check if this game is already in enrichedGames (from Everyone's Games)
     const existingGame = enrichedGames.find(g => {
@@ -1275,6 +1279,7 @@ const BrowseAndProposeScreen = () => {
     if (existingGame) {
       // Use the existing game data - it already has BGG data loaded
       setSelectedGame(existingGame);
+      setSelectedProposalId(proposalId);
       setShowGameDetails(true);
       return;
     }
@@ -1289,8 +1294,9 @@ const BrowseAndProposeScreen = () => {
     };
     
     setSelectedGame(gameObject);
+    setSelectedProposalId(proposalId);
     setShowGameDetails(true);
-  }, [enrichedGames]);
+  }, [enrichedGames, selectedDate]);
   
   // Helper function to find game owner user IDs
   const findGameOwnerUserIds = (game, memberNames, members) => {
@@ -1362,17 +1368,7 @@ const BrowseAndProposeScreen = () => {
           message: `${proposerName} proposed ${gameName} for your next meeting. You might want to bring it in case the group decides to play it!`,
         });
 
-        // Send message from beeple
-        try {
-          const conversation = await getOrCreateConversation(eventId, BEEPLE_USER_ID, ownerUserId);
-          if (conversation) {
-            const beepleMessage = `Hi! Just wanted to let you know that ${proposerName} proposed "${gameName}" for your next meeting. You might want to bring it in case the group decides they'd like to play it (no pressure!).`;
-            await sendMessage(eventId, conversation.id, BEEPLE_USER_ID, beepleMessage);
-          }
-        } catch (messageError) {
-          console.error('[notifyGameOwnersAboutProposal] Error sending beeple message:', messageError);
-          // Continue even if message fails
-        }
+        // Note: Direct messaging has been removed. Game owners are notified via in-app notifications only.
       } catch (notifyError) {
         console.error(`[notifyGameOwnersAboutProposal] Error notifying owner ${ownerUserId}:`, notifyError);
         // Continue with other owners even if one fails
@@ -1935,6 +1931,7 @@ const BrowseAndProposeScreen = () => {
           onClose={() => {
             setShowGameDetails(false);
             setSelectedGame(null);
+            setSelectedProposalId(null);
           }}
           preloadedBggData={selectedGame._bggData}
           owners={selectedGame._owners || []}
@@ -1942,6 +1939,10 @@ const BrowseAndProposeScreen = () => {
           onProposeGame={handleProposeGame}
           userProposals={userProposals}
           userProposalLimit={userProposalLimit}
+          proposalId={selectedProposalId}
+          selectedDate={selectedDate}
+          eventMembers={members}
+          memberNames={memberNames}
         />
       )}
 

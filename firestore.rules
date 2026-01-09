@@ -188,6 +188,25 @@ service cloud.firestore {
           resource.data.userId == request.auth.uid ||
           request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
         );
+        
+        match /comments/{commentId} {
+          allow read: if isAuthenticated() && (
+            hasMemberDocument() ||
+            (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+            (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId)
+          );
+          allow create: if isAuthenticated() && 
+            request.resource.data.userId == request.auth.uid &&
+            (
+              hasMemberDocument() ||
+              (request.auth.uid in (get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.memberIds || [])) ||
+              (request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId)
+            );
+          allow update, delete: if isAuthenticated() && (
+            resource.data.userId == request.auth.uid ||
+            request.auth.uid == get(/databases/$(database)/documents/gamingGroups/$(groupId)).data.organizerId
+          );
+        }
       }
 
       match /matchScores/{gameId} {
@@ -202,63 +221,6 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      match /privateConversations/{conversationId} {
-        function conversationDoc() {
-          return get(/databases/$(database)/documents/gamingGroups/$(groupId)/privateConversations/$(conversationId));
-        }
-        
-        function isBeeple(participantId) {
-          return participantId == 'beeple';
-        }
-        
-        function canAccessExistingConversation() {
-          let participants = conversationDoc().data.participants || [];
-          return isGroupMember(groupId) && (
-            request.auth.uid in participants ||
-            isBeeple(participants[0]) || isBeeple(participants[1])
-          );
-        }
-        
-        function canCreateConversation() {
-          let participants = request.resource.data.participants || [];
-          return isGroupMember(groupId) && (
-            request.auth.uid in participants ||
-            isBeeple(participants[0]) || isBeeple(participants[1])
-          );
-        }
-        
-        allow read: if isAuthenticated() && canAccessExistingConversation();
-        allow create: if isAuthenticated() && canCreateConversation();
-        allow update, delete: if isAuthenticated() && canAccessExistingConversation();
-
-        match /messages/{messageId} {
-          function canAccessMessages() {
-            let participants = conversationDoc().data.participants || [];
-            return isGroupMember(groupId) && (
-              request.auth.uid in participants ||
-              'beeple' in participants
-            );
-          }
-          
-          allow read: if isAuthenticated() && canAccessMessages();
-          allow create: if isAuthenticated() && canAccessMessages() && (
-            request.resource.data.senderId == request.auth.uid ||
-            request.resource.data.senderId == 'beeple'
-          );
-          allow update: if isAuthenticated() && canAccessMessages() &&
-            (
-              resource.data.senderId == request.auth.uid ||
-              (
-                request.resource.data.diff(resource.data).changedKeys().hasOnly(['read']) &&
-                request.resource.data.senderId == resource.data.senderId &&
-                request.resource.data.content == resource.data.content &&
-                request.resource.data.createdAt == resource.data.createdAt
-              )
-            );
-          allow delete: if isAuthenticated() && canAccessMessages() &&
-            resource.data.senderId == request.auth.uid;
-        }
-      }
     }
     
     match /games/{gameId} {

@@ -638,129 +638,6 @@ export const calculateZipcodeDistance = (zipcode1, zipcode2) => {
   return estimatedDistance;
 };
 
-/**
- * Notify user about a new direct message
- * @param {string} recipientId - User ID receiving the message
- * @param {string} senderId - User ID sending the message
- * @param {string} senderName - Name of sender
- * @param {string} messagePreview - Preview of the message
- * @param {string} groupId - MeepleUp ID where message was sent
- * @param {string} groupName - MeepleUp name
- */
-export const notifyNewDirectMessage = async (
-  recipientId,
-  senderId,
-  senderName,
-  messagePreview,
-  groupId,
-  groupName
-) => {
-  if (!recipientId || !senderId || !db) {
-    return;
-  }
-
-  try {
-    // Get recipient's notification preferences
-    const preferences = await getUserNotificationPreferences(recipientId);
-
-    // Create in-app notification
-    const notificationId = await createNotification(recipientId, {
-      type: 'new_message',
-      groupId: groupId,
-      fromUserId: senderId,
-      fromUserName: senderName,
-      message: `${senderName} sent you a message in ${groupName || 'a MeepleUp'}`,
-    });
-
-    // Send push notification if enabled
-    if (preferences?.meepleupChanges !== false) {
-      try {
-        await sendPushNotification(recipientId, `${senderName}: ${messagePreview.substring(0, 50)}${messagePreview.length > 50 ? '...' : ''}`, {
-          type: 'new_message',
-          groupId: groupId,
-          groupName: groupName,
-          senderId: senderId,
-          senderName: senderName,
-        });
-      } catch (pushError) {
-        console.error('Error sending push notification for DM:', pushError);
-      }
-    }
-
-    // Send email if enabled
-    if (preferences?.meepleupChangesEmail === true && notificationId) {
-      try {
-        await sendDirectMessageEmail(recipientId, senderName, messagePreview, groupName, groupId);
-      } catch (emailError) {
-        console.error('Error sending email notification for DM:', emailError);
-      }
-    }
-  } catch (error) {
-    console.error('Error notifying about direct message:', error);
-  }
-};
-
-/**
- * Send email notification for direct message
- * @param {string} recipientId - User ID receiving the message
- * @param {string} senderName - Name of sender
- * @param {string} messagePreview - Preview of the message
- * @param {string} groupName - MeepleUp name
- * @param {string} groupId - MeepleUp ID
- */
-const sendDirectMessageEmail = async (recipientId, senderName, messagePreview, groupName, groupId) => {
-  if (!recipientId || !db) {
-    return;
-  }
-
-  try {
-    const recipientDoc = await db.collection('users').doc(recipientId).get();
-    if (!recipientDoc.exists) {
-      console.warn(`Cannot send email: user ${recipientId} not found`);
-      return;
-    }
-
-    const recipientData = recipientDoc.data();
-    const recipientEmail = recipientData.email;
-
-    if (!recipientEmail) {
-      console.warn(`Cannot send email: user ${recipientId} has no email`);
-      return;
-    }
-
-    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
-    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendDirectMessageEmail`;
-
-    try {
-      const response = await fetch(functionsUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          to: recipientEmail,
-          subject: `New message from ${senderName} in ${groupName || 'MeepleUp'}`,
-          senderName: senderName,
-          messagePreview: messagePreview,
-          groupName: groupName || 'MeepleUp',
-          groupId: groupId,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        throw new Error(`Email service returned ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json().catch(() => ({}));
-      console.log(`Direct message email sent to ${recipientEmail}`, result);
-    } catch (error) {
-      console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
-    }
-  } catch (error) {
-    console.error('Error in sendDirectMessageEmail:', error);
-  }
-};
 
 /**
  * Send email notification for RSVP update
@@ -921,6 +798,330 @@ const sendPushNotification = async (userId, message, data = {}) => {
     }
   } catch (error) {
     console.error('[sendPushNotification] Error in sendPushNotification:', error);
+  }
+};
+
+/**
+ * Extract @mentions from post content
+ * Returns array of mentioned user names (without @)
+ * @param {string} content - Post content
+ * @returns {string[]} Array of mentioned names
+ */
+export const extractMentions = (content) => {
+  if (!content || typeof content !== 'string') {
+    return [];
+  }
+
+  // Match @ followed by a name (letters, numbers, spaces, hyphens, underscores)
+  // Stop at whitespace, punctuation, or end of string
+  const mentionRegex = /@([a-zA-Z0-9\s\-_]+)/g;
+  const mentions = [];
+  let match;
+
+  while ((match = mentionRegex.exec(content)) !== null) {
+    const name = match[1].trim();
+    if (name && !mentions.includes(name)) {
+      mentions.push(name);
+    }
+  }
+
+  return mentions;
+};
+
+/**
+ * Find user IDs for mentioned names in a MeepleUp
+ * @param {string} groupId - MeepleUp ID
+ * @param {string[]} mentionedNames - Array of mentioned names
+ * @returns {Promise<Array>} Array of { userId, userName } objects
+ */
+export const findMentionedUsers = async (groupId, mentionedNames) => {
+  if (!groupId || !db || !mentionedNames || mentionedNames.length === 0) {
+    return [];
+  }
+
+  try {
+    // Get all members of the group
+    const membersRef = db.collection('gamingGroups').doc(groupId).collection('members');
+    const membersSnapshot = await membersRef.get();
+
+    if (membersSnapshot.empty) {
+      return [];
+    }
+
+    const mentionedUsers = [];
+
+    // For each mentioned name, find matching members
+    for (const mentionedName of mentionedNames) {
+      const normalizedMention = mentionedName.toLowerCase().trim();
+
+      for (const memberDoc of membersSnapshot.docs) {
+        const memberData = memberDoc.data();
+        const userId = memberData.userId;
+
+        if (!userId) continue;
+
+        // Get user's name from users collection
+        try {
+          const userDoc = await db.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            const userName = userData.name || userData.email || '';
+            const normalizedName = userName.toLowerCase().trim();
+
+            // Check if names match (case-insensitive, partial match)
+            if (normalizedName.includes(normalizedMention) || normalizedMention.includes(normalizedName)) {
+              // Avoid duplicates
+              if (!mentionedUsers.find(u => u.userId === userId)) {
+                mentionedUsers.push({
+                  userId,
+                  userName,
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching user data for ${userId}:`, error);
+        }
+      }
+    }
+
+    return mentionedUsers;
+  } catch (error) {
+    console.error('Error finding mentioned users:', error);
+    return [];
+  }
+};
+
+/**
+ * Notify users when they are @mentioned in a post
+ * @param {string} groupId - MeepleUp ID
+ * @param {string} postId - Post ID
+ * @param {string} postContent - Post content
+ * @param {string} senderId - User ID who created the post
+ * @param {string} senderName - Name of user who created the post
+ * @param {string} groupName - MeepleUp name
+ */
+export const notifyMentions = async (groupId, postId, postContent, senderId, senderName, groupName) => {
+  if (!groupId || !postContent || !db) {
+    return;
+  }
+
+  try {
+    // Extract mentions from post content
+    const mentionedNames = extractMentions(postContent);
+    if (mentionedNames.length === 0) {
+      return;
+    }
+
+    // Find user IDs for mentioned names
+    const mentionedUsers = await findMentionedUsers(groupId, mentionedNames);
+
+    if (mentionedUsers.length === 0) {
+      return;
+    }
+
+    // Notify each mentioned user
+    for (const mentionedUser of mentionedUsers) {
+      // Skip if mentioning self
+      if (mentionedUser.userId === senderId) {
+        continue;
+      }
+
+      try {
+        // Get user's notification preferences
+        const preferences = await getUserNotificationPreferences(mentionedUser.userId);
+
+        // Device alert (default: yes)
+        if (preferences?.mentionAlert !== false) {
+          const notificationId = await createNotification(mentionedUser.userId, {
+            type: 'mention',
+            groupId: groupId,
+            postId: postId,
+            fromUserId: senderId,
+            fromUserName: senderName,
+            message: `${senderName} mentioned you in a post in ${groupName || 'a MeepleUp'}`,
+          });
+
+          // Push notification if enabled
+          try {
+            await sendPushNotification(
+              mentionedUser.userId,
+              `${senderName} mentioned you: ${postContent.substring(0, 50)}${postContent.length > 50 ? '...' : ''}`,
+              {
+                type: 'mention',
+                groupId: groupId,
+                groupName: groupName,
+                postId: postId,
+                senderId: senderId,
+                senderName: senderName,
+              }
+            );
+          } catch (pushError) {
+            console.error('Error sending push notification for mention:', pushError);
+          }
+
+          // Email notification if enabled
+          if (preferences?.mentionEmail === true && notificationId) {
+            try {
+              await sendMentionEmail(
+                mentionedUser.userId,
+                senderName,
+                postContent,
+                groupName,
+                groupId,
+                postId
+              );
+            } catch (emailError) {
+              console.error('Error sending email notification for mention:', emailError);
+            }
+          }
+
+          // SMS notification if enabled
+          if (preferences?.mentionSMS === true && notificationId) {
+            try {
+              await sendMentionSMS(
+                mentionedUser.userId,
+                senderName,
+                postContent,
+                groupName,
+                groupId
+              );
+            } catch (smsError) {
+              console.error('Error sending SMS notification for mention:', smsError);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error notifying mentioned user ${mentionedUser.userId}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error notifying mentions:', error);
+  }
+};
+
+/**
+ * Send email notification for @mention
+ * @param {string} recipientId - User ID receiving the mention
+ * @param {string} senderName - Name of sender
+ * @param {string} postContent - Post content
+ * @param {string} groupName - MeepleUp name
+ * @param {string} groupId - MeepleUp ID
+ * @param {string} postId - Post ID
+ */
+const sendMentionEmail = async (recipientId, senderName, postContent, groupName, groupId, postId) => {
+  if (!recipientId || !db) {
+    return;
+  }
+
+  try {
+    const recipientDoc = await db.collection('users').doc(recipientId).get();
+    if (!recipientDoc.exists) {
+      console.warn(`Cannot send email: user ${recipientId} not found`);
+      return;
+    }
+
+    const recipientData = recipientDoc.data();
+    const recipientEmail = recipientData.email;
+
+    if (!recipientEmail) {
+      console.warn(`Cannot send email: user ${recipientId} has no email`);
+      return;
+    }
+
+    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
+    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendMentionEmail`;
+
+    try {
+      const response = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: recipientEmail,
+          subject: `${senderName} mentioned you in ${groupName || 'MeepleUp'}`,
+          senderName: senderName,
+          postContent: postContent,
+          groupName: groupName || 'MeepleUp',
+          groupId: groupId,
+          postId: postId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Email service returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`Mention email sent to ${recipientEmail}`, result);
+    } catch (error) {
+      console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
+    }
+  } catch (error) {
+    console.error('Error in sendMentionEmail:', error);
+  }
+};
+
+/**
+ * Send SMS notification for @mention
+ * @param {string} recipientId - User ID receiving the mention
+ * @param {string} senderName - Name of sender
+ * @param {string} postContent - Post content
+ * @param {string} groupName - MeepleUp name
+ * @param {string} groupId - MeepleUp ID
+ */
+const sendMentionSMS = async (recipientId, senderName, postContent, groupName, groupId) => {
+  if (!recipientId || !db) {
+    return;
+  }
+
+  try {
+    const recipientDoc = await db.collection('users').doc(recipientId).get();
+    if (!recipientDoc.exists) {
+      console.warn(`Cannot send SMS: user ${recipientId} not found`);
+      return;
+    }
+
+    const recipientData = recipientDoc.data();
+    const phoneNumber = recipientData.phoneNumber;
+
+    if (!phoneNumber) {
+      console.warn(`Cannot send SMS: user ${recipientId} has no phone number`);
+      return;
+    }
+
+    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
+    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendMentionSMS`;
+
+    try {
+      const response = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: phoneNumber,
+          message: `${senderName} mentioned you in ${groupName || 'MeepleUp'}: ${postContent.substring(0, 100)}${postContent.length > 100 ? '...' : ''}`,
+          senderName: senderName,
+          groupName: groupName || 'MeepleUp',
+          groupId: groupId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`SMS service returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`Mention SMS sent to ${phoneNumber}`, result);
+    } catch (error) {
+      console.warn('Could not send SMS (Cloud Function may not be deployed):', error.message);
+    }
+  } catch (error) {
+    console.error('Error in sendMentionSMS:', error);
   }
 };
 

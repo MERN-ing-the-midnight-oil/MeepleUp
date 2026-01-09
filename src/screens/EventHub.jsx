@@ -34,11 +34,10 @@ import { formatDate, formatTime } from '../utils/helpers';
 import { getStarRating } from '../utils/gameBadges';
 import { Linking } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { notifyDiscussionActivity, notifyGameOwner, createNotification, getUserNotificationPreferences, isNotificationEnabled, notifyMeepleUpMembers, sendRSVPUpdateEmail } from '../utils/notifications';
+import { notifyDiscussionActivity, notifyGameOwner, createNotification, getUserNotificationPreferences, isNotificationEnabled, notifyMeepleUpMembers, sendRSVPUpdateEmail, notifyMentions } from '../utils/notifications';
 import RSVPManagementScreen from '../components/RSVPManagementScreen';
 import UserProfileModal from '../components/UserProfileModal';
 import { handleLeaveEvent as handleLeaveEventUtil } from '../components/LeaveEventButton';
-import PrivateMessaging from '../components/PrivateMessaging';
 import { getBlockedUsers } from '../services/blocking';
 import { pickAndUploadImage } from '../utils/imageUpload';
 import { checkPhotoUploadLimit, incrementPhotoUploadCount } from '../utils/photoUploadTracking';
@@ -213,8 +212,6 @@ const EventHub = () => {
   const [replyText, setReplyText] = useState('');
   const [editing, setEditing] = useState(null); // { type: 'post' | 'comment', id: string, postId: string, content: string }
   const [editText, setEditText] = useState('');
-  const [showPrivateMessaging, setShowPrivateMessaging] = useState(false);
-  const [selectedMemberForMessage, setSelectedMemberForMessage] = useState(null); // { userId, userName, avatarUrl }
   // GamesTab state
   const [selectedGame, setSelectedGame] = useState(null);
   const [selectedGameBggData, setSelectedGameBggData] = useState(null);
@@ -3715,7 +3712,8 @@ const EventHub = () => {
           pinned: false,
         };
 
-        await postsRef.add(postData);
+        const postDocRef = await postsRef.add(postData);
+        const postId = postDocRef.id;
 
         // Notify members about new post
         try {
@@ -3726,6 +3724,20 @@ const EventHub = () => {
           });
         } catch (notifError) {
           console.error('Error sending post notification:', notifError);
+        }
+
+        // Notify @mentions
+        try {
+          await notifyMentions(
+            event.id,
+            postId,
+            newPostContent.trim(),
+            userId,
+            user?.name || user?.email || 'Unknown',
+            event?.name || 'MeepleUp'
+          );
+        } catch (mentionError) {
+          console.error('Error notifying mentions:', mentionError);
         }
 
         // Reset form
@@ -3838,11 +3850,7 @@ const EventHub = () => {
         {members && members.length > 0 && (
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Members</Text>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.contactListContainer}
-            >
+            <View style={styles.contactListContainer}>
               {members.map((member) => {
                 if (!member.userId) return null;
                 const memberName = memberNames[member.userId] || member.userName || 'Unknown';
@@ -3879,23 +3887,10 @@ const EventHub = () => {
                     <Text style={styles.contactName} numberOfLines={1}>
                       {memberName}
                     </Text>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setSelectedMemberForMessage({
-                          userId: member.userId,
-                          userName: memberName,
-                          avatarUrl: memberAvatar,
-                        });
-                        setShowPrivateMessaging(true);
-                      }}
-                      style={styles.messageButton}
-                    >
-                      <FontAwesome5 name="envelope" size={14} color={theme.colors.meepleRed} />
-                    </TouchableOpacity>
                   </View>
                 );
               })}
-            </ScrollView>
+            </View>
           </View>
         )}
 
@@ -4257,26 +4252,18 @@ const EventHub = () => {
         {activeTab === TABS.GAMES && <GamesTab />}
         {activeTab === TABS.DISCUSSION && <DiscussionTab />}
         
-        {/* Message Modal */}
-        <Modal
-          isOpen={showPrivateMessaging}
-          onClose={() => {
-            setShowPrivateMessaging(false);
-            setSelectedMemberForMessage(null);
-          }}
-          fullScreen={true}
-        >
-          <PrivateMessaging
-            eventId={event?.id}
-            members={members}
-            onBackToTabletalk={() => {
-              setShowPrivateMessaging(false);
-              setSelectedMemberForMessage(null);
-            }}
-            initialOtherUserId={selectedMemberForMessage?.userId}
-          />
-        </Modal>
       </View>
+
+      {/* User Profile Modal */}
+      {selectedUserForProfile && (
+        <UserProfileModal
+          isOpen={!!selectedUserForProfile}
+          onClose={() => setSelectedUserForProfile(null)}
+          userId={selectedUserForProfile.userId}
+          userName={selectedUserForProfile.userName}
+          avatarUrl={selectedUserForProfile.avatarUrl}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 };
@@ -4295,8 +4282,6 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.xs,
     paddingBottom: theme.spacing.xs,
     backgroundColor: theme.colors.surfaceColor,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.woodMedium,
     alignItems: 'center',
     flexShrink: 0,
   },
@@ -4381,17 +4366,6 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.textSecondary,
     marginLeft: theme.spacing.sm,
-  },
-  privateMessageToggle: {
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.xs,
-    marginBottom: theme.spacing.sm,
-    alignSelf: 'flex-start',
-  },
-  privateMessageToggleText: {
-    color: theme.colors.textSecondary,
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.medium,
   },
   sectionCopy: {
     fontSize: theme.typography.fontSize.sm,
@@ -7692,13 +7666,13 @@ const styles = StyleSheet.create({
   },
   contactListContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingVertical: 8,
     gap: 16,
   },
   contactItem: {
     alignItems: 'center',
-    minWidth: 70,
-    maxWidth: 80,
+    width: 80,
   },
   contactAvatarContainer: {
     marginBottom: 6,
@@ -7724,15 +7698,6 @@ const styles = StyleSheet.create({
     color: '#333',
     textAlign: 'center',
     marginBottom: 4,
-  },
-  messageButton: {
-    padding: 6,
-    borderRadius: 15,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minWidth: 30,
-    minHeight: 30,
   },
   taggingSuggestion: {
     marginTop: 8,
