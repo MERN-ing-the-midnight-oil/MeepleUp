@@ -49,7 +49,9 @@ export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
           bggDetails: bggDetails,
         };
       } catch (bggError) {
-        console.warn('Failed to get BGG details for GameUPC verified game:', bggError);
+        if (__DEV__) {
+          console.warn('Failed to get BGG details for GameUPC verified game:', bggError);
+        }
         // Return what we have from GameUPC
         return {
           ...barcodeResult,
@@ -93,7 +95,9 @@ export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
         };
       }
     } catch (bggError) {
-      console.warn('BGG search failed, returning barcode result only:', bggError);
+      if (__DEV__) {
+        console.warn('BGG search failed, returning barcode result only:', bggError);
+      }
       return {
         ...barcodeResult,
         bggMatch: false,
@@ -123,7 +127,9 @@ export const searchGameUPC = async (barcode, searchTerms = null) => {
     const response = await axios.get(url);
 
     if (process.env.NODE_ENV === 'development') {
-      console.log('GameUPC API Response:', response.data);
+      if (__DEV__) {
+        console.log('GameUPC API Response:', response.data);
+      }
     }
 
     if (response.data.status === 'error') {
@@ -203,7 +209,9 @@ export const searchGameByBarcode = async (barcode) => {
     });
 
     if (process.env.NODE_ENV === 'development') {
-      console.log('Primary Barcode API Response:', response.data);
+      if (__DEV__) {
+        console.log('Primary Barcode API Response:', response.data);
+      }
     }
 
     const data = response.data;
@@ -249,7 +257,9 @@ export const searchGameByBarcode = async (barcode) => {
       }
     }
   } catch (error) {
-    console.warn('Primary barcode lookup failed, trying GameUPC fallback:', error);
+    if (__DEV__) {
+      console.warn('Primary barcode lookup failed, trying GameUPC fallback:', error);
+    }
     primaryError = error;
   }
 
@@ -387,8 +397,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     } catch (firestoreError) {
       // Firestore error or timeout - mark as failed and fall through to BGG if fallback enabled
       firestoreFailed = true;
-      console.warn(`[Game Search] Firestore search error for "${query}":`, firestoreError.message);
       if (__DEV__) {
+        console.warn(`[Game Search] Firestore search error for "${query}":`, firestoreError.message);
         console.log('[Firestore] Not available or error, trying BGG API:', firestoreError.message);
       }
       // Don't throw - fall through to BGG API if fallback is enabled
@@ -413,9 +423,15 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       let lastError = null;
       const searchStartTime = Date.now();
       
-      console.log(`[Game Search → BGG API] ⏱️ Starting search for "${query}"`, {
+      if (__DEV__) {
+
+      
+        console.log(`[Game Search → BGG API] ⏱️ Starting search for "${query}"`, {
         timestamp: new Date().toISOString(),
       });
+
+      
+      }
       
       while (bggRetryCount <= maxBggRetries) {
         try {
@@ -424,12 +440,20 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             // Cap at 80 seconds to avoid extremely long waits
             const backoffMs = Math.min(10000 * Math.pow(2, Math.min(bggRetryCount - 1, 4)), 80000);
             const elapsed = ((Date.now() - searchStartTime) / 1000).toFixed(1);
-            console.log(`[Game Search → BGG API] 🔄 Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`, {
+            if (__DEV__) {
+
+              console.log(`[Game Search → BGG API] 🔄 Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`, {
               elapsedSeconds: elapsed,
             });
+
+            }
             await new Promise(resolve => setTimeout(resolve, backoffMs));
           } else {
-            console.log(`[Game Search → BGG API] 📡 Sending search query to BGG: "${query}"`);
+            if (__DEV__) {
+
+              console.log(`[Game Search → BGG API] 📡 Sending search query to BGG: "${query}"`);
+
+            }
           }
           
           const attemptStartTime = Date.now();
@@ -439,11 +463,15 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           
           if (bggResults && bggResults.length > 0) {
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
-            console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}"`, {
+            if (__DEV__) {
+
+              console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}"`, {
               attemptDurationSeconds: attemptDuration,
               totalDurationSeconds: totalDuration,
               attempts: bggRetryCount + 1,
             });
+
+            }
             if (__DEV__) {
               console.log(`[BGG API] Found ${bggResults.length} games`);
             }
@@ -458,11 +486,15 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             // No results - BGG successfully returned empty array (game doesn't exist)
             // Don't retry - accept it immediately to save time during bulk imports
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
-            console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (game doesn't exist in BGG)`, {
+            if (__DEV__) {
+
+              console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (game doesn't exist in BGG)`, {
               attemptDurationSeconds: attemptDuration,
               totalDurationSeconds: totalDuration,
               attempts: bggRetryCount + 1,
             });
+
+            }
             // Return empty array immediately - don't waste time retrying
             return [];
           }
@@ -474,9 +506,13 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           // Check if it's a rate limit error - keep retrying
           if (isRateLimited) {
             if (bggRetryCount < maxBggRetries) {
-              console.warn(`[Game Search → BGG API] ⚠️ Rate limited for "${query}", will retry (attempt ${bggRetryCount + 1}/${maxBggRetries})...`, {
+              if (__DEV__) {
+
+                console.warn(`[Game Search → BGG API] ⚠️ Rate limited for "${query}", will retry (attempt ${bggRetryCount + 1}/${maxBggRetries})...`, {
                 elapsedSeconds: attemptDuration,
               });
+
+              }
               bggRetryCount++;
               continue; // Keep retrying
             } else {
@@ -495,7 +531,11 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
               elapsedSeconds: attemptDuration,
             });
             if (bggRetryCount < 3) { // Retry up to 3 times for non-rate-limit errors
-              console.warn(`[Game Search → BGG API] Will retry after error...`);
+              if (__DEV__) {
+
+                console.warn(`[Game Search → BGG API] Will retry after error...`);
+
+              }
               bggRetryCount++;
               continue;
             } else {
@@ -522,7 +562,11 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     }
 
     // No results found (successful API call returned empty, not rate-limited)
-    console.warn(`[Game Search] No results found for "${query}" (successful API call with no results)`);
+    if (__DEV__) {
+
+      console.warn(`[Game Search] No results found for "${query}" (successful API call with no results)`);
+
+    }
     if (__DEV__) {
       console.log('[Game Search] No results found, returning empty array');
     }
@@ -817,19 +861,31 @@ function getBGGToken() {
     
     if (__DEV__) {
       if (token) {
-        console.log('[BGG Collection] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
+        if (__DEV__) {
+
+          console.log('[BGG Collection] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
+
+        }
       } else {
-        console.warn('[BGG Collection] No token found. Checked:', {
+        if (__DEV__) {
+
+          console.warn('[BGG Collection] No token found. Checked:', {
           EXPO_PUBLIC_BGG_API_TOKEN: !!process.env.EXPO_PUBLIC_BGG_API_TOKEN,
           EXPO_PUBLIC_BGGbearerToken: !!process.env.EXPO_PUBLIC_BGGbearerToken,
           BGGbearerToken: !!process.env.BGGbearerToken,
           REACT_APP_BGG_API_TOKEN: !!process.env.REACT_APP_BGG_API_TOKEN,
         });
+
+        }
       }
     }
     return token;
   } catch (error) {
-    console.warn('[BGG Collection] Error loading API config:', error);
+    if (__DEV__) {
+
+      console.warn('[BGG Collection] Error loading API config:', error);
+
+    }
     return null;
   }
 }
@@ -874,7 +930,11 @@ export const fetchBGGCollection = async (username, options = {}) => {
     
     if (__DEV__) {
       console.log('[BGG Collection] Fetching collection for:', username);
-      console.log('[BGG Collection] URL:', url);
+      if (__DEV__) {
+
+        console.log('[BGG Collection] URL:', url);
+
+      }
     }
 
     // Retry logic for 202 responses with exponential backoff

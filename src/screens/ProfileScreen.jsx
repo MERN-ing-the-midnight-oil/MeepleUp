@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert, Image, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert, Image, TouchableOpacity, ActivityIndicator, useWindowDimensions, Linking } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useAuth } from '../context/AuthContext';
 import Input from '../components/common/Input';
@@ -158,26 +158,36 @@ const ProfileScreen = () => {
   };
 
   const handleSubmit = async () => {
-    console.log('[ProfileScreen] handleSubmit called');
-    console.log('[ProfileScreen] Current userData:', {
-      bio: userData.bio?.substring(0, 50) + '...',
-      bggUsername: userData.bggUsername,
-      zipcode: userData.zipcode,
-      bioLength: userData.bio?.length || 0,
-    });
+    if (__DEV__) {
+      console.log('[ProfileScreen] handleSubmit called');
+      console.log('[ProfileScreen] Current userData:', {
+        bio: userData.bio?.substring(0, 50) + '...',
+        bggUsername: userData.bggUsername,
+        zipcode: userData.zipcode,
+        bioLength: userData.bio?.length || 0,
+      });
+    }
 
     // Validate zipcode before submitting
-    console.log('[ProfileScreen] Validating zipcode...');
+    if (__DEV__) {
+      console.log('[ProfileScreen] Validating zipcode...');
+    }
     const zipcodeValidationError = validateZipcode(userData.zipcode);
     if (zipcodeValidationError) {
-      console.log('[ProfileScreen] Zipcode validation failed:', zipcodeValidationError);
+      if (__DEV__) {
+        console.log('[ProfileScreen] Zipcode validation failed:', zipcodeValidationError);
+      }
       setZipcodeError(zipcodeValidationError);
       setMessage('');
       return;
     }
-    console.log('[ProfileScreen] Zipcode validation passed');
+    if (__DEV__) {
+      console.log('[ProfileScreen] Zipcode validation passed');
+    }
 
-    console.log('[ProfileScreen] Setting saving state to true');
+    if (__DEV__) {
+      console.log('[ProfileScreen] Setting saving state to true');
+    }
     setSaving(true);
     setMessage('');
     setZipcodeError('');
@@ -188,24 +198,34 @@ const ProfileScreen = () => {
         bggUsername: userData.bggUsername,
         zipcode: userData.zipcode.trim() || '', // Save as zipcode, trim whitespace
       };
-      console.log('[ProfileScreen] Calling updateUser with data:', {
-        ...updateData,
-        bio: updateData.bio?.substring(0, 50) + '...',
-        bioLength: updateData.bio?.length || 0,
-      });
+      if (__DEV__) {
+        console.log('[ProfileScreen] Calling updateUser with data:', {
+          ...updateData,
+          bio: updateData.bio?.substring(0, 50) + '...',
+          bioLength: updateData.bio?.length || 0,
+        });
+      }
       
       const updateStartTime = Date.now();
       await updateUser(updateData);
       const updateDuration = Date.now() - updateStartTime;
-      console.log('[ProfileScreen] updateUser completed in', updateDuration, 'ms');
+      if (__DEV__) {
+        console.log('[ProfileScreen] updateUser completed in', updateDuration, 'ms');
+      }
 
-      console.log('[ProfileScreen] Calling refreshUser...');
+      if (__DEV__) {
+        console.log('[ProfileScreen] Calling refreshUser...');
+      }
       const refreshStartTime = Date.now();
       await refreshUser();
       const refreshDuration = Date.now() - refreshStartTime;
-      console.log('[ProfileScreen] refreshUser completed in', refreshDuration, 'ms');
+      if (__DEV__) {
+        console.log('[ProfileScreen] refreshUser completed in', refreshDuration, 'ms');
+      }
 
-      console.log('[ProfileScreen] Profile update successful');
+      if (__DEV__) {
+        console.log('[ProfileScreen] Profile update successful');
+      }
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
       console.error('[ProfileScreen] Profile update error:', error);
@@ -216,9 +236,13 @@ const ProfileScreen = () => {
       });
       setMessage(error.message || 'Failed to update profile. Please try again.');
     } finally {
-      console.log('[ProfileScreen] Setting saving state to false');
+      if (__DEV__) {
+        console.log('[ProfileScreen] Setting saving state to false');
+      }
       setSaving(false);
-      console.log('[ProfileScreen] handleSubmit completed');
+      if (__DEV__) {
+        console.log('[ProfileScreen] handleSubmit completed');
+      }
     }
   };
 
@@ -343,10 +367,14 @@ const ProfileScreen = () => {
     setDeleting(true);
     try {
       // Show a message that this may take a moment
-      console.log('Starting account deletion...');
+      if (__DEV__) {
+        console.log('Starting account deletion...');
+      }
       await deleteAccount();
       // User will be logged out automatically
-      console.log('Account deletion successful');
+      if (__DEV__) {
+        console.log('Account deletion successful');
+      }
     } catch (error) {
       setDeleting(false);
       console.error('Account deletion error:', error);
@@ -378,9 +406,11 @@ const ProfileScreen = () => {
       if (photoURL) {
         // Delete old photo if it exists (don't wait for this to complete)
         if (user.photoURL) {
-          deleteImageFromFirebase(user.photoURL).catch(err => 
-            console.warn('Error deleting old photo:', err)
-          );
+          deleteImageFromFirebase(user.photoURL).catch(err => {
+            if (__DEV__) {
+              console.warn('Error deleting old photo:', err);
+            }
+          });
         }
         
         // Update user profile with new photo URL
@@ -610,6 +640,24 @@ const ProfileScreen = () => {
           variant="outline"
           style={[styles.logoutButton, styles.compactButton, styles.tightButton]}
         />
+      </View>
+
+      <View style={styles.form}>
+        <Text style={styles.sectionTitle}>Legal</Text>
+        <View style={styles.legalSection}>
+          <Button
+            label="📄 Privacy Policy"
+            onPress={() => Linking.openURL('https://meepleup.com/privacy-policy.html')}
+            variant="outline"
+            style={[styles.compactButton, styles.tightButton]}
+          />
+          <Button
+            label="📋 Terms of Service"
+            onPress={() => Linking.openURL('https://meepleup.com/terms-of-service.html')}
+            variant="outline"
+            style={[styles.compactButton, styles.tightButton]}
+          />
+        </View>
       </View>
 
       <View style={styles.form}>
@@ -1058,6 +1106,14 @@ const styles = StyleSheet.create({
   },
   tightButton: {
     marginBottom: theme.spacing.xs,
+  },
+  legalSection: {
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.cardSurface,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
   },
   editPhotoButton: {
     position: 'absolute',

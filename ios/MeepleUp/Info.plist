@@ -63,15 +63,15 @@
     <key>NSCameraUsageDescription</key>
     <string>Allow MeepleUp to access your camera to scan barcodes.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>Allow MeepleUp to access your location</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>Allow MeepleUp to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Allow MeepleUp to access your location to find nearby game events.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <string>Allow MeepleUp to access your microphone to record audio narration when taking photos of games.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your photos</string>
+    <string>Allow MeepleUp to access your photos</string>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UILaunchStoryboardName</key>

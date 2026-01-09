@@ -68,23 +68,29 @@ const SmartEventsRedirect = () => {
 
   // Log when component mounts
   useEffect(() => {
-    console.log('🚀 [SmartEventsRedirect] Component mounted/rendered');
+    if (__DEV__) {
+      console.log('🚀 [SmartEventsRedirect] Component mounted/rendered');
+    }
   }, []);
 
   useEffect(() => {
-    console.log('🔄 [SmartEventsRedirect] useEffect triggered', { 
-      hasRedirected, 
-      loading, 
-      hasUser: !!user, 
-      eventsCount: events.length,
-      userId: user?.uid || user?.id,
-      collectionsInitialised,
-      collectionsLoading
-    });
+    if (__DEV__) {
+      console.log('🔄 [SmartEventsRedirect] useEffect triggered', { 
+        hasRedirected, 
+        loading, 
+        hasUser: !!user, 
+        eventsCount: events.length,
+        userId: user?.uid || user?.id,
+        collectionsInitialised,
+        collectionsLoading
+      });
+    }
     
     // Don't check again if we've already redirected
     if (hasRedirected) {
-      console.log('⏭️ [SmartEventsRedirect] Already redirected, skipping');
+      if (__DEV__) {
+        console.log('⏭️ [SmartEventsRedirect] Already redirected, skipping');
+      }
       return;
     }
 
@@ -96,25 +102,33 @@ const SmartEventsRedirect = () => {
 
     // Wait for collections to initialize before checking
     if (!collectionsInitialised || collectionsLoading) {
-      console.log('⏳ [SmartEventsRedirect] Still loading collections...');
+      if (__DEV__) {
+        console.log('⏳ [SmartEventsRedirect] Still loading collections...');
+      }
       return;
     }
 
     // Wait for events to load and user to be available
     if (loading) {
-      console.log('⏳ [SmartEventsRedirect] Still loading events...');
+      if (__DEV__) {
+        console.log('⏳ [SmartEventsRedirect] Still loading events...');
+      }
       return;
     }
 
     if (!user) {
-      console.log('❌ [SmartEventsRedirect] No user found');
+      if (__DEV__) {
+        console.log('❌ [SmartEventsRedirect] No user found');
+      }
       setHasFinishedChecking(true);
       return;
     }
 
     const userId = user.uid || user.id;
     if (!userId) {
-      console.log('❌ [SmartEventsRedirect] No userId found');
+      if (__DEV__) {
+        console.log('❌ [SmartEventsRedirect] No userId found');
+      }
       setHasFinishedChecking(true);
       return;
     }
@@ -122,11 +136,15 @@ const SmartEventsRedirect = () => {
     // Check if user has any games in their collection
     const userCollection = getUserCollection(userId);
     const hasGames = userCollection && userCollection.length > 0;
-    console.log('🎮 [SmartEventsRedirect] User collection:', userCollection?.length || 0, 'games');
+    if (__DEV__) {
+      console.log('🎮 [SmartEventsRedirect] User collection:', userCollection?.length || 0, 'games');
+    }
 
     // If user has no games, redirect to collection screen
     if (!hasGames) {
-      console.log('📚 [SmartEventsRedirect] User has no games, redirecting to collection');
+      if (__DEV__) {
+        console.log('📚 [SmartEventsRedirect] User has no games, redirecting to collection');
+      }
       setHasRedirected(true);
       setHasFinishedChecking(true);
       navigate('/collection', { replace: true });
@@ -135,16 +153,22 @@ const SmartEventsRedirect = () => {
 
     // Get all events where user is a member
     const userEvents = getUserEvents();
-    console.log('📊 [SmartEventsRedirect] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
+    if (__DEV__) {
+      console.log('📊 [SmartEventsRedirect] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
+    }
     
     // Filter to only active events (not archived) - explicitly check for isActive === true
     const activeEvents = userEvents.filter(event => event.isActive === true);
-    console.log('[SmartEventsRedirect] Active events:', activeEvents.length, 'of', userEvents.length, 'total user events');
+    if (__DEV__) {
+      console.log('[SmartEventsRedirect] Active events:', activeEvents.length, 'of', userEvents.length, 'total user events');
+    }
 
     // If user is a member of exactly one active meepleUp, redirect to its logistics tab
     if (activeEvents.length === 1) {
       const eventId = activeEvents[0].id;
-      console.log('[SmartEventsRedirect] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
+      if (__DEV__) {
+        console.log('[SmartEventsRedirect] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
+      }
       setHasRedirected(true);
       setHasFinishedChecking(true);
       navigate(`/event/${eventId}`, { replace: true });
@@ -153,27 +177,37 @@ const SmartEventsRedirect = () => {
 
     // If we have events but not exactly one, we're done checking
     if (activeEvents.length !== 1 && (userEvents.length > 0 || events.length > 0)) {
-      console.log('[SmartEventsRedirect] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+      if (__DEV__) {
+        console.log('[SmartEventsRedirect] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+      }
       setHasFinishedChecking(true);
       return;
     }
 
     // If events haven't loaded yet, wait a bit for Firestore sync
     if (activeEvents.length === 0 && events.length === 0 && !loading) {
-      console.log('[SmartEventsRedirect] Waiting for Firestore sync...');
+      if (__DEV__) {
+        console.log('[SmartEventsRedirect] Waiting for Firestore sync...');
+      }
       checkTimeoutRef.current = setTimeout(() => {
         const delayedUserEvents = getUserEvents();
         const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive === true);
-        console.log('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
+        if (__DEV__) {
+          console.log('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
+        }
         
         if (delayedActiveEvents.length === 1) {
           const eventId = delayedActiveEvents[0].id;
-          console.log('[SmartEventsRedirect] ✓ Redirecting to event after Firestore sync:', eventId);
+          if (__DEV__) {
+            console.log('[SmartEventsRedirect] ✓ Redirecting to event after Firestore sync:', eventId);
+          }
           setHasRedirected(true);
           setHasFinishedChecking(true);
           navigate(`/event/${eventId}`, { replace: true });
         } else {
-          console.log('[SmartEventsRedirect] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+          if (__DEV__) {
+            console.log('[SmartEventsRedirect] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+          }
           setHasFinishedChecking(true);
         }
         checkTimeoutRef.current = null;
@@ -190,18 +224,24 @@ const SmartEventsRedirect = () => {
 
   // Show loading spinner while loading events/collections or checking
   if (loading || collectionsLoading || !collectionsInitialised || (!hasFinishedChecking && !hasRedirected && user)) {
-    console.log('⏳ [SmartEventsRedirect] Showing loading spinner');
+    if (__DEV__) {
+      console.log('⏳ [SmartEventsRedirect] Showing loading spinner');
+    }
     return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
 
   // If we redirected, show a brief loading state while navigation happens
   if (hasRedirected) {
-    console.log('✅ [SmartEventsRedirect] Redirected, showing loading spinner');
+    if (__DEV__) {
+      console.log('✅ [SmartEventsRedirect] Redirected, showing loading spinner');
+    }
     return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
 
   // Otherwise, show the events screen
-  console.log('📋 [SmartEventsRedirect] Showing EventsScreen (no redirect)');
+  if (__DEV__) {
+    console.log('📋 [SmartEventsRedirect] Showing EventsScreen (no redirect)');
+  }
   return <EventsScreen />;
 };
 

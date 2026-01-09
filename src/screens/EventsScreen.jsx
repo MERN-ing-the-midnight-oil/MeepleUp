@@ -77,50 +77,58 @@ const EventsScreen = () => {
   const userIdentifier = user?.uid || user?.id;
   
   // DEBUG: Log user identifier and events retrieval
-  console.log('[EventsScreen] 🔍 DEBUG START: User identifier:', userIdentifier);
-  console.log('[EventsScreen] 🔍 DEBUG: User object:', { uid: user?.uid, id: user?.id, email: user?.email });
-  console.log('[EventsScreen] 🔍 DEBUG: All events from context:', events?.length || 0);
+  if (__DEV__) {
+    console.log('[EventsScreen] 🔍 DEBUG START: User identifier:', userIdentifier);
+    console.log('[EventsScreen] 🔍 DEBUG: User object:', { uid: user?.uid, id: user?.id, email: user?.email });
+    console.log('[EventsScreen] 🔍 DEBUG: All events from context:', events?.length || 0);
+  }
   
   // getUserEvents doesn't take parameters - it uses user from context
   const allUserEvents = getUserEvents();
-  console.log('[EventsScreen] 🔍 DEBUG: All user events (before filtering):', {
-    count: allUserEvents.length,
-    events: allUserEvents.map(e => ({ 
-      id: e.id, 
-      name: e.name, 
-      isActive: e.isActive, 
-      isActiveType: typeof e.isActive,
-      organizerId: e.organizerId,
-      members: e.members?.length || 0,
-      memberUserIds: e.members?.map(m => m.userId) || []
-    }))
-  });
+  if (__DEV__) {
+    console.log('[EventsScreen] 🔍 DEBUG: All user events (before filtering):', {
+      count: allUserEvents.length,
+      events: allUserEvents.map(e => ({ 
+        id: e.id, 
+        name: e.name, 
+        isActive: e.isActive, 
+        isActiveType: typeof e.isActive,
+        organizerId: e.organizerId,
+        members: e.members?.length || 0,
+        memberUserIds: e.members?.map(m => m.userId) || []
+      }))
+    });
+  }
   
   // Check specifically for "Bobs MeepleUp"
   const bobsMeepleUp = allUserEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
-  if (bobsMeepleUp) {
-    console.log('[EventsScreen] 🔍 DEBUG: Found "Bobs MeepleUp":', {
-      id: bobsMeepleUp.id,
-      name: bobsMeepleUp.name,
-      isActive: bobsMeepleUp.isActive,
-      isActiveType: typeof bobsMeepleUp.isActive,
-      organizerId: bobsMeepleUp.organizerId,
-      userIdentifier: userIdentifier
-    });
-  } else {
-    console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT FOUND in allUserEvents');
+  if (__DEV__) {
+    if (bobsMeepleUp) {
+      console.log('[EventsScreen] 🔍 DEBUG: Found "Bobs MeepleUp":', {
+        id: bobsMeepleUp.id,
+        name: bobsMeepleUp.name,
+        isActive: bobsMeepleUp.isActive,
+        isActiveType: typeof bobsMeepleUp.isActive,
+        organizerId: bobsMeepleUp.organizerId,
+        userIdentifier: userIdentifier
+      });
+    } else {
+      console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT FOUND in allUserEvents');
+    }
   }
   
   const archivedEvents = getUserArchivedEvents();
-  console.log('[EventsScreen] 🔍 DEBUG: Archived events:', {
-    count: archivedEvents.length,
-    events: archivedEvents.map(e => ({ id: e.id, name: e.name }))
-  });
+  if (__DEV__) {
+    console.log('[EventsScreen] 🔍 DEBUG: Archived events:', {
+      count: archivedEvents.length,
+      events: archivedEvents.map(e => ({ id: e.id, name: e.name }))
+    });
+  }
   
   // Filter to only active events (not archived) - explicitly check for isActive === true
   const userEvents = allUserEvents.filter(event => {
     const isActive = event.isActive === true;
-    if (!isActive) {
+    if (__DEV__ && !isActive) {
       console.log('[EventsScreen] 🔍 DEBUG: Filtering out event (not active):', {
         id: event.id,
         name: event.name,
@@ -132,17 +140,19 @@ const EventsScreen = () => {
     return isActive;
   });
   
-  console.log('[EventsScreen] 🔍 DEBUG: Filtered active events:', {
-    count: userEvents.length,
-    events: userEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive }))
-  });
-  
-  // Check if "Bobs MeepleUp" is in filtered list
-  const bobsMeepleUpFiltered = userEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
-  if (bobsMeepleUpFiltered) {
-    console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" IS in filtered active events');
-  } else {
-    console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT in filtered active events');
+  if (__DEV__) {
+    console.log('[EventsScreen] 🔍 DEBUG: Filtered active events:', {
+      count: userEvents.length,
+      events: userEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive }))
+    });
+    
+    // Check if "Bobs MeepleUp" is in filtered list
+    const bobsMeepleUpFiltered = userEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
+    if (bobsMeepleUpFiltered) {
+      console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" IS in filtered active events');
+    } else {
+      console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT in filtered active events');
+    }
   }
 
   // Fetch RSVP data and organizer info for all user events

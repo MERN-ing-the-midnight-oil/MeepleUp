@@ -23,7 +23,7 @@
     "events",
     "collection management"
   ],
-  "author": "Your Name",
+  "author": "Rhys Smoker",
   "license": "MIT",
   "dependencies": {
     "@expo-google-fonts/abril-fatface": "^0.4.1",

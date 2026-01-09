@@ -149,11 +149,15 @@ const Onboarding = () => {
     // Check if user has any games in their collection
     const userCollection = getUserCollection(userId);
     const hasGames = userCollection && userCollection.length > 0;
-    console.log('[Onboarding] User collection:', userCollection?.length || 0, 'games');
+    if (__DEV__) {
+      console.log('[Onboarding] User collection:', userCollection?.length || 0, 'games');
+    }
 
     // If user has no games, redirect to collection screen
     if (!hasGames) {
-      console.log('[Onboarding] User has no games, redirecting to collection');
+      if (__DEV__) {
+        console.log('[Onboarding] User has no games, redirecting to collection');
+      }
       setHasCheckedRedirect(true);
       navigation.navigate('Collection');
       return;
@@ -177,26 +181,36 @@ const Onboarding = () => {
 
     // If we have events but not exactly one, we're done checking
     if (activeEvents.length !== 1 && (userEvents.length > 0 || events.length > 0)) {
-      console.log('[Onboarding] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+      if (__DEV__) {
+        console.log('[Onboarding] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+      }
       setHasCheckedRedirect(true);
       return;
     }
 
     // If events haven't loaded yet, wait a bit for Firestore sync
     if (activeEvents.length === 0 && events.length === 0 && !eventsLoading) {
-      console.log('[Onboarding] Waiting for Firestore sync...');
+      if (__DEV__) {
+        console.log('[Onboarding] Waiting for Firestore sync...');
+      }
       redirectTimeoutRef.current = setTimeout(() => {
         const delayedUserEvents = getUserEvents();
         const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive === true);
-        console.log('[Onboarding] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
+        if (__DEV__) {
+          console.log('[Onboarding] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
+        }
         
         if (delayedActiveEvents.length === 1) {
           const eventId = delayedActiveEvents[0].id;
-          console.log('[Onboarding] ✓ Redirecting to event after Firestore sync:', eventId);
+          if (__DEV__) {
+            console.log('[Onboarding] ✓ Redirecting to event after Firestore sync:', eventId);
+          }
           setHasCheckedRedirect(true);
           navigation.navigate('EventHub', { eventId });
         } else {
-          console.log('[Onboarding] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+          if (__DEV__) {
+            console.log('[Onboarding] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+          }
           setHasCheckedRedirect(true);
         }
         redirectTimeoutRef.current = null;
@@ -305,20 +319,22 @@ const Onboarding = () => {
 
     setLoading(true);
     try {
-      console.log('[Onboarding] handleCreateEvent - selectedDates before conversion:', {
-        count: selectedDates.length,
-        selectedDates: selectedDates.map(d => ({
-          date: d.date instanceof Date ? d.date.toISOString() : d.date,
-          dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
-          dateType: d.date instanceof Date ? 'Date' : typeof d.date,
-          startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
-          startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
-          startTimeType: d.startTime instanceof Date ? 'Date' : typeof d.startTime,
-          endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
-          endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
-          endTimeType: d.endTime instanceof Date ? 'Date' : typeof d.endTime,
-        })),
-      });
+      if (__DEV__) {
+        console.log('[Onboarding] handleCreateEvent - selectedDates before conversion:', {
+          count: selectedDates.length,
+          selectedDates: selectedDates.map(d => ({
+            date: d.date instanceof Date ? d.date.toISOString() : d.date,
+            dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
+            dateType: d.date instanceof Date ? 'Date' : typeof d.date,
+            startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+            startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
+            startTimeType: d.startTime instanceof Date ? 'Date' : typeof d.startTime,
+            endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+            endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
+            endTimeType: d.endTime instanceof Date ? 'Date' : typeof d.endTime,
+          })),
+        });
+      }
       
       // Convert dates to ISO strings for storage
       const eventDates = selectedDates.map((d, index) => {
@@ -340,43 +356,49 @@ const Onboarding = () => {
           converted.note = d.note.trim();
         }
         
-        console.log(`[Onboarding] Converting date ${index + 1}:`, {
-          original: {
-            date: d.date instanceof Date ? d.date.toISOString() : d.date,
-            startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
-            endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
-            location: d.location,
-            note: d.note,
-          },
-          converted: converted,
-        });
+        if (__DEV__) {
+          console.log(`[Onboarding] Converting date ${index + 1}:`, {
+            original: {
+              date: d.date instanceof Date ? d.date.toISOString() : d.date,
+              startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+              endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+              location: d.location,
+              note: d.note,
+            },
+            converted: converted,
+          });
+        }
         
         return converted;
       });
       
-      console.log('[Onboarding] handleCreateEvent - eventDates after conversion:', {
-        count: eventDates.length,
-        eventDates: eventDates.map((ed, index) => ({
-          index,
-          date: ed.date,
-          startTime: ed.startTime,
-          endTime: ed.endTime,
-          dateParsed: new Date(ed.date).toISOString(),
-          startTimeParsed: new Date(ed.startTime).toISOString(),
-          endTimeParsed: new Date(ed.endTime).toISOString(),
-        })),
-      });
+      if (__DEV__) {
+        console.log('[Onboarding] handleCreateEvent - eventDates after conversion:', {
+          count: eventDates.length,
+          eventDates: eventDates.map((ed, index) => ({
+            index,
+            date: ed.date,
+            startTime: ed.startTime,
+            endTime: ed.endTime,
+            dateParsed: new Date(ed.date).toISOString(),
+            startTimeParsed: new Date(ed.startTime).toISOString(),
+            endTimeParsed: new Date(ed.endTime).toISOString(),
+          })),
+        });
+      }
       
       const scheduledForValue = selectedDates[0]?.date instanceof Date 
         ? selectedDates[0].date.toISOString() 
         : (selectedDates[0]?.date ? new Date(selectedDates[0].date).toISOString() : '');
       
-      console.log('[Onboarding] handleCreateEvent - scheduledFor:', {
-        scheduledFor: scheduledForValue,
-        firstDate: selectedDates[0]?.date instanceof Date 
-          ? selectedDates[0].date.toISOString() 
-          : selectedDates[0]?.date,
-      });
+      if (__DEV__) {
+        console.log('[Onboarding] handleCreateEvent - scheduledFor:', {
+          scheduledFor: scheduledForValue,
+          firstDate: selectedDates[0]?.date instanceof Date 
+            ? selectedDates[0].date.toISOString() 
+            : selectedDates[0]?.date,
+        });
+      }
       
       const eventData = {
         name: eventName.trim(),
@@ -389,15 +411,17 @@ const Onboarding = () => {
         organizerId: user.uid,
       };
       
-      console.log('[Onboarding] handleCreateEvent - eventData being sent to createEvent:', {
-        ...eventData,
-        eventDates: eventData.eventDates.map((ed, index) => ({
-          index,
-          date: ed.date,
-          startTime: ed.startTime,
-          endTime: ed.endTime,
-        })),
-      });
+      if (__DEV__) {
+        console.log('[Onboarding] handleCreateEvent - eventData being sent to createEvent:', {
+          ...eventData,
+          eventDates: eventData.eventDates.map((ed, index) => ({
+            index,
+            date: ed.date,
+            startTime: ed.startTime,
+            endTime: ed.endTime,
+          })),
+        });
+      }
 
       // Only include usual times if they're set
       if (usualStartTime) {
@@ -519,7 +543,9 @@ const Onboarding = () => {
             // Permission errors can occur if user isn't a member yet or group doesn't exist
             // This is non-fatal - we'll use fallback data from the event.members array
             if (error.code === 'permission-denied' || error.message?.includes('permission')) {
-              console.warn(`Permission denied fetching members for event ${event.id}, using fallback data`);
+              if (__DEV__) {
+                console.warn(`Permission denied fetching members for event ${event.id}, using fallback data`);
+              }
             } else {
               console.error(`Error fetching members for event ${event.id}:`, error);
             }
@@ -1117,17 +1143,19 @@ const Onboarding = () => {
             <CalendarDatePicker
               selectedDates={selectedDates}
               onDatesChange={(newDates) => {
-                console.log('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
-                  count: newDates.length,
-                  dates: newDates.map(d => ({
-                    date: d.date instanceof Date ? d.date.toISOString() : d.date,
-                    dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
-                    startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
-                    startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
-                    endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
-                    endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
-                  })),
-                });
+                if (__DEV__) {
+                  console.log('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
+                    count: newDates.length,
+                    dates: newDates.map(d => ({
+                      date: d.date instanceof Date ? d.date.toISOString() : d.date,
+                      dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
+                      startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+                      startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
+                      endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+                      endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
+                    })),
+                  });
+                }
                 setSelectedDates(newDates);
               }}
               minDate={new Date()}
@@ -1137,7 +1165,9 @@ const Onboarding = () => {
                 setShowTimePicker({ type: timeType || 'start', dateIndex });
               }}
               onDatePress={(dateIndex, dateInfo) => {
-                console.log('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
+                if (__DEV__) {
+                  console.log('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
+                }
                 
                 // Close calendar modal first
                 setShowCalendarModal(false);
@@ -1146,24 +1176,32 @@ const Onboarding = () => {
                 // Use ref to get latest selectedDates
                 setTimeout(() => {
                   const currentDates = selectedDatesRef.current;
-                  console.log('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
+                  if (__DEV__) {
+                    console.log('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
+                  }
                   
                   if (dateIndex !== null && dateIndex !== undefined && dateIndex >= 0 && currentDates[dateIndex]) {
                     const date = currentDates[dateIndex];
-                    console.log('[Onboarding] Opening edit modal for date:', date);
-                    console.log('[Onboarding] Setting editingDateIndex to:', dateIndex);
+                    if (__DEV__) {
+                      console.log('[Onboarding] Opening edit modal for date:', date);
+                      console.log('[Onboarding] Setting editingDateIndex to:', dateIndex);
+                    }
                     setEditingDateIndex(dateIndex);
                     setEditingDateForm({
                       location: date.location || '',
                       note: date.note || '',
                     });
-                    console.log('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
+                    if (__DEV__) {
+                      console.log('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
+                    }
                   } else {
-                    console.warn('[Onboarding] Invalid dateIndex or date not found:', { 
-                      dateIndex, 
-                      selectedDatesLength: currentDates.length,
-                      selectedDates: currentDates.map((d, i) => ({ index: i, date: d.date }))
-                    });
+                    if (__DEV__) {
+                      console.warn('[Onboarding] Invalid dateIndex or date not found:', { 
+                        dateIndex, 
+                        selectedDatesLength: currentDates.length,
+                        selectedDates: currentDates.map((d, i) => ({ index: i, date: d.date }))
+                      });
+                    }
                   }
                 }, 300);
               }}
@@ -1184,7 +1222,9 @@ const Onboarding = () => {
       <Modal
         isOpen={editingDateIndex !== null}
         onClose={() => {
-          console.log('[Onboarding] Closing Date Edit Modal');
+          if (__DEV__) {
+            console.log('[Onboarding] Closing Date Edit Modal');
+          }
           setEditingDateIndex(null);
           setEditingDateForm({ location: '', note: '' });
         }}
