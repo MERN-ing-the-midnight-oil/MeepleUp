@@ -424,13 +424,9 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       const searchStartTime = Date.now();
       
       if (__DEV__) {
-
-      
         console.log(`[Game Search → BGG API] ⏱️ Starting search for "${query}"`, {
-        timestamp: new Date().toISOString(),
-      });
-
-      
+          timestamp: new Date().toISOString(),
+        });
       }
       
       while (bggRetryCount <= maxBggRetries) {
@@ -441,18 +437,14 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             const backoffMs = Math.min(10000 * Math.pow(2, Math.min(bggRetryCount - 1, 4)), 80000);
             const elapsed = ((Date.now() - searchStartTime) / 1000).toFixed(1);
             if (__DEV__) {
-
               console.log(`[Game Search → BGG API] 🔄 Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`, {
-              elapsedSeconds: elapsed,
-            });
-
+                elapsedSeconds: elapsed,
+              });
             }
             await new Promise(resolve => setTimeout(resolve, backoffMs));
           } else {
             if (__DEV__) {
-
               console.log(`[Game Search → BGG API] 📡 Sending search query to BGG: "${query}"`);
-
             }
           }
           
@@ -464,15 +456,11 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           if (bggResults && bggResults.length > 0) {
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
             if (__DEV__) {
-
               console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}"`, {
-              attemptDurationSeconds: attemptDuration,
-              totalDurationSeconds: totalDuration,
-              attempts: bggRetryCount + 1,
-            });
-
-            }
-            if (__DEV__) {
+                attemptDurationSeconds: attemptDuration,
+                totalDurationSeconds: totalDuration,
+                attempts: bggRetryCount + 1,
+              });
               console.log(`[BGG API] Found ${bggResults.length} games`);
             }
             
@@ -487,13 +475,11 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             // Don't retry - accept it immediately to save time during bulk imports
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
             if (__DEV__) {
-
               console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (game doesn't exist in BGG)`, {
-              attemptDurationSeconds: attemptDuration,
-              totalDurationSeconds: totalDuration,
-              attempts: bggRetryCount + 1,
-            });
-
+                attemptDurationSeconds: attemptDuration,
+                totalDurationSeconds: totalDuration,
+                attempts: bggRetryCount + 1,
+              });
             }
             // Return empty array immediately - don't waste time retrying
             return [];
@@ -507,11 +493,9 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           if (isRateLimited) {
             if (bggRetryCount < maxBggRetries) {
               if (__DEV__) {
-
                 console.warn(`[Game Search → BGG API] ⚠️ Rate limited for "${query}", will retry (attempt ${bggRetryCount + 1}/${maxBggRetries})...`, {
-                elapsedSeconds: attemptDuration,
-              });
-
+                  elapsedSeconds: attemptDuration,
+                });
               }
               bggRetryCount++;
               continue; // Keep retrying
@@ -563,9 +547,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
 
     // No results found (successful API call returned empty, not rate-limited)
     if (__DEV__) {
-
       console.warn(`[Game Search] No results found for "${query}" (successful API call with no results)`);
-
     }
     if (__DEV__) {
       console.log('[Game Search] No results found, returning empty array');

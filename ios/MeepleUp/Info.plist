@@ -62,10 +62,6 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Allow MeepleUp to access your camera to scan barcodes.</string>
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Allow MeepleUp to access your location</string>
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow MeepleUp to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Allow MeepleUp to access your location to find nearby game events.</string>
     <key>NSMicrophoneUsageDescription</key>
