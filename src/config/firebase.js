@@ -5,6 +5,7 @@ import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 import 'firebase/compat/functions';
 import { Platform } from 'react-native';
+import logger from '../utils/logger';
 
 // Firebase Configuration
 // All values must be set via environment variables for security
@@ -41,43 +42,111 @@ if (__DEV__) {
 const requiredFields = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
 const missingFields = requiredFields.filter(field => !firebaseConfig[field]);
 
+// Store initialization error for graceful handling
+let firebaseInitError = null;
+
 if (missingFields.length > 0) {
-  throw new Error(
-    `Missing required Firebase configuration. Please set the following environment variables:\n` +
+  // Map field names to their correct environment variable names
+  const fieldNameMap = {
+    apiKey: 'API_KEY',
+    authDomain: 'AUTH_DOMAIN',
+    projectId: 'PROJECT_ID',
+    storageBucket: 'STORAGE_BUCKET',
+    messagingSenderId: 'MESSAGING_SENDER_ID',
+    appId: 'APP_ID',
+  };
+  
+  const errorMessage = `Missing required Firebase configuration. Please set the following environment variables:\n` +
     `  ${missingFields.map(field => {
-      const expoVar = `EXPO_PUBLIC_FIREBASE_${field.toUpperCase().replace(/([A-Z])/g, '_$1').slice(1)}`;
-      const reactVar = `REACT_APP_FIREBASE_${field.toUpperCase().replace(/([A-Z])/g, '_$1').slice(1)}`;
+      const varName = fieldNameMap[field] || field.toUpperCase().replace(/([A-Z])/g, '_$1').replace(/^_/, '');
+      const expoVar = `EXPO_PUBLIC_FIREBASE_${varName}`;
+      const reactVar = `REACT_APP_FIREBASE_${varName}`;
       return `${expoVar} or ${reactVar}`;
     }).join('\n  ')}\n\n` +
-    `Create a .env file in the project root with these variables. See .env.example for reference.`
-  );
+    `Create a .env file in the project root with these variables, or set EAS secrets for production builds.\n` +
+    `For EAS builds, use: eas secret:create --scope project --name <VAR_NAME> --value <VALUE>`;
+  
+  firebaseInitError = new Error(errorMessage);
+  
+  // Log error in both dev and production (for debugging TestFlight)
+  // Using logger.error ensures it shows in production logs
+  logger.error('FIREBASE INIT ERROR:', errorMessage);
+  logger.error('Missing fields:', missingFields);
+  logger.error('Config received:', Object.keys(firebaseConfig).reduce((acc, key) => {
+    acc[key] = firebaseConfig[key] ? 'SET' : 'MISSING';
+    return acc;
+  }, {}));
+  
+  // Always log to console for TestFlight debugging (visible in Xcode console)
+  console.error('❌ FIREBASE INIT ERROR:', errorMessage);
+  console.error('Missing fields:', missingFields);
+  
+  // In production, don't throw immediately - let the app handle it gracefully
+  // The AuthProvider will check for this error and show an error screen
+  if (__DEV__) {
+    throw firebaseInitError;
+  }
+} else {
+  // Only initialize if config is valid
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+      logger.info('Firebase initialized successfully');
+      console.log('✅ Firebase initialized successfully');
+    }
+  } catch (error) {
+    firebaseInitError = error;
+    logger.error('FIREBASE INITIALIZATION ERROR:', error);
+    console.error('❌ FIREBASE INITIALIZATION ERROR:', error);
+    // In dev, throw immediately. In production, let the app handle it
+    if (__DEV__) {
+      throw error;
+    }
+  }
 }
 
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
+// Export error so components can check it
+export { firebaseInitError };
+
+// Only export Firebase services if initialization succeeded
+// These will be null if Firebase failed to initialize, allowing graceful error handling
+let authInstance = null;
+let dbInstance = null;
+let storageInstance = null;
+
+if (!firebaseInitError && firebase.apps.length > 0) {
+  try {
+    authInstance = firebase.auth();
+    dbInstance = firebase.firestore();
+    storageInstance = firebase.storage();
+    
+    // Explicitly set persistence for web (local = persists across browser sessions)
+    // React Native/Expo automatically uses AsyncStorage, so no configuration needed
+    if (Platform.OS === 'web' && authInstance && authInstance.setPersistence) {
+      // For web, explicitly set to 'local' persistence (default, but being explicit)
+      // This ensures users stay logged in across page refreshes and server restarts
+      // Note: 'local' is the default, but we're being explicit for clarity
+      authInstance.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
+        console.warn('Error setting auth persistence:', error);
+        logger.warn('Error setting auth persistence:', error);
+        // Continue anyway - default behavior should still work
+      });
+    }
+  } catch (error) {
+    logger.error('Error initializing Firebase services:', error);
+    console.error('❌ Error initializing Firebase services:', error);
+    // Services will remain null, and the app will handle the error gracefully
+  }
 }
 
-export const auth = firebase.auth();
-
-// Explicitly set persistence for web (local = persists across browser sessions)
-// React Native/Expo automatically uses AsyncStorage, so no configuration needed
-if (Platform.OS === 'web' && auth.setPersistence) {
-  // For web, explicitly set to 'local' persistence (default, but being explicit)
-  // This ensures users stay logged in across page refreshes and server restarts
-  // Note: 'local' is the default, but we're being explicit for clarity
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
-    console.warn('Error setting auth persistence:', error);
-    // Continue anyway - default behavior should still work
-  });
-}
+export const auth = authInstance;
+export const db = dbInstance;
+export const storage = storageInstance;
 
 // Note: 
 // - Web: Uses localStorage (persists across browser sessions)
 // - React Native/Expo: Automatically uses AsyncStorage (persists across app restarts)
 // Users will remain logged in across app restarts in both environments.
-
-export const db = firebase.firestore();
-export const storage = firebase.storage();
 
 // Initialize Firebase Functions (if available)
 let functionsInstance = null;

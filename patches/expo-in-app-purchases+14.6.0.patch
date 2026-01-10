@@ -1,0 +1,26 @@
+diff --git a/node_modules/expo-in-app-purchases/android/build.gradle b/node_modules/expo-in-app-purchases/android/build.gradle
+index e53e7a7..4d3f0b9 100644
+--- a/node_modules/expo-in-app-purchases/android/build.gradle
++++ b/node_modules/expo-in-app-purchases/android/build.gradle
+@@ -53,7 +53,9 @@ afterEvaluate {
+ android {
+   // Remove this if and it's contents, when support for SDK49 is dropped
+   if (!safeExtGet("expoProvidesDefaultConfig", false)) {
+-    compileSdkVersion safeExtGet("compileSdkVersion", 33)
++    def compileSdkValue = safeExtGet("compileSdkVersion", safeExtGet("compileSdk", 33))
++    compileSdkVersion compileSdkValue
++    compileSdk compileSdkValue
+     
+     defaultConfig {
+       minSdkVersion safeExtGet("minSdkVersion", 23)
+@@ -63,6 +65,10 @@ android {
+     lintOptions {
+       abortOnError false
+     }
++  } else {
++    // Ensure compileSdk is set even when expoProvidesDefaultConfig is true
++    def compileSdkValue = safeExtGet("compileSdkVersion", safeExtGet("compileSdk", 33))
++    compileSdk compileSdkValue
+   }
+ 
+   def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION

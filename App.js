@@ -7,6 +7,8 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { EventsProvider } from './src/context/EventsContext';
 import { CollectionsProvider } from './src/context/CollectionsContext';
 import { AvailabilityProvider } from './src/context/AvailabilityContext';
+import { NotificationProvider } from './src/context/NotificationContext';
+import { SubscriptionProvider } from './src/context/SubscriptionContext';
 import LandingScreen from './src/screens/Landing';
 import AuthScreen from './src/screens/Auth';
 import VerifyEmailScreen from './src/screens/VerifyEmail';
@@ -194,13 +196,17 @@ function AppContent() {
   return (
     <ErrorBoundary name="AppContent">
       <ToastProvider>
-        <AvailabilityProvider>
-          <EventsProvider>
-            <CollectionsProvider>
-              <AppNavigator />
-            </CollectionsProvider>
-          </EventsProvider>
-        </AvailabilityProvider>
+        <SubscriptionProvider>
+          <AvailabilityProvider>
+            <EventsProvider>
+              <NotificationProvider>
+                <CollectionsProvider>
+                  <AppNavigator />
+                </CollectionsProvider>
+              </NotificationProvider>
+            </EventsProvider>
+          </AvailabilityProvider>
+        </SubscriptionProvider>
       </ToastProvider>
     </ErrorBoundary>
   );

@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, Text, StyleSheet, ScrollView } from 'react-native';
 import storage from '../utils/storage';
-import firebase, { auth, db, functions } from '../config/firebase';
+import firebase, { auth, db, functions, firebaseInitError } from '../config/firebase';
+import logger from '../utils/logger';
 
 // Helper to get the verification URL
 const getVerificationUrl = () => {
@@ -110,11 +111,92 @@ export const useAuth = () => {
   return context;
 };
 
+// Firebase Initialization Error Screen Component
+const FirebaseInitErrorScreen = ({ error }) => (
+  <View style={styles.errorContainer}>
+    <ScrollView contentContainerStyle={styles.errorContent}>
+      <Text style={styles.errorIcon}>⚠️</Text>
+      <Text style={styles.errorTitle}>Configuration Error</Text>
+      <Text style={styles.errorMessage}>
+        MeepleUp cannot start due to a missing configuration. This is a development/deployment issue.
+      </Text>
+      <Text style={styles.errorDetails}>
+        {error?.message || 'Unknown configuration error'}
+      </Text>
+      <Text style={styles.errorHelp}>
+        Please contact support with this error message. The app cannot function without proper configuration.
+      </Text>
+    </ScrollView>
+  </View>
+);
+
+const styles = StyleSheet.create({
+  errorContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorContent: {
+    alignItems: 'center',
+    maxWidth: 600,
+    width: '100%',
+  },
+  errorIcon: {
+    fontSize: 64,
+    marginBottom: 20,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#d32f2f',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 24,
+  },
+  errorDetails: {
+    fontSize: 12,
+    color: '#666',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    backgroundColor: '#f5f5f5',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+    width: '100%',
+  },
+  errorHelp: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+});
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const profileCacheRef = useRef({});
   const previousEmailVerifiedRef = useRef(null);
+
+  // Check for Firebase initialization errors first
+  useEffect(() => {
+    if (firebaseInitError) {
+      logger.error('Firebase initialization failed, showing error screen', firebaseInitError);
+      setLoading(false);
+    }
+  }, []);
+
+  // Show error screen if Firebase failed to initialize
+  if (firebaseInitError) {
+    return <FirebaseInitErrorScreen error={firebaseInitError} />;
+  }
 
   // Helper function to load user profile and set user state
   const loadUserProfile = async (firebaseUser) => {
@@ -130,7 +212,7 @@ export const AuthProvider = ({ children }) => {
       if (!cachedProfile) {
         // Try to load from Firestore first
         let firestoreProfile = null;
-        if (db) {
+        if (db && !firebaseInitError) {
           try {
             const userDoc = await db.collection('users').doc(cacheKey).get();
             if (userDoc.exists) {
@@ -204,7 +286,7 @@ export const AuthProvider = ({ children }) => {
 
   // Handle email verification callback from email link
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !auth) {
       return;
     }
 
@@ -259,6 +341,13 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    // Don't set up auth listener if Firebase failed to initialize
+    if (!auth || firebaseInitError) {
+      logger.warn('Auth not available, skipping auth state listener setup');
+      setLoading(false);
+      return () => {}; // Return empty cleanup function
+    }
+
     let isMounted = true;
     let authStateResolved = false;
 

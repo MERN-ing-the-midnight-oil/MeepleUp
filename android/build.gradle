@@ -20,5 +20,23 @@ allprojects {
   }
 }
 
+subprojects {
+  afterEvaluate { project ->
+    if (project.hasProperty('android')) {
+      project.android {
+        if (!project.android.hasProperty('compileSdk')) {
+          compileSdk rootProject.ext.compileSdkVersion
+        }
+        if (project.android.hasProperty('compileOptions')) {
+          compileOptions {
+            sourceCompatibility JavaVersion.VERSION_17
+            targetCompatibility JavaVersion.VERSION_17
+          }
+        }
+      }
+    }
+  }
+}
+
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"

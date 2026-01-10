@@ -3,7 +3,7 @@
     "name": "MeepleUp",
     "slug": "meepleup",
     "scheme": "meepleup",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.rhyssmoker.meepleup",
-      "buildNumber": "2",
+      "buildNumber": "8",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -28,7 +28,7 @@
       }
     },
     "android": {
-      "versionCode": 2,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/app-icon.png",
         "backgroundColor": "#ffffff"
