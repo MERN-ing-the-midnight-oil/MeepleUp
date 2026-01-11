@@ -643,8 +643,13 @@ export const EventsProvider = ({ children }) => {
         throw new Error('User must be authenticated to create a meepleup');
       }
 
-      // In development mode, skip purchase check for easier testing
-      if (!__DEV__) {
+      // Check for bypass flag (useful for TestFlight/testing builds)
+      // Set EXPO_PUBLIC_BYPASS_PURCHASE_CHECK=true in EAS build secrets for test builds
+      const bypassPurchaseCheck = 
+        __DEV__ || 
+        process.env.EXPO_PUBLIC_BYPASS_PURCHASE_CHECK === 'true';
+
+      if (!bypassPurchaseCheck) {
         // Check if user has already purchased meepleup creation
         const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
         
@@ -656,13 +661,13 @@ export const EventsProvider = ({ children }) => {
           };
         }
       } else {
-        // In development, log that we're bypassing purchase check
-        console.log('[createEventWithPurchaseCheck] Development mode: bypassing purchase check');
+        // In development or when bypass is enabled, log that we're bypassing purchase check
+        console.log('[createEventWithPurchaseCheck] Purchase check bypassed (dev mode or EXPO_PUBLIC_BYPASS_PURCHASE_CHECK enabled)');
       }
 
-      // User has purchase (or in dev mode), proceed with event creation
+      // User has purchase (or bypass enabled), proceed with event creation
       try {
-        const event = await createEvent(eventData, true); // Skip purchase check since we already verified (or in dev mode)
+        const event = await createEvent(eventData, true); // Skip purchase check since we already verified (or bypass enabled)
         return { success: true, event };
       } catch (error) {
         console.error('[createEventWithPurchaseCheck] Error creating event:', error);
@@ -1461,6 +1466,22 @@ export const EventsProvider = ({ children }) => {
         }
 
         const groupRef = db.collection('gamingGroups').doc(eventId);
+        
+        // Check if the document exists before trying to update it
+        const groupDoc = await groupRef.get();
+        if (!groupDoc.exists) {
+          console.warn(`[EventsContext] Document ${eventId} does not exist in Firestore, only archiving locally`);
+          // Update local state only
+          setEvents((prev) =>
+            prev.map((event) =>
+              event.id === eventId
+                ? { ...event, isActive: false, deletedAt: new Date().toISOString() }
+                : event
+            )
+          );
+          return;
+        }
+
         await groupRef.update({
           isActive: false,
           deletedAt: firebase.firestore.Timestamp.now(),

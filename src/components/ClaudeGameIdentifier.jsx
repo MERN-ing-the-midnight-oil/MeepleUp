@@ -18,7 +18,10 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import Button from './common/Button';
 import { identifyGamesFromImage } from '../services/claudeVision';
-import { searchGamesByName, getGameDetails } from '../utils/api';
+import { getGameDetails } from '../utils/api';
+import { searchForAllGames as searchForAllGamesUtil } from '../utils/gameSearch';
+import { theme, commonStyles } from '../utils/theme';
+import GameSelectionModal from './GameSelectionModal';
 
 const defaultAudioState = {
   uri: null,
@@ -203,6 +206,11 @@ const ClaudeGameIdentifier = ({
   const [audioPermissionStatus, setAudioPermissionStatus] = useState(null);
   const [gameCandidates, setGameCandidates] = useState([]);
   const gameCandidatesRef = useRef([]); // Keep a ref for synchronous access
+  // TextListGameIdentifier-style state
+  const [formattedGames, setFormattedGames] = useState([]); // Array of game titles
+  const [searchResults, setSearchResults] = useState({}); // { gameTitle: [results] }
+  const [selectedGames, setSelectedGames] = useState({}); // { gameTitle: selectedBggId }
+  const [loadingGames, setLoadingGames] = useState(new Set()); // Track which games are still loading
   const [correctionCandidate, setCorrectionCandidate] = useState(null);
   
   // Keep ref in sync with state
@@ -1110,6 +1118,15 @@ const ClaudeGameIdentifier = ({
     [processBggQueue] // Include in dependencies so closure is fresh
   );
 
+  // Search function (shared utility from TextListGameIdentifier)
+  const searchForAllGames = useCallback(async (games) => {
+    await searchForAllGamesUtil(games, {
+      setLoadingGames,
+      setSearchResults,
+      setSelectedGames,
+    }, 'image_recognition');
+  }, []);
+
   const beginIdentificationWorkflow = useCallback(
     async (capturedPhoto, sessionKey) => {
       setIsProcessing(true);
@@ -1168,6 +1185,26 @@ const ClaudeGameIdentifier = ({
           return;
         }
 
+        // Convert to TextListGameIdentifier format
+        const gameTitles = filteredGames.map(game => game.title || 'Untitled');
+        setFormattedGames(gameTitles);
+        setSearchResults({});
+        setSelectedGames({});
+        setLoadingGames(new Set(gameTitles));
+        
+        if (__DEV__) {
+          console.log('[ClaudeGameIdentifier] Set formattedGames:', gameTitles.length, 'games');
+          console.log('[ClaudeGameIdentifier] GameSelectionModal should now be visible:', gameTitles.length > 0);
+          console.log('[ClaudeGameIdentifier] showCameraModal:', showCameraModal, 'showResultsModal:', showResultsModal);
+        }
+        
+        // Start searching for all games (async, don't await - let it run in background)
+        // Use the same search logic as TextListGameIdentifier
+        searchForAllGames(gameTitles).catch(err => {
+          console.error('[ClaudeGameIdentifier] Error in searchForAllGames:', err);
+        });
+
+        // OLD CODE - keeping for now but will be removed:
         filteredGames.forEach((game, index) => {
           try {
             const candidateId = `${sessionKey}-${index}-${Date.now()}`;
@@ -1254,7 +1291,7 @@ const ClaudeGameIdentifier = ({
         }
       }
     },
-    [audioClip, narrationText, scheduleBGGFetch]
+    [audioClip, narrationText, scheduleBGGFetch, searchForAllGames]
   );
 
   const handleCapturePhoto = async () => {
@@ -1283,10 +1320,8 @@ const ClaudeGameIdentifier = ({
       // Start identification workflow first
       beginIdentificationWorkflow(capturedPhoto, sessionKey);
       
-      // Close camera modal - results modal will be opened by parent
-      if (onCameraModalClose) {
-        onCameraModalClose();
-      }
+      // Don't close camera modal - games will be shown in the camera modal itself
+      // Camera modal will stay open to show the identified games
     } catch (captureError) {
       console.error('Error capturing photo:', captureError);
       setError('Unable to capture photo. Please try again.');
@@ -2502,11 +2537,12 @@ const ClaudeGameIdentifier = ({
 
   // Camera Modal - Just camera and capture button
   // Only check permissions when camera modal is shown - don't render permission UI unless modal is open
+  // Hide camera modal when GameSelectionModal should be visible (React Native doesn't support nested modals)
   const renderCameraModal = () => (
     <Modal
       animationType="slide"
       transparent={false}
-      visible={showCameraModal}
+      visible={showCameraModal && formattedGames.length === 0}
       onRequestClose={onCameraModalClose}
     >
       <View style={styles.cameraModalContainer}>
@@ -2694,7 +2730,7 @@ const ClaudeGameIdentifier = ({
           {isProcessing && (
             <View style={styles.processingRow}>
               <ActivityIndicator size="small" color="#4a90e2" />
-              <Text style={styles.processingText}>Claude is analysing your photo…</Text>
+              <Text style={styles.processingText}>Identifying game titles in your photo…</Text>
             </View>
           )}
 
@@ -2755,12 +2791,151 @@ const ClaudeGameIdentifier = ({
     </Modal>
   );
 
+  // Handlers for GameSelectionModal
+  const handleSelectGame = useCallback((gameTitle, bggId) => {
+    setSelectedGames(prev => ({
+      ...prev,
+      [gameTitle]: bggId,
+    }));
+  }, []);
+
+  const handleRemoveGame = useCallback((gameTitle) => {
+    setFormattedGames(prev => prev.filter(title => title !== gameTitle));
+    setSearchResults(prev => {
+      const updated = { ...prev };
+      delete updated[gameTitle];
+      return updated;
+    });
+    setSelectedGames(prev => {
+      const updated = { ...prev };
+      delete updated[gameTitle];
+      return updated;
+    });
+    setLoadingGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(gameTitle);
+      return updated;
+    });
+  }, []);
+
+  const handleAddSelectedGames = useCallback(async () => {
+    if (Object.keys(selectedGames).length === 0) {
+      Alert.alert('No Games Selected', 'Please select at least one game to add to your collection.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      for (const [gameTitle, bggId] of Object.entries(selectedGames)) {
+        if (!bggId) continue;
+
+        try {
+          const gameDetails = await getGameDetails(bggId);
+          if (gameDetails) {
+            const gameData = {
+              title: gameDetails.name || gameTitle,
+              bggId: bggId.toString(),
+              image: gameDetails.image || null,
+              thumbnail: gameDetails.thumbnail || null,
+              description: gameDetails.description || '',
+              yearPublished: gameDetails.yearPublished || null,
+              minPlayers: gameDetails.minPlayers || null,
+              maxPlayers: gameDetails.maxPlayers || null,
+              playingTime: gameDetails.playingTime || null,
+              mechanics: gameDetails.mechanics || null,
+              categories: gameDetails.categories || null,
+              publishers: gameDetails.publishers || null,
+              publisher: gameDetails.publisher || null,
+              complexity: gameDetails.complexity || gameDetails.averageWeight || null,
+              averageWeight: gameDetails.averageWeight || gameDetails.complexity || null,
+              source: 'image_recognition',
+            };
+
+            if (onAddToCollection) {
+              onAddToCollection(gameData);
+              successCount++;
+            }
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          console.error(`[ClaudeGameIdentifier] Error adding game ${gameTitle}:`, err);
+          failCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        Alert.alert(
+          'Games Added',
+          `Successfully added ${successCount} game${successCount !== 1 ? 's' : ''} to your collection.${failCount > 0 ? ` ${failCount} game${failCount !== 1 ? 's' : ''} failed.` : ''}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Reset state
+                setFormattedGames([]);
+                setSearchResults({});
+                setSelectedGames({});
+                setLoadingGames(new Set());
+                setIsProcessing(false);
+                if (onDone) {
+                  onDone();
+                }
+                if (onCameraModalClose) {
+                  onCameraModalClose();
+                }
+              },
+            },
+          ]
+        );
+      } else {
+        setError(`Failed to add games. ${failCount > 0 ? `${failCount} game${failCount !== 1 ? 's' : ''} failed.` : ''}`);
+      }
+    } catch (err) {
+      console.error('[ClaudeGameIdentifier] Error adding games:', err);
+      setError('Failed to add games. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [selectedGames, onAddToCollection, onDone, onCameraModalClose]);
+
+  // Render GameSelectionModal whenever we have formatted games, regardless of camera modal state
+  const gameSelectionModal = formattedGames.length > 0 ? (
+    <GameSelectionModal
+      visible={formattedGames.length > 0}
+      onClose={() => {
+        setFormattedGames([]);
+        setSearchResults({});
+        setSelectedGames({});
+        setLoadingGames(new Set());
+        if (onCameraModalClose) {
+          onCameraModalClose();
+        }
+      }}
+      title="Select Games from Image"
+      formattedGames={formattedGames}
+      searchResults={searchResults}
+      selectedGames={selectedGames}
+      loadingGames={loadingGames}
+      isProcessing={isProcessing && formattedGames.length > 0}
+      onSelectGame={handleSelectGame}
+      onRemoveGame={handleRemoveGame}
+      onAddGames={handleAddSelectedGames}
+    />
+  ) : null;
+
   // If using modals, render them
   if (showCameraModal || showResultsModal) {
     return (
       <>
         {renderCameraModal()}
-        {renderResultsModal()}
+        {/* renderResultsModal removed - games shown in camera modal instead */}
+        {gameSelectionModal}
         {renderMultipleResultsModal()}
         {/* Correction modal for editing games */}
         <Modal
@@ -2818,9 +2993,65 @@ const ClaudeGameIdentifier = ({
     );
   }
 
-  // Original full-screen view (fallback) - hidden when using modals
-  // Return null since we're using modal mode
-  return null;
+  // Render GameSelectionModal even when camera modal is closed (if we have formatted games)
+  // This allows the modal to show after submitting the list
+  return (
+    <>
+      {gameSelectionModal}
+      {/* Correction modal for editing games */}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={isCorrectionModalVisible}
+        onRequestClose={closeCorrectionModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Help us fix that title</Text>
+              <Pressable onPress={closeCorrectionModal} accessibilityRole="button">
+                <Text style={styles.modalCloseLink}>Close</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.modalDescription}>
+              Say or type the correct game name and we will search BoardGameGeek for a match.
+            </Text>
+            <TextInput
+              value={correctionQuery}
+              onChangeText={setCorrectionQuery}
+              placeholder="Correct game title"
+              style={styles.modalInput}
+            />
+            <View style={styles.modalActions}>
+              <Button
+                label={isCorrectionSearching ? 'Searching…' : 'Search BoardGameGeek'}
+                onPress={() => handleCorrectionSearch()}
+                disabled={isCorrectionSearching || !correctionQuery.trim()}
+              />
+            </View>
+            {correctionError ? <Text style={styles.correctionError}>{correctionError}</Text> : null}
+            {isCorrectionSearching ? (
+              <View style={styles.modalLoadingRow}>
+                <ActivityIndicator size="small" color="#4a90e2" />
+                <Text style={styles.modalLoadingText}>Fetching suggestions…</Text>
+              </View>
+            ) : null}
+            {correctionSuggestions.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
+                {correctionSuggestions.map((suggestion) => (
+                  <CorrectionSuggestionCard
+                    key={suggestion.id}
+                    suggestion={suggestion}
+                    onSelect={handleSuggestionSelect}
+                  />
+                ))}
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
 };
 
 const styles = StyleSheet.create({

@@ -635,10 +635,7 @@ const CollectionScreen = () => {
   const handleCameraModalClose = () => {
     console.log('[CollectionScreen] handleCameraModalClose called');
     setShowCameraModal(false);
-    // Open results modal after camera closes (photo was captured)
-    setTimeout(() => {
-      setShowResultsModal(true);
-    }, 300);
+    // Don't open results modal - games will be shown in the camera modal itself
   };
 
   const handleResultsModalClose = () => {

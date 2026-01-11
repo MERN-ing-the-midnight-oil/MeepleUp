@@ -686,6 +686,15 @@ const EventHub = () => {
     }).filter(Boolean);
   }, [futureEvents, pastEvents, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
 
+  // Optimistic state for calendar dates - updates immediately on long press
+  // This ensures the UI reflects changes instantly before Firestore syncs
+  const [optimisticCalendarDates, setOptimisticCalendarDates] = useState([]);
+
+  // Sync optimistic state with actual calendarDates when they update from Firestore
+  useEffect(() => {
+    setOptimisticCalendarDates(calendarDates);
+  }, [calendarDates]);
+
   // Initialize date detail form when selectedDateDetail changes
   useEffect(() => {
     if (selectedDateDetail) {
@@ -2528,10 +2537,12 @@ const EventHub = () => {
             onPress: () => {
               // Proceed with deletion by calling toggleDate logic
               const dateKey = getDateKey(date);
-              const newSelectedDates = calendarDates.filter(cd => {
+              const newSelectedDates = optimisticCalendarDates.filter(cd => {
                 const cdDate = cd.date instanceof Date ? cd.date : new Date(cd.date);
                 return getDateKey(cdDate) !== dateKey;
               });
+              // Update optimistic state immediately for instant UI feedback
+              setOptimisticCalendarDates(newSelectedDates);
               handleCalendarDatesChange(newSelectedDates);
             },
           },
@@ -2570,7 +2581,7 @@ const EventHub = () => {
         endTime,
       };
       
-      const newSelectedDates = [...calendarDates, newDateObj];
+      const newSelectedDates = [...optimisticCalendarDates, newDateObj];
       // Sort dates
       newSelectedDates.sort((a, b) => {
         const dateA = a.date instanceof Date ? a.date : new Date(a.date);
@@ -2578,9 +2589,11 @@ const EventHub = () => {
         return dateA.getTime() - dateB.getTime();
       });
       
+      // Update optimistic state immediately for instant UI feedback
+      setOptimisticCalendarDates(newSelectedDates);
       handleCalendarDatesChange(newSelectedDates);
     }
-  }, [isOrganizerOrCoOrganizer, calendarDates, event, handleCalendarDatesChange]);
+  }, [isOrganizerOrCoOrganizer, optimisticCalendarDates, event, handleCalendarDatesChange]);
 
   // Helper to schedule delayed notification for announcement edits
   const scheduleAnnouncementNotification = useCallback((announcementId, isNew = false) => {
@@ -3332,7 +3345,7 @@ const EventHub = () => {
             </View>
           )}
           <CalendarDatePicker
-            selectedDates={calendarDates}
+            selectedDates={optimisticCalendarDates}
             onDatesChange={handleCalendarDatesChange}
             onDateLongPress={handleCalendarDateLongPress}
             usualStartTime={event?.usualStartTime ? new Date(event.usualStartTime) : null}
