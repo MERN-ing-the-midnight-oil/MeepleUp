@@ -3231,10 +3231,12 @@ const EventHub = () => {
             setCollapsedEventCards={setCollapsedEventCardsWithLogging}
           />
           
-          {(event?.eventDates && Array.isArray(event.eventDates) && event.eventDates.length > 0) || event?.scheduledFor ? (
-            <Text style={styles.scheduleValue}>No upcoming dates scheduled</Text>
-          ) : (
-            <Text style={styles.scheduleValue}>Date and time to be announced</Text>
+          {futureEvents.length === 0 && (
+            <Text style={styles.scheduleValue}>
+              {(!event?.eventDates || event.eventDates.length === 0) && !event?.scheduledFor
+                ? 'Date and time to be announced'
+                : 'No upcoming dates scheduled'}
+            </Text>
           )}
         </View>
 
@@ -3325,7 +3327,7 @@ const EventHub = () => {
           {isOrganizerOrCoOrganizer && (
             <View style={styles.longPressInstructionBox}>
               <Text style={styles.longPressInstructionText}>
-                <Text style={styles.longPressInstructionBold}>Long press</Text> on a date to add or delete an event date.
+                <Text style={styles.longPressInstructionBold}>Long press</Text> on a date to add or remove an event date.
               </Text>
             </View>
           )}

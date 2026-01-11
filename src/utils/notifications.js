@@ -707,6 +707,76 @@ export const sendRSVPUpdateEmail = async (memberId, organizerName, newStatus, da
 };
 
 /**
+ * Send email notification when a MeepleUp is archived
+ * Note: Requires a Cloud Function 'sendMeepleupArchiveEmail' to be deployed
+ * @param {string} memberId - Member user ID to send email to
+ * @param {string} organizerName - Name of the organizer
+ * @param {string} groupId - MeepleUp/Group ID
+ * @param {string} groupName - MeepleUp name
+ * @returns {Promise<void>}
+ */
+export const sendMeepleupArchiveEmail = async (memberId, organizerName, groupId, groupName) => {
+  if (!memberId || !db) {
+    return;
+  }
+
+  try {
+    const memberDoc = await db.collection('users').doc(memberId).get();
+    if (!memberDoc.exists) {
+      console.warn(`Cannot send email: user ${memberId} not found`);
+      return;
+    }
+
+    const memberData = memberDoc.data();
+    const memberEmail = memberData.email;
+    
+    if (!memberEmail) {
+      console.warn(`Cannot send email: user ${memberId} has no email`);
+      return;
+    }
+
+    // Check if user has email notifications enabled for meepleup changes
+    const preferences = await getUserNotificationPreferences(memberId);
+    if (!preferences?.meepleupChangesEmail) {
+      // User has disabled email notifications for meepleup changes
+      return;
+    }
+
+    const meepleUpName = groupName || 'your MeepleUp';
+    const projectId = firebase.apps[0]?.options?.projectId || 'meepleup-951a1';
+    const functionsUrl = `https://us-central1-${projectId}.cloudfunctions.net/sendMeepleupArchiveEmail`;
+    
+    try {
+      const response = await fetch(functionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: memberEmail,
+          subject: `${organizerName} archived ${meepleUpName}`,
+          organizerName: organizerName,
+          meepleUpName: meepleUpName,
+          groupId: groupId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Email service returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json().catch(() => ({}));
+      console.log(`Archive email sent to ${memberEmail}`, result);
+    } catch (error) {
+      console.warn('Could not send archive email (Cloud Function may not be deployed):', error.message);
+    }
+  } catch (error) {
+    console.error('Error in sendMeepleupArchiveEmail:', error);
+  }
+};
+
+/**
  * Send push notification to a user
  * @param {string} userId - User ID to send notification to
  * @param {string} message - Notification message

@@ -19,13 +19,14 @@ import JoinForm from '../components/JoinForm';
 import EventCard from '../components/EventCard';
 import UserProfileModal from '../components/UserProfileModal';
 import MeepleupPurchaseModal from '../components/MeepleupPurchaseModal';
+import ArchivedMeepleUpsModal from '../components/ArchivedMeepleUpsModal';
 import AppTour, { useTour } from '../components/AppTour';
 
 const Onboarding = () => {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const { user, updateUser } = useAuth();
-  const { joinEventWithCode, createEvent, createEventWithPurchaseCheck, getUserEvents, leaveEvent, getEventById, getUserArchivedEvents, loading: eventsLoading, events } = useEvents();
+  const { joinEventWithCode, createEvent, createEventWithPurchaseCheck, getUserEvents, leaveEvent, archiveEvent, deleteEvent, getEventById, getUserArchivedEvents, loading: eventsLoading, events } = useEvents();
   const { getUserCollection, initialised: collectionsInitialised, loading: collectionsLoading } = useCollections();
   const [hasCheckedRedirect, setHasCheckedRedirect] = useState(false);
   const redirectTimeoutRef = useRef(null);
@@ -54,8 +55,8 @@ const Onboarding = () => {
   const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
-  const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [showArchivedMeepleUpsModal, setShowArchivedMeepleUpsModal] = useState(false);
   const [pendingEventData, setPendingEventData] = useState(null); // Store event data when purchase is required
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -304,7 +305,57 @@ const Onboarding = () => {
     }
   };
 
+  const handleLeaveEvent = async (eventId) => {
+    const userIdentifier = user?.uid || user?.id;
+    if (!userIdentifier) {
+      Alert.alert('Error', 'You must be signed in to leave a MeepleUp.');
+      return;
+    }
 
+    try {
+      await leaveEvent(eventId);
+      Alert.alert('Left MeepleUp', 'You have successfully left the MeepleUp.');
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to leave MeepleUp. Please try again.');
+      console.error('Error leaving MeepleUp:', error);
+    }
+  };
+
+  const handleArchiveEvent = async (eventId) => {
+    const userIdentifier = user?.uid || user?.id;
+    if (!userIdentifier) {
+      Alert.alert('Error', 'You must be signed in to archive a MeepleUp.');
+      return;
+    }
+
+    try {
+      await archiveEvent(eventId, userIdentifier);
+      Alert.alert('MeepleUp Archived', 'The MeepleUp has been archived. All members have been notified.');
+    } catch (error) {
+      Alert.alert('Error', error.message || 'Failed to archive MeepleUp. Please try again.');
+      console.error('Error archiving MeepleUp:', error);
+    }
+  };
+
+  const handleDeleteEvent = async (eventId, currentUserId) => {
+    console.log('[Onboarding] handleDeleteEvent called:', eventId, currentUserId);
+    const userIdentifier = currentUserId || user?.uid || user?.id;
+    if (!userIdentifier) {
+      console.warn('[Onboarding] No user identifier found');
+      Alert.alert('Error', 'You must be signed in to delete a MeepleUp.');
+      return;
+    }
+
+    try {
+      console.log('[Onboarding] Calling deleteEvent with:', eventId, userIdentifier);
+      await deleteEvent(eventId, userIdentifier);
+      console.log('[Onboarding] deleteEvent completed successfully');
+      // Alert is shown in the modal
+    } catch (error) {
+      console.error('[Onboarding] Error in handleDeleteEvent:', error);
+      throw error; // Let the modal handle the error
+    }
+  };
 
   const handleCreateEvent = async () => {
     if (!user) {
@@ -702,12 +753,15 @@ const Onboarding = () => {
                     })}
                     isOrganizer={isOrganizer}
                     style={styles.eventCard}
+                    currentUserId={userIdentifier}
                     memberAvatars={memberAvatars}
                     memberNames={memberNames}
                     onMemberPress={(userId, userName, avatarUrl) => {
                       setSelectedUserForProfile({ userId, userName, avatarUrl });
                     }}
                     navigation={navigation}
+                    onLeave={handleLeaveEvent}
+                    onArchive={handleArchiveEvent}
                   />
                 );
               })
@@ -732,8 +786,8 @@ const Onboarding = () => {
                 <View style={styles.eventsSection}>
                   <TouchableOpacity
                     onPress={() => {
-                      // Toggle showing archived events
-                      setShowArchivedEvents(!showArchivedEvents);
+                      // Open the archived MeepleUps modal
+                      setShowArchivedMeepleUpsModal(true);
                     }}
                     style={styles.archivedHeader}
                   >
@@ -741,42 +795,11 @@ const Onboarding = () => {
                       📦 Archived MeepleUps ({organizerArchivedEvents.length})
                     </Text>
                     <MaterialIcons 
-                      name={showArchivedEvents ? "expand-less" : "expand-more"} 
+                      name="arrow-forward" 
                       size={24} 
                       color={theme.colors.textSecondary} 
                     />
                   </TouchableOpacity>
-                  
-                  {showArchivedEvents && organizerArchivedEvents.map((event) => {
-                    if (!event || !event.id) return null;
-                    const organizer = organizerData[event.id] || {};
-                    const eventMemberData = memberData[event.id] || {};
-                    
-                    const memberAvatars = {};
-                    const memberNames = {};
-                    Object.keys(eventMemberData).forEach((userId) => {
-                      memberAvatars[userId] = eventMemberData[userId]?.avatarUrl || null;
-                      memberNames[userId] = eventMemberData[userId]?.name || 'Unknown';
-                    });
-                    
-                    return (
-                      <EventCard
-                        key={event.id}
-                        event={event}
-                        onPress={() => navigation.navigate('EventHub', {
-                          eventId: event.id,
-                        })}
-                        isOrganizer={true}
-                        style={[styles.eventCard, styles.archivedCard]}
-                        memberAvatars={memberAvatars}
-                        memberNames={memberNames}
-                        onMemberPress={(userId, userName, avatarUrl) => {
-                          setSelectedUserForProfile({ userId, userName, avatarUrl });
-                        }}
-                        navigation={navigation}
-                      />
-                    );
-                  })}
                 </View>
               );
             }
@@ -828,6 +851,19 @@ const Onboarding = () => {
         onClose={() => setShowTour(false)}
         currentScreen="Onboarding"
       />
+      {(() => {
+        const userIdentifier = user?.uid || user?.id;
+        const archivedEvents = userIdentifier ? getUserArchivedEvents() : [];
+        return (
+          <ArchivedMeepleUpsModal
+            isOpen={showArchivedMeepleUpsModal}
+            onClose={() => setShowArchivedMeepleUpsModal(false)}
+            archivedEvents={archivedEvents}
+            onDelete={handleDeleteEvent}
+            currentUserId={userIdentifier}
+          />
+        );
+      })()}
       </>
     );
   }

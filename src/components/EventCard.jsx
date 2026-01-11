@@ -1,5 +1,5 @@
 import React, { memo, useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, Image, TouchableOpacity, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Image, TouchableOpacity, Animated, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
@@ -23,6 +23,8 @@ const EventCard = memo(({
   memberNames = {},
   onMemberPress = null,
   navigation = null, // Navigation object for icon links
+  onLeave = null, // Function to handle leaving the meepleup
+  onArchive = null, // Function to handle archiving the meepleup
 }) => {
   const memberCount = (event.members || []).filter(
     (member) => {
@@ -348,6 +350,58 @@ const EventCard = memo(({
           />
         </View>
       )}
+
+      {/* Leave/Archive Action Buttons */}
+      {currentUserId && isMember && (
+        <View style={styles.actionButtonsWrapper}>
+          {!isOrganizer && onLeave && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                Alert.alert(
+                  'Leave MeepleUp?',
+                  `Are you sure you want to leave "${event.name}"? You may need a new passphrase to rejoin.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Leave',
+                      style: 'destructive',
+                      onPress: () => onLeave(event.id),
+                    },
+                  ]
+                );
+              }}
+            >
+              <MaterialIcons name="exit-to-app" size={18} color={theme.colors.meepleRed} />
+              <Text style={styles.actionButtonText}>Leave</Text>
+            </TouchableOpacity>
+          )}
+          {isOrganizer && onArchive && event.isActive && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                Alert.alert(
+                  'Archive MeepleUp?',
+                  `Are you sure you want to archive "${event.name}"? All members will be notified. You can restore it later.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Archive',
+                      style: 'destructive',
+                      onPress: () => onArchive(event.id),
+                    },
+                  ]
+                );
+              }}
+            >
+              <MaterialIcons name="archive" size={18} color={theme.colors.textSecondary} />
+              <Text style={styles.actionButtonText}>Archive</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </Animated.View>
   );
 }, (prevProps, nextProps) => {
@@ -365,10 +419,13 @@ const EventCard = memo(({
     prevProps.event.name === nextProps.event.name &&
     prevProps.event.scheduledFor === nextProps.event.scheduledFor &&
     prevProps.event.rsvpSettings === nextProps.event.rsvpSettings &&
+    prevProps.event.isActive === nextProps.event.isActive &&
     prevProps.currentUserId === nextProps.currentUserId &&
     prevRSVP === nextRSVP &&
     prevProps.isOrganizer === nextProps.isOrganizer &&
     prevProps.onRSVP === nextProps.onRSVP &&
+    prevProps.onLeave === nextProps.onLeave &&
+    prevProps.onArchive === nextProps.onArchive &&
     JSON.stringify(prevProps.memberAvatars) === JSON.stringify(nextProps.memberAvatars) &&
     JSON.stringify(prevProps.memberNames) === JSON.stringify(nextProps.memberNames)
   );
@@ -584,6 +641,31 @@ const styles = StyleSheet.create({
   },
   rsvpButton: {
     flex: 1,
+  },
+  actionButtonsWrapper: {
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.woodMedium,
+    backgroundColor: theme.colors.woodLight,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.woodMedium,
+    backgroundColor: '#fff',
+  },
+  actionButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.textPrimary,
   },
 });
 

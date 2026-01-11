@@ -318,8 +318,7 @@ const ClaudeGameIdentifier = ({
   const [isMultipleResultsModalVisible, setIsMultipleResultsModalVisible] = useState(false);
   const [multipleResultsOptions, setMultipleResultsOptions] = useState([]);
   const [isLoadingMultipleResults, setIsLoadingMultipleResults] = useState(false);
-  const [carouselIndex, setCarouselIndex] = useState(0);
-  const carouselFlatListRef = useRef(null);
+  const [selectedResultId, setSelectedResultId] = useState(null);
 
   // Only request camera permissions when the camera modal is shown
   useEffect(() => {
@@ -1956,6 +1955,7 @@ const ClaudeGameIdentifier = ({
       setIsMultipleResultsModalVisible(false);
       setMultipleResultsOptions([]);
       setMultipleResultsCandidate(null);
+      setSelectedResultId(null);
 
       try {
         let details = null;
@@ -2609,7 +2609,7 @@ const ClaudeGameIdentifier = ({
                   setIsMultipleResultsModalVisible(false);
                   setMultipleResultsOptions([]);
                   setMultipleResultsCandidate(null);
-                  setCarouselIndex(0);
+                  setSelectedResultId(null);
                 }}
                 accessibilityRole="button"
               >
@@ -2617,7 +2617,7 @@ const ClaudeGameIdentifier = ({
               </Pressable>
             </View>
             <Text style={styles.modalDescription}>
-              Swipe through titles or use arrows to browse. Tap the checkmark to select.
+              Scroll horizontally to browse all matches. Tap a game to select it.
             </Text>
             {isLoadingMultipleResults ? (
               <View style={styles.modalLoadingRow}>
@@ -2625,108 +2625,49 @@ const ClaudeGameIdentifier = ({
                 <Text style={styles.modalLoadingText}>Loading game details…</Text>
               </View>
             ) : multipleResultsOptions.length > 0 ? (
-              <View style={styles.carouselContainer}>
-                {/* Left Arrow */}
-                {carouselIndex > 0 && (
-                  <Pressable
-                    style={styles.carouselArrow}
-                    onPress={() => {
-                      const newIndex = Math.max(0, carouselIndex - 1);
-                      setCarouselIndex(newIndex);
-                      carouselFlatListRef.current?.scrollToIndex({ index: newIndex, animated: true });
-                    }}
-                  >
-                    <Text style={styles.carouselArrowText}>←</Text>
-                  </Pressable>
-                )}
-                
-                {/* Carousel Content */}
-                <View style={styles.carouselContent}>
-                  <FlatList
-                    ref={(ref) => {
-                      if (ref) {
-                        carouselFlatListRef.current = ref;
-                      }
-                    }}
-                    data={multipleResultsOptions}
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    keyExtractor={(item, index) => item.id?.toString() || index.toString()}
-                    onMomentumScrollEnd={(event) => {
-                      const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
-                      setCarouselIndex(index);
-                    }}
-                    snapToInterval={300}
-                    snapToAlignment="center"
-                    decelerationRate="fast"
-                    renderItem={({ item: option, index }) => (
-                      <View style={styles.carouselCard}>
-                        <View style={styles.carouselCardContent}>
-                          {option.thumbnail ? (
-                            <Image
-                              source={{ uri: option.thumbnail }}
-                              style={styles.carouselThumbnail}
-                            />
-                          ) : (
-                            <View style={styles.carouselThumbnailPlaceholder}>
-                              <Text style={styles.carouselPlaceholderText}>
-                                {option.name?.charAt(0)?.toUpperCase() || '?'}
-                              </Text>
-                            </View>
-                          )}
-                          <View style={styles.carouselInfo}>
-                            <Text style={styles.carouselName} numberOfLines={3}>
-                              {option.name}
-                            </Text>
-                            {option.yearPublished ? (
-                              <Text style={styles.carouselYear}>
-                                {option.yearPublished}
-                              </Text>
-                            ) : null}
-                            {option.rank && option.rank !== '0' ? (
-                              <Text style={styles.carouselRank}>
-                                BGG Rank: #{option.rank}
-                              </Text>
-                            ) : null}
-                          </View>
-                          <Pressable
-                            style={styles.carouselCheckmarkButton}
-                            onPress={() => {
-                              if (multipleResultsCandidate && multipleResultsCandidate.id) {
-                                handleSelectFromMultipleResults(
-                                  option,
-                                  multipleResultsCandidate.id,
-                                  activeSessionRef.current
-                                );
-                              }
-                            }}
-                          >
-                            <Text style={styles.carouselCheckmarkText}>✓</Text>
-                          </Pressable>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll}>
+                {multipleResultsOptions.map((option) => {
+                  const isSelected = selectedResultId === option.id;
+                  return (
+                    <Pressable
+                      key={option.id}
+                      style={[
+                        styles.resultCard,
+                        isSelected && styles.resultCardSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedResultId(option.id);
+                        if (multipleResultsCandidate && multipleResultsCandidate.id) {
+                          handleSelectFromMultipleResults(
+                            option,
+                            multipleResultsCandidate.id,
+                            activeSessionRef.current
+                          );
+                        }
+                      }}
+                    >
+                      {option.thumbnail ? (
+                        <Image source={{ uri: option.thumbnail }} style={styles.resultThumbnail} />
+                      ) : (
+                        <View style={styles.resultThumbnailPlaceholder}>
+                          <Text style={styles.resultPlaceholderText}>BGG</Text>
                         </View>
-                        <Text style={styles.carouselCounter}>
-                          {index + 1} of {multipleResultsOptions.length}
-                        </Text>
-                      </View>
-                    )}
-                  />
-                </View>
-                
-                {/* Right Arrow */}
-                {carouselIndex < multipleResultsOptions.length - 1 && (
-                  <Pressable
-                    style={styles.carouselArrow}
-                    onPress={() => {
-                      const newIndex = Math.min(multipleResultsOptions.length - 1, carouselIndex + 1);
-                      setCarouselIndex(newIndex);
-                      carouselFlatListRef.current?.scrollToIndex({ index: newIndex, animated: true });
-                    }}
-                  >
-                    <Text style={styles.carouselArrowText}>→</Text>
-                  </Pressable>
-                )}
-              </View>
+                      )}
+                      <Text style={styles.resultName} numberOfLines={2}>
+                        {option.name}
+                      </Text>
+                      {option.yearPublished && (
+                        <Text style={styles.resultYear}>{option.yearPublished}</Text>
+                      )}
+                      {isSelected && (
+                        <View style={styles.selectedIndicator}>
+                          <Text style={styles.selectedIndicatorText}>✓</Text>
+                        </View>
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
             ) : null}
           </View>
         </View>
@@ -3472,211 +3413,70 @@ const styles = StyleSheet.create({
     marginRight: 12,
     backgroundColor: '#e0e0e0',
   },
-  // Carousel styles
-  carouselContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    minHeight: 300,
-  },
-  carouselArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4a90e2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  carouselArrowText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  carouselContent: {
-    flex: 1,
-    height: 300,
-  },
-  carouselCard: {
-    width: 280,
-    marginHorizontal: 10,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  carouselCardContent: {
-    alignItems: 'center',
-  },
-  carouselThumbnail: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  carouselThumbnailPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    backgroundColor: '#e0e0e0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  carouselPlaceholderText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#999',
-  },
-  carouselInfo: {
-    alignItems: 'center',
-    marginBottom: 12,
-    minHeight: 80,
-  },
-  carouselName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  carouselYear: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  carouselRank: {
-    fontSize: 12,
-    color: '#999',
-  },
-  carouselCheckmarkButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#2ecc71',
-    justifyContent: 'center',
-    alignItems: 'center',
+  // Result card styles (matching TextListGameIdentifier)
+  resultsScroll: {
     marginTop: 8,
   },
-  carouselCheckmarkText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  carouselCounter: {
-    textAlign: 'center',
-    marginTop: 12,
-    fontSize: 12,
-    color: '#999',
-  },
-  // Carousel styles
-  carouselContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 16,
-    minHeight: 300,
-  },
-  carouselArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4a90e2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  carouselArrowText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  carouselContent: {
-    flex: 1,
-    height: 300,
-  },
-  carouselCard: {
-    width: 280,
-    marginHorizontal: 10,
+  resultCard: {
+    width: 120,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: '#8B7355',
+    borderRadius: 8,
+    padding: 12,
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    position: 'relative',
   },
-  carouselCardContent: {
-    alignItems: 'center',
+  resultCardSelected: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#F5E6D3',
   },
-  carouselThumbnail: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    marginBottom: 12,
+  resultThumbnail: {
+    width: '100%',
+    height: 100,
+    borderRadius: 6,
+    marginBottom: 8,
+    backgroundColor: '#F5E6D3',
   },
-  carouselThumbnailPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    backgroundColor: '#e0e0e0',
+  resultThumbnailPlaceholder: {
+    width: '100%',
+    height: 100,
+    borderRadius: 6,
+    backgroundColor: '#F5E6D3',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  carouselPlaceholderText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#999',
-  },
-  carouselInfo: {
-    alignItems: 'center',
-    marginBottom: 12,
-    minHeight: 80,
-  },
-  carouselName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
     marginBottom: 8,
   },
-  carouselYear: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  carouselRank: {
+  resultPlaceholderText: {
     fontSize: 12,
-    color: '#999',
-  },
-  carouselCheckmarkButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#2ecc71',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  carouselCheckmarkText: {
-    color: '#fff',
-    fontSize: 24,
+    color: '#666',
     fontWeight: 'bold',
   },
-  carouselCounter: {
-    textAlign: 'center',
-    marginTop: 12,
+  resultName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#222',
+    marginBottom: 8,
+  },
+  resultYear: {
     fontSize: 12,
-    color: '#999',
+    color: '#666',
+  },
+  selectedIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#4CAF50',
+    borderRadius: 18,
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectedIndicatorText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   multipleResultThumbnailPlaceholder: {
     width: 60,
@@ -3836,5 +3636,7 @@ const styles = StyleSheet.create({
 });
 
 export default ClaudeGameIdentifier;
+
+
 
 

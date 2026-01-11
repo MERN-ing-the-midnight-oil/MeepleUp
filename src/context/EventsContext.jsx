@@ -643,20 +643,26 @@ export const EventsProvider = ({ children }) => {
         throw new Error('User must be authenticated to create a meepleup');
       }
 
-      // Check if user has already purchased meepleup creation
-      const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
-      
-      if (!purchaseStatus.hasPurchase) {
-        // User needs to purchase - return special error to trigger purchase flow in UI
-        return {
-          requiresPurchase: true,
-          error: 'PURCHASE_REQUIRED',
-        };
+      // In development mode, skip purchase check for easier testing
+      if (!__DEV__) {
+        // Check if user has already purchased meepleup creation
+        const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
+        
+        if (!purchaseStatus.hasPurchase) {
+          // User needs to purchase - return special error to trigger purchase flow in UI
+          return {
+            requiresPurchase: true,
+            error: 'PURCHASE_REQUIRED',
+          };
+        }
+      } else {
+        // In development, log that we're bypassing purchase check
+        console.log('[createEventWithPurchaseCheck] Development mode: bypassing purchase check');
       }
 
-      // User has purchase, proceed with event creation
+      // User has purchase (or in dev mode), proceed with event creation
       try {
-        const event = await createEvent(eventData, true); // Skip purchase check since we already verified
+        const event = await createEvent(eventData, true); // Skip purchase check since we already verified (or in dev mode)
         return { success: true, event };
       } catch (error) {
         console.error('[createEventWithPurchaseCheck] Error creating event:', error);
@@ -1152,6 +1158,18 @@ export const EventsProvider = ({ children }) => {
     [getEventById],
   );
 
+  // Helper to get date key from event date
+  const getDateKey = (eventDate) => {
+    if (!eventDate) return 'default';
+    const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
+    // Format using local date components to avoid timezone shifts
+    date.setHours(0, 0, 0, 0);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`; // YYYY-MM-DD format using local date
+  };
+
   const updateEvent = useCallback(
     async (eventId, updates) => {
       console.log('[EventsContext] ========== updateEvent CALLED ==========');
@@ -1173,6 +1191,71 @@ export const EventsProvider = ({ children }) => {
       
       try {
         const groupRef = db.collection('gamingGroups').doc(eventId);
+        
+        // If eventDates are being updated, check for deleted dates and clean up RSVPs
+        if (updates.eventDates && Array.isArray(updates.eventDates)) {
+          // Get current event dates from Firestore
+          const currentEventDoc = await groupRef.get();
+          const currentEventData = currentEventDoc.exists ? currentEventDoc.data() : {};
+          const currentEventDates = currentEventData.eventDates || [];
+          
+          // Extract date keys from current and new event dates
+          const currentDateKeys = new Set(
+            currentEventDates.map((ed) => {
+              const date = ed.date?.toDate?.() || ed.date;
+              return getDateKey(date);
+            })
+          );
+          
+          const newDateKeys = new Set(
+            updates.eventDates.map((ed) => {
+              const date = ed.date instanceof Date ? ed.date : new Date(ed.date);
+              return getDateKey(date);
+            })
+          );
+          
+          // Find deleted date keys (in current but not in new)
+          const deletedDateKeys = Array.from(currentDateKeys).filter((key) => !newDateKeys.has(key));
+          
+          // Clean up RSVPs for deleted dates
+          if (deletedDateKeys.length > 0) {
+            console.log('[EventsContext] Cleaning up RSVPs for deleted dates:', deletedDateKeys);
+            
+            // Get all members
+            const membersRef = groupRef.collection('members');
+            const membersSnapshot = await membersRef.get();
+            
+            // Update each member's RSVPs to remove deleted date keys
+            const updatePromises = [];
+            membersSnapshot.forEach((memberDoc) => {
+              const memberData = memberDoc.data();
+              const rsvpStatuses = memberData.rsvpStatuses || {};
+              
+              // Only update if this member has RSVPs for any of the deleted dates
+              const hasDeletedDateRSVPs = deletedDateKeys.some((dateKey) => rsvpStatuses.hasOwnProperty(dateKey));
+              
+              if (hasDeletedDateRSVPs) {
+                // Create updated rsvpStatuses without deleted date keys
+                const updatedRSVPStatuses = { ...rsvpStatuses };
+                deletedDateKeys.forEach((dateKey) => {
+                  delete updatedRSVPStatuses[dateKey];
+                });
+                
+                // Update member document
+                updatePromises.push(
+                  memberDoc.ref.update({
+                    rsvpStatuses: updatedRSVPStatuses,
+                    rsvpUpdatedAt: firebase.firestore.Timestamp.now(),
+                  })
+                );
+              }
+            });
+            
+            // Wait for all member updates to complete
+            await Promise.all(updatePromises);
+            console.log('[EventsContext] ✅ Cleaned up RSVPs for', deletedDateKeys.length, 'deleted date(s)');
+          }
+        }
         
         // Convert eventDates to Firestore Timestamps if present
         const firestoreUpdates = { ...updates };
@@ -1260,18 +1343,6 @@ export const EventsProvider = ({ children }) => {
     },
     [db],
   );
-
-  // Helper to get date key from event date
-  const getDateKey = (eventDate) => {
-    if (!eventDate) return 'default';
-    const date = eventDate instanceof Date ? eventDate : new Date(eventDate);
-    // Format using local date components to avoid timezone shifts
-    date.setHours(0, 0, 0, 0);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`; // YYYY-MM-DD format using local date
-  };
 
   const updateMemberRSVP = useCallback(
     async (eventId, userId, status, eventDate = null) => {
@@ -1418,7 +1489,7 @@ export const EventsProvider = ({ children }) => {
             isSystemMessage: true, // Mark as system message
           });
 
-          // Notify members about the archive
+          // Notify members about the archive (push notifications)
           try {
             const { notifyDiscussionActivity } = await import('../utils/notifications');
             await notifyDiscussionActivity(eventId, organizerUserId || user?.uid || user?.id, {
@@ -1429,6 +1500,40 @@ export const EventsProvider = ({ children }) => {
           } catch (notifError) {
             console.warn('[EventsContext] Error sending archive notification:', notifError);
             // Don't fail the archive if notification fails
+          }
+
+          // Send email notifications to members
+          try {
+            const { sendMeepleupArchiveEmail } = await import('../utils/notifications');
+            const membersSnapshot = await groupRef.collection('members').get();
+            
+            // Send emails to all members (except the organizer) who have email notifications enabled
+            const emailPromises = membersSnapshot.docs.map(async (memberDoc) => {
+              const memberData = memberDoc.data();
+              const memberId = memberData.userId || memberDoc.id;
+              
+              // Don't send email to the organizer
+              if (memberId === (organizerUserId || user?.uid || user?.id)) {
+                return;
+              }
+              
+              try {
+                await sendMeepleupArchiveEmail(
+                  memberId,
+                  organizerName,
+                  eventId,
+                  event.name
+                );
+              } catch (emailError) {
+                console.warn(`[EventsContext] Error sending archive email to ${memberId}:`, emailError);
+                // Don't fail the archive if email fails
+              }
+            });
+            
+            await Promise.all(emailPromises);
+          } catch (emailError) {
+            console.warn('[EventsContext] Error sending archive emails:', emailError);
+            // Don't fail the archive if email sending fails
           }
         } catch (messageError) {
           console.warn('[EventsContext] Error posting archive message:', messageError);
@@ -1626,13 +1731,66 @@ export const EventsProvider = ({ children }) => {
     [db, getEventById, user],
   );
 
+  const deleteEvent = useCallback(
+    async (eventId, organizerUserId) => {
+      if (!db) return;
+      try {
+        const event = getEventById(eventId);
+        if (!event) {
+          throw new Error('Event not found');
+        }
+
+        // Only the organizer can delete
+        if (event.organizerId !== organizerUserId) {
+          throw new Error('Only the organizer can delete a MeepleUp');
+        }
+
+        // Only allow deletion of archived events
+        if (event.isActive) {
+          throw new Error('MeepleUp must be archived before it can be deleted');
+        }
+
+        const groupRef = db.collection('gamingGroups').doc(eventId);
+
+        // Delete the main document first (this is the critical operation)
+        // Note: Subcollections (members, posts, etc.) are not automatically deleted
+        // These will remain in Firestore but won't be accessible since the parent doc is deleted
+        // A Cloud Function could be used to clean up subcollections if needed
+        await groupRef.delete();
+
+        // Clean up the current user's groupIds (if they're in the member list)
+        // Note: We can't update other users' documents from the client due to security rules
+        // Other members' groupIds will be cleaned up when they next access the app or via a Cloud Function
+        try {
+          const currentUserId = organizerUserId;
+          if (currentUserId) {
+            const userRef = db.collection('users').doc(currentUserId);
+            await userRef.update({
+              groupIds: firebase.firestore.FieldValue.arrayRemove(eventId),
+            });
+          }
+        } catch (cleanupError) {
+          // Don't fail the deletion if cleanup fails - the document is already deleted
+          console.warn('[EventsContext] Error cleaning up user groupIds:', cleanupError);
+        }
+
+        // Update local state
+        setEvents((prev) => prev.filter((event) => event.id !== eventId));
+      } catch (error) {
+        console.error('[EventsContext] Error deleting event:', error);
+        throw error;
+      }
+    },
+    [db, getEventById],
+  );
+
   const getUserArchivedEvents = useCallback(() => {
     if (!user) return [];
     const userId = user.uid || user.id;
     return events.filter(
       (event) =>
         !event.isActive &&
-        event.members.some((member) => member.userId === userId)
+        event.organizerId === userId // Only show archived events where user is organizer
     );
   }, [events, user]);
 
@@ -1654,6 +1812,7 @@ export const EventsProvider = ({ children }) => {
       updateEventSchedule,
       archiveEvent,
       unarchiveEvent,
+      deleteEvent,
       addJoinCode,
       deleteJoinCode,
       updateMemberRole,
@@ -1681,6 +1840,7 @@ export const EventsProvider = ({ children }) => {
       updateEventSchedule,
       archiveEvent,
       unarchiveEvent,
+      deleteEvent,
       addJoinCode,
       deleteJoinCode,
       updateMemberRole,
