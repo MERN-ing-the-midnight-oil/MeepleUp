@@ -212,7 +212,7 @@ const ClaudeGameIdentifier = ({
   const [searchResults, setSearchResults] = useState({}); // { gameTitle: [results] }
   const [selectedGames, setSelectedGames] = useState({}); // { gameTitle: selectedBggId }
   const [loadingGames, setLoadingGames] = useState(new Set()); // Track which games are still loading
-  const [stuckGames, setStuckGames] = useState(new Set()); // Track which games have been searching > 10 seconds
+  const [stuckGames, setStuckGames] = useState(new Set()); // Track which games have been searching > 30 seconds
   const [skippedGames, setSkippedGames] = useState(new Set()); // Track which games user chose to skip
   const [gameSearchStartTimes, setGameSearchStartTimes] = useState({}); // Track when each game search started
   const [correctionCandidate, setCorrectionCandidate] = useState(null);
@@ -369,7 +369,7 @@ const ClaudeGameIdentifier = ({
     };
   }, [clearPendingFetchTimers]);
 
-  // Monitor for stuck games (searching for > 10 seconds)
+  // Monitor for stuck games (searching for > 30 seconds)
   useEffect(() => {
     if (Object.keys(gameSearchStartTimes).length === 0) return;
     
@@ -379,7 +379,11 @@ const ClaudeGameIdentifier = ({
       
       Object.entries(gameSearchStartTimes).forEach(([gameTitle, startTime]) => {
         const elapsed = now - startTime;
-        if (elapsed > 10000 && loadingGames.has(gameTitle) && !skippedGames.has(gameTitle)) {
+        // Mark as stuck if searching for > 30 seconds and either:
+        // 1. Still loading, OR
+        // 2. Has empty results (failed search that's in pending retries)
+        const hasEmptyResults = searchResults[gameTitle] && searchResults[gameTitle].length === 0;
+        if (elapsed > 30000 && !skippedGames.has(gameTitle) && (loadingGames.has(gameTitle) || hasEmptyResults)) {
           newStuckGames.add(gameTitle);
         }
       });
@@ -390,7 +394,7 @@ const ClaudeGameIdentifier = ({
     }, 1000); // Check every second
     
     return () => clearInterval(interval);
-  }, [gameSearchStartTimes, loadingGames, skippedGames]);
+  }, [gameSearchStartTimes, loadingGames, skippedGames, searchResults]);
 
   const requestAudioPermission = async () => {
     if (audioPermissionStatus !== null) {
@@ -1163,6 +1167,7 @@ const ClaudeGameIdentifier = ({
       isSkipped: (gameTitle) => skippedGames.has(gameTitle),
       setSkippedGames,
       addPendingRetry,
+      setStuckGames,
     }, 'image_recognition');
   }, [skippedGames]);
 
@@ -1356,11 +1361,13 @@ const ClaudeGameIdentifier = ({
 
       setPhoto(capturedPhoto);
       
-      // Start identification workflow first
-      beginIdentificationWorkflow(capturedPhoto, sessionKey);
+      // Close camera modal immediately after capture to allow GameSelectionModal to show
+      if (onCameraModalClose) {
+        onCameraModalClose();
+      }
       
-      // Don't close camera modal - games will be shown in the camera modal itself
-      // Camera modal will stay open to show the identified games
+      // Start identification workflow
+      beginIdentificationWorkflow(capturedPhoto, sessionKey);
     } catch (captureError) {
       console.error('Error capturing photo:', captureError);
       setError('Unable to capture photo. Please try again.');
@@ -2867,6 +2874,57 @@ const ClaudeGameIdentifier = ({
     });
   }, []);
 
+  const handleReviseTitle = useCallback(async (oldTitle, newTitle) => {
+    console.log('[ClaudeGameIdentifier] User revised game title:', { oldTitle, newTitle });
+    
+    // Remove old title from all state and add new title
+    setFormattedGames(prev => prev.map(title => title === oldTitle ? newTitle : title));
+    setSearchResults(prev => {
+      const updated = { ...prev };
+      if (updated[oldTitle]) {
+        delete updated[oldTitle];
+      }
+      return updated;
+    });
+    setSelectedGames(prev => {
+      const updated = { ...prev };
+      if (updated[oldTitle]) {
+        delete updated[oldTitle];
+      }
+      return updated;
+    });
+    setStuckGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(oldTitle);
+      return updated;
+    });
+    setSkippedGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(oldTitle);
+      return updated;
+    });
+    setLoadingGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(oldTitle);
+      updated.add(newTitle);
+      return updated;
+    });
+
+    // Trigger new search for the revised title
+    // Note: searchForAllGames is defined in this component, but we need to call it properly
+    // We'll use the utility directly to avoid dependency issues
+    const { searchForAllGames: searchForAllGamesUtil } = await import('../utils/gameSearch');
+    await searchForAllGamesUtil([newTitle], {
+      setLoadingGames,
+      setSearchResults,
+      setSelectedGames,
+      isSkipped: (gameTitle) => skippedGames.has(gameTitle),
+      setSkippedGames,
+      addPendingRetry,
+      setStuckGames,
+    }, 'image_recognition');
+  }, [skippedGames, setLoadingGames, setSearchResults, setSelectedGames, setSkippedGames]);
+
   const handleSkipGame = useCallback(async (gameTitle) => {
     console.log('[ClaudeGameIdentifier] User skipped game, saving for later retry:', gameTitle);
     
@@ -2999,6 +3057,7 @@ const ClaudeGameIdentifier = ({
       onSelectGame={handleSelectGame}
       onRemoveGame={handleRemoveGame}
       onSkipGame={handleSkipGame}
+      onReviseTitle={handleReviseTitle}
       onAddGames={handleAddSelectedGames}
     />
   ) : null;

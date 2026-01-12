@@ -35,7 +35,7 @@ const TextListGameIdentifier = ({
   const [selectedGames, setSelectedGames] = useState({}); // { gameTitle: selectedBggId }
   const [processingGameIndex, setProcessingGameIndex] = useState(null);
   const [loadingGames, setLoadingGames] = useState(new Set()); // Track which games are still loading (including retries)
-  const [stuckGames, setStuckGames] = useState(new Set()); // Track which games have been searching > 10 seconds
+  const [stuckGames, setStuckGames] = useState(new Set()); // Track which games have been searching > 30 seconds
   const [skippedGames, setSkippedGames] = useState(new Set()); // Track which games user chose to skip
   const [gameSearchStartTimes, setGameSearchStartTimes] = useState({}); // Track when each game search started
 
@@ -81,7 +81,7 @@ const TextListGameIdentifier = ({
     }
   };
 
-  // Track when searches start and check for stuck games (> 10 seconds)
+  // Track when searches start and check for stuck games (> 30 seconds)
   useEffect(() => {
     if (Object.keys(gameSearchStartTimes).length === 0) return;
     
@@ -91,7 +91,11 @@ const TextListGameIdentifier = ({
       
       Object.entries(gameSearchStartTimes).forEach(([gameTitle, startTime]) => {
         const elapsed = (now - startTime) / 1000;
-        if (elapsed > 10 && loadingGames.has(gameTitle) && !skippedGames.has(gameTitle)) {
+        // Mark as stuck if searching for > 30 seconds and either:
+        // 1. Still loading, OR
+        // 2. Has empty results (failed search that's in pending retries)
+        const hasEmptyResults = searchResults[gameTitle] && searchResults[gameTitle].length === 0;
+        if (elapsed > 30 && !skippedGames.has(gameTitle) && (loadingGames.has(gameTitle) || hasEmptyResults)) {
           stuck.add(gameTitle);
         }
       });
@@ -106,7 +110,7 @@ const TextListGameIdentifier = ({
     }, 1000); // Check every second
     
     return () => clearInterval(interval);
-  }, [gameSearchStartTimes, loadingGames, skippedGames]);
+  }, [gameSearchStartTimes, loadingGames, skippedGames, searchResults]);
 
   const searchForAllGames = async (games) => {
     // Reset state
@@ -126,6 +130,7 @@ const TextListGameIdentifier = ({
       isSkipped: (gameTitle) => skippedGames.has(gameTitle),
       setSkippedGames,
       addPendingRetry,
+      setStuckGames,
     }, 'text_list_import');
   };
 
@@ -240,6 +245,46 @@ const TextListGameIdentifier = ({
     });
   };
 
+  const handleReviseTitle = async (oldTitle, newTitle) => {
+    console.log('[TextListGameIdentifier] User revised game title:', { oldTitle, newTitle });
+    
+    // Remove old title from all state
+    setFormattedGames(prev => prev.map(title => title === oldTitle ? newTitle : title));
+    setSearchResults(prev => {
+      const updated = { ...prev };
+      if (updated[oldTitle]) {
+        delete updated[oldTitle];
+      }
+      return updated;
+    });
+    setSelectedGames(prev => {
+      const updated = { ...prev };
+      if (updated[oldTitle]) {
+        delete updated[oldTitle];
+      }
+      return updated;
+    });
+    setStuckGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(oldTitle);
+      return updated;
+    });
+    setSkippedGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(oldTitle);
+      return updated;
+    });
+    setLoadingGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(oldTitle);
+      updated.add(newTitle);
+      return updated;
+    });
+
+    // Trigger new search for the revised title
+    await searchForAllGames([newTitle]);
+  };
+
   const handleSkipGame = async (gameTitle) => {
     console.log('[TextListGameIdentifier] User skipped game, saving for later retry:', gameTitle);
     
@@ -345,6 +390,7 @@ const TextListGameIdentifier = ({
         onSelectGame={handleSelectGame}
         onRemoveGame={handleRemoveGame}
         onSkipGame={handleSkipGame}
+        onReviseTitle={handleReviseTitle}
         onAddGames={handleAddSelectedGames}
       />
     </>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, Image, Platform } from 'react-native';
 import { formatDate, formatTime } from '../utils/helpers';
 import { theme } from '../utils/theme';
@@ -235,17 +235,6 @@ const LogisticsCardV2 = ({
         const originalIndex = ed.originalIndex !== undefined ? ed.originalIndex : index;
         const dateKey = getDateKey(date);
         const isCollapsed = collapsedEventCards[dateKey] !== false; // Default to collapsed (true)
-        
-        // Debug logging for collapse state
-        if (__DEV__) {
-          console.log(`[LogisticsCardV2] Event card ${index} (dateKey: ${dateKey}):`, {
-            dateKey,
-            isCollapsed,
-            collapsedEventCards,
-            hasSetCollapsedEventCards: !!setCollapsedEventCards,
-            dateStr,
-          });
-        }
         
         // Get location and address
         const location = ed.location || ed.generalLocation || event?.location || event?.generalLocation || '';
@@ -1452,5 +1441,6 @@ const LogisticsCardV2 = ({
   );
 };
 
-export default LogisticsCardV2;
+// Memoize component to prevent unnecessary re-renders when props haven't changed
+export default memo(LogisticsCardV2);
 

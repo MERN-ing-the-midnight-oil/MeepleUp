@@ -16,7 +16,7 @@ import { Alert } from 'react-native';
  * @returns {Promise<void>}
  */
 export const searchForAllGames = async (games, callbacks, source = 'game_import') => {
-  const { setLoadingGames, setSearchResults, setSelectedGames, setProcessingGameIndex, isSkipped, setSkippedGames, addPendingRetry } = callbacks;
+  const { setLoadingGames, setSearchResults, setSelectedGames, setProcessingGameIndex, isSkipped, setSkippedGames, addPendingRetry, setStuckGames } = callbacks;
   const results = {};
   const selected = {};
   const searchStartTime = Date.now();
@@ -189,13 +189,18 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           
           if (!searchResults || searchResults.length === 0) {
             performanceStats.gamesNotFound++;
-            console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - BGG says this game doesn't exist (successful API call with no results after retries)`);
-            // Alert user that BGG says this title doesn't exist
-            Alert.alert(
-              'Game Not Found',
-              `BGG says "${gameTitle}" doesn't exist in their database.`,
-              [{ text: 'OK' }]
-            );
+            console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - adding to pending retries for later (BGG API may need multiple attempts)`);
+            // Add to pending retries instead of showing alert - BGG API often needs multiple attempts
+            if (addPendingRetry) {
+              try {
+                await addPendingRetry(gameTitle);
+                console.log(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries (no results found - will retry later)`);
+                // Don't mark as stuck immediately - let the 30-second check handle it
+                // This prevents showing the stuck message too quickly
+              } catch (retryError) {
+                console.error(`${logPrefix} ❌ Error saving "${gameTitle}" to pending retries:`, retryError);
+              }
+            }
           } else {
             performanceStats.gamesFound++;
           }
@@ -340,7 +345,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             console.log(`${logPrefix} Updated selectedGames, total selected: ${Object.keys(selected).length + 1}`);
             console.log(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, rank: ${bestMatch.rank || 'N/A'})`);
           } else {
-            console.warn(`${logPrefix} No BGG results found for "${gameTitle}" (definitive - successful API call returned empty)`);
+            console.warn(`${logPrefix} No BGG results found for "${gameTitle}" - added to pending retries (will try again later)`);
           }
         } catch (processError) {
           console.error(`${logPrefix} ❌ Error processing results for "${gameTitle}":`, processError);

@@ -51,6 +51,10 @@ import storage from '../utils/storage';
 // All game categories in order
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
 
+// Module-level cache for member data to persist across navigation
+// Key format: `${eventId}:${memberIdsKey}`
+const memberDataCache = new Map();
+
 // Platform-specific navigation hooks
 let useNavigationHook;
 let useRouteHook;
@@ -817,15 +821,33 @@ const EventHub = () => {
       return;
     }
 
+    // Check cache first
+    const cacheKey = `${event.id}:${memberIdsKey}`;
+    const cachedData = memberDataCache.get(cacheKey);
+    if (cachedData) {
+      // Load from cache immediately
+      setMemberNames(cachedData.names || {});
+      setMemberRSVPs(cachedData.rsvps || {});
+      setMemberAvatars(cachedData.avatars || {});
+      setLoadingMemberData(false);
+      // Still fetch in background to update cache (data might have changed)
+      // But don't block the UI
+    } else {
+      // No cache, show loading
+      setLoadingMemberData(true);
+    }
+
     // Prevent concurrent fetches
     if (memberDataFetchInProgressRef.current) {
-      console.log('[EventHub] Member data fetch already in progress, skipping');
       return;
     }
 
     const fetchMemberData = async () => {
       memberDataFetchInProgressRef.current = true;
-      setLoadingMemberData(true);
+      if (!cachedData) {
+        // Only show loading if we don't have cached data
+        setLoadingMemberData(true);
+      }
       // Reduced logging - removed verbose fetchMemberData start log
       
       const names = {};
@@ -1055,6 +1077,13 @@ const EventHub = () => {
           return safePrev; // No change, return previous object
         }
         return safeAvatars;
+      });
+      
+      // Save to cache for future navigation
+      memberDataCache.set(cacheKey, {
+        names,
+        rsvps,
+        avatars,
       });
       
       memberDataFetchInProgressRef.current = false; // Release lock
@@ -2866,7 +2895,10 @@ const EventHub = () => {
     }
     
     // Show spinner while member data is loading
-    const isLoading = loadingMemberData;
+    // Skip loading if we already have data for all current members
+    const hasMemberData = members.length > 0 && Object.keys(memberNames).length > 0 && 
+      members.every(m => m.userId && memberNames[m.userId] !== undefined);
+    const isLoading = loadingMemberData && !hasMemberData;
     
     if (isLoading) {
       return (

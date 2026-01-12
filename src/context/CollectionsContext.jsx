@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import storage from '../utils/storage';
 import { useAuth } from './AuthContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import { startBackgroundRetryService, stopBackgroundRetryService } from '../utils/backgroundRetryService';
 
 const CollectionsContext = createContext();
 
@@ -573,6 +574,29 @@ export const CollectionsProvider = ({ children }) => {
     
     return () => clearTimeout(timeoutId);
   }, [collections, initialised]);
+
+  // Start/stop background retry service when user is authenticated and collections are initialized
+  useEffect(() => {
+    if (!initialised || !user) {
+      // Stop service if user logs out or collections not initialized
+      stopBackgroundRetryService();
+      return;
+    }
+
+    const userId = user.uid || user.id;
+    if (!userId) {
+      stopBackgroundRetryService();
+      return;
+    }
+
+    // Start background retry service
+    startBackgroundRetryService(addGameToCollection, userId);
+
+    // Cleanup: stop service when component unmounts or user changes
+    return () => {
+      stopBackgroundRetryService();
+    };
+  }, [user, initialised, addGameToCollection]);
 
   // Simple stable callbacks
   const addGameToCollection = useCallback(async (userId, gameData) => {

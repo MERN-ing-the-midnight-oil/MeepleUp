@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Button from './common/Button';
@@ -26,14 +27,20 @@ const GameSelectionModal = ({
   onSelectGame,
   onRemoveGame,
   onSkipGame,
+  onReviseTitle,
   onAddGames,
 }) => {
+  const [revisingGames, setRevisingGames] = useState({}); // { gameTitle: revisedTitle }
+  const [isRevising, setIsRevising] = useState(new Set()); // Set of game titles being revised
+
   const renderGameSelection = (gameTitle, index) => {
     const results = searchResults[gameTitle];
     const selectedBggId = selectedGames[gameTitle];
     const isLoading = loadingGames.has(gameTitle) || (results === undefined);
     const isStuck = stuckGames.has(gameTitle) && !skippedGames.has(gameTitle);
     const isSkipped = skippedGames.has(gameTitle);
+    const revisedTitle = revisingGames[gameTitle] || gameTitle;
+    const isRevisingThis = isRevising.has(gameTitle);
 
     return (
       <View key={`${index}-${gameTitle}`} style={styles.gameSelectionCard}>
@@ -48,7 +55,7 @@ const GameSelectionModal = ({
           </Pressable>
         </View>
         
-        {isLoading && !isSkipped ? (
+        {(isLoading || (isStuck && (!results || results.length === 0))) && !isSkipped ? (
           <View style={styles.processingContainer}>
             <View style={styles.processingRow}>
               <ActivityIndicator size="small" color={theme.colors.meepleRed} />
@@ -56,13 +63,102 @@ const GameSelectionModal = ({
             </View>
             {isStuck && onSkipGame && (
               <View style={styles.stuckContainer}>
-                <Text style={styles.stuckText}>This title seems to be stuck in the internet tubes.</Text>
-                <Pressable
-                  onPress={() => onSkipGame(gameTitle)}
-                  style={styles.tryAgainButton}
-                >
-                  <Text style={styles.tryAgainButtonText}>Try again later?</Text>
-                </Pressable>
+                <Text style={styles.stuckText}>This title seems to be stuck in the Board Game Geek internet tubes. We'll try again later (in 10 seconds, then 20 seconds, 40 seconds, etc.)</Text>
+                {isRevisingThis ? (
+                  <View style={styles.reviseContainer}>
+                    <TextInput
+                      style={styles.reviseInput}
+                      value={revisedTitle}
+                      onChangeText={(text) => {
+                        setRevisingGames(prev => ({ ...prev, [gameTitle]: text }));
+                      }}
+                      placeholder="Enter revised game title"
+                      autoFocus
+                      returnKeyType="done"
+                      onSubmitEditing={() => {
+                        if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
+                          onReviseTitle(gameTitle, revisedTitle.trim());
+                          setIsRevising(prev => {
+                            const updated = new Set(prev);
+                            updated.delete(gameTitle);
+                            return updated;
+                          });
+                          setRevisingGames(prev => {
+                            const updated = { ...prev };
+                            delete updated[gameTitle];
+                            return updated;
+                          });
+                        }
+                      }}
+                    />
+                    <View style={styles.reviseButtonRow}>
+                      <Pressable
+                        onPress={() => {
+                          if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
+                            onReviseTitle(gameTitle, revisedTitle.trim());
+                          }
+                          setIsRevising(prev => {
+                            const updated = new Set(prev);
+                            updated.delete(gameTitle);
+                            return updated;
+                          });
+                          setRevisingGames(prev => {
+                            const updated = { ...prev };
+                            delete updated[gameTitle];
+                            return updated;
+                          });
+                        }}
+                        style={[styles.reviseButton, styles.submitButton]}
+                        disabled={!revisedTitle.trim() || revisedTitle.trim() === gameTitle}
+                      >
+                        <Text style={[styles.reviseButtonText, (!revisedTitle.trim() || revisedTitle.trim() === gameTitle) && styles.reviseButtonTextDisabled]}>
+                          Search Again
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => {
+                          setIsRevising(prev => {
+                            const updated = new Set(prev);
+                            updated.delete(gameTitle);
+                            return updated;
+                          });
+                          setRevisingGames(prev => {
+                            const updated = { ...prev };
+                            delete updated[gameTitle];
+                            return updated;
+                          });
+                        }}
+                        style={[styles.reviseButton, styles.cancelButton]}
+                      >
+                        <Text style={styles.reviseButtonText}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.stuckButtonRow}>
+                    <Pressable
+                      onPress={() => onSkipGame(gameTitle)}
+                      style={[styles.stuckButton, styles.keepTryingButton]}
+                    >
+                      <Text style={styles.stuckButtonText}>Yes, Keep Trying</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setIsRevising(prev => new Set(prev).add(gameTitle));
+                        setRevisingGames(prev => ({ ...prev, [gameTitle]: gameTitle }));
+                      }}
+                      style={[styles.stuckButton, styles.reviseTitleButton]}
+                    >
+                      <Text style={styles.stuckButtonText}>Revise Title</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => onRemoveGame(gameTitle)}
+                      style={[styles.stuckButton, styles.giveUpButton]}
+                    >
+                      <Text style={styles.stuckButtonText}>Give up looking</Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -281,19 +377,74 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
     fontStyle: 'italic',
   },
-  tryAgainButton: {
-    alignSelf: 'flex-start',
+  stuckButtonRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    flexWrap: 'wrap',
+  },
+  stuckButton: {
+    flex: 1,
+    minWidth: 100,
     paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.md,
+    paddingHorizontal: theme.spacing.sm,
     borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.woodMedium,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keepTryingButton: {
+    backgroundColor: theme.colors.woodMedium,
     borderColor: theme.colors.woodDark,
   },
-  tryAgainButtonText: {
+  reviseTitleButton: {
+    backgroundColor: theme.colors.woodMedium,
+    borderColor: theme.colors.woodDark,
+  },
+  giveUpButton: {
+    backgroundColor: theme.colors.woodLight,
+    borderColor: theme.colors.woodMedium,
+  },
+  stuckButtonText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.textPrimary,
     fontWeight: theme.typography.fontWeight.medium,
+  },
+  reviseContainer: {
+    marginTop: theme.spacing.sm,
+  },
+  reviseInput: {
+    ...commonStyles.input,
+    marginBottom: theme.spacing.sm,
+    fontSize: theme.typography.fontSize.sm,
+  },
+  reviseButtonRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  reviseButton: {
+    flex: 1,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitButton: {
+    backgroundColor: theme.colors.woodMedium,
+    borderColor: theme.colors.woodDark,
+  },
+  cancelButton: {
+    backgroundColor: theme.colors.woodLight,
+    borderColor: theme.colors.woodMedium,
+  },
+  reviseButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textPrimary,
+    fontWeight: theme.typography.fontWeight.medium,
+  },
+  reviseButtonTextDisabled: {
+    opacity: 0.5,
   },
   noResultsText: {
     fontSize: theme.typography.fontSize.sm,

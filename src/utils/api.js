@@ -470,11 +470,12 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             return bggResults;
           } else {
             // No results - BGG successfully returned empty array (no <item> tags in XML)
-            // This is definitive: BGG says the game doesn't exist in their database
-            // No need to retry - if BGG successfully responds with empty results, we trust it
+            // Note: This doesn't definitively mean the game doesn't exist - BGG API doesn't distinguish
+            // between "game doesn't exist" and "search didn't find it". The caller will add to pending retries
+            // so we can try again later, as BGG API often needs multiple attempts.
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
             if (__DEV__) {
-              console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (game doesn't exist in BGG)`, {
+              console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (will be added to pending retries)`, {
                 attemptDurationSeconds: attemptDuration,
                 totalDurationSeconds: totalDuration,
               });
