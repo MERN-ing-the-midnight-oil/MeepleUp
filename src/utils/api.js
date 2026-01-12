@@ -416,9 +416,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       // Keep trying until we get results - don't give up on rate-limited errors
       // Exponential backoff prevents overwhelming the API - delays get progressively longer
       const maxBggRetries = 30; // Increased retries - keep trying for rate-limited errors
-      const maxEmptyResultRetries = 4; // More retries for empty results (might be temporary issues, not wrong query format)
       let bggRetryCount = 0;
-      let emptyResultCount = 0;
       let bggResults = null;
       let lastError = null;
       const searchStartTime = Date.now();
@@ -471,17 +469,16 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             
             return bggResults;
           } else {
-            // No results - BGG successfully returned empty array (game doesn't exist)
-            // Don't retry - accept it immediately to save time during bulk imports
+            // No results - BGG successfully returned empty array (no <item> tags in XML)
+            // This is definitive: BGG says the game doesn't exist in their database
+            // No need to retry - if BGG successfully responds with empty results, we trust it
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
             if (__DEV__) {
               console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (game doesn't exist in BGG)`, {
                 attemptDurationSeconds: attemptDuration,
                 totalDurationSeconds: totalDuration,
-                attempts: bggRetryCount + 1,
               });
             }
-            // Return empty array immediately - don't waste time retrying
             return [];
           }
         } catch (bggError) {

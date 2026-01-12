@@ -20,15 +20,20 @@ const GameSelectionModal = ({
   searchResults = {},
   selectedGames = {},
   loadingGames = new Set(),
+  stuckGames = new Set(),
+  skippedGames = new Set(),
   isProcessing = false,
   onSelectGame,
   onRemoveGame,
+  onSkipGame,
   onAddGames,
 }) => {
   const renderGameSelection = (gameTitle, index) => {
     const results = searchResults[gameTitle];
     const selectedBggId = selectedGames[gameTitle];
     const isLoading = loadingGames.has(gameTitle) || (results === undefined);
+    const isStuck = stuckGames.has(gameTitle) && !skippedGames.has(gameTitle);
+    const isSkipped = skippedGames.has(gameTitle);
 
     return (
       <View key={`${index}-${gameTitle}`} style={styles.gameSelectionCard}>
@@ -43,10 +48,23 @@ const GameSelectionModal = ({
           </Pressable>
         </View>
         
-        {isLoading ? (
+        {isLoading && !isSkipped ? (
           <View style={styles.processingContainer}>
-            <ActivityIndicator size="small" color={theme.colors.meepleRed} />
-            <Text style={styles.processingText}>Loading...</Text>
+            <View style={styles.processingRow}>
+              <ActivityIndicator size="small" color={theme.colors.meepleRed} />
+              <Text style={styles.processingText}>Loading...</Text>
+            </View>
+            {isStuck && onSkipGame && (
+              <View style={styles.stuckContainer}>
+                <Text style={styles.stuckText}>This title seems to be stuck in the internet tubes.</Text>
+                <Pressable
+                  onPress={() => onSkipGame(gameTitle)}
+                  style={styles.tryAgainButton}
+                >
+                  <Text style={styles.tryAgainButtonText}>Try again later?</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         ) : (results || []).length === 0 ? (
           <Text style={styles.noResultsText}>No matches found</Text>
@@ -243,14 +261,39 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.bold,
   },
   processingContainer: {
+    paddingVertical: theme.spacing.md,
+  },
+  processingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: theme.spacing.md,
   },
   processingText: {
     marginLeft: theme.spacing.sm,
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.textSecondary,
+  },
+  stuckContainer: {
+    marginTop: theme.spacing.md,
+  },
+  stuckText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
+    fontStyle: 'italic',
+  },
+  tryAgainButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.woodMedium,
+    borderWidth: 1,
+    borderColor: theme.colors.woodDark,
+  },
+  tryAgainButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textPrimary,
+    fontWeight: theme.typography.fontWeight.medium,
   },
   noResultsText: {
     fontSize: theme.typography.fontSize.sm,

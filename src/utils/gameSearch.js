@@ -1,4 +1,6 @@
 import { searchGamesByName, getGameDetails } from './api';
+import { addPendingRetry } from './pendingGameRetries';
+import { Alert } from 'react-native';
 
 /**
  * Shared utility function to search BGG for multiple game titles
@@ -14,11 +16,18 @@ import { searchGamesByName, getGameDetails } from './api';
  * @returns {Promise<void>}
  */
 export const searchForAllGames = async (games, callbacks, source = 'game_import') => {
-  const { setLoadingGames, setSearchResults, setSelectedGames, setProcessingGameIndex } = callbacks;
+  const { setLoadingGames, setSearchResults, setSelectedGames, setProcessingGameIndex, isSkipped, setSkippedGames, addPendingRetry } = callbacks;
   const results = {};
   const selected = {};
   const searchStartTime = Date.now();
   const gameTimings = {}; // Track timing for each game
+  const gameSearchStartTimes = {}; // Track when each game search started
+  const performanceStats = {
+    gamesAutoSkipped: 0, // Games auto-skipped due to 10s timeout
+    rateLimitHits: 0, // Number of times we hit rate limits
+    gamesNotFound: 0, // Games BGG said don't exist
+    gamesFound: 0, // Games with results
+  };
 
   const logPrefix = source === 'image_recognition' ? '[ClaudeGameIdentifier → BGG]' : '[TextListGameIdentifier → BGG]';
 
@@ -72,11 +81,69 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     
     // Keep retrying until we get results (or exhaust retries for non-rate-limit errors)
     while (retryCount <= maxRetries) {
+      // Check if user skipped this game
+      if (isSkipped && isSkipped(gameTitle)) {
+        console.log(`${logPrefix} ⏭️ Skipping "${gameTitle}" - user chose to try again later`);
+        results[gameTitle] = [];
+        setLoadingGames(prev => {
+          const updated = new Set(prev);
+          updated.delete(gameTitle);
+          return updated;
+        });
+        setSearchResults({ ...results });
+        break;
+      }
+      
+      // Check if this search has been running too long (> 10 seconds) - auto-skip to retry bucket
+      const STUCK_TIMEOUT_MS = 10000; // 10 seconds
+      const elapsedMs = Date.now() - gameSearchStartTime;
+      if (elapsedMs > STUCK_TIMEOUT_MS) {
+        performanceStats.gamesAutoSkipped++;
+        console.log(`${logPrefix} ⏱️ Search for "${gameTitle}" has been running for ${(elapsedMs / 1000).toFixed(1)}s - skipping to retry bucket`);
+        results[gameTitle] = [];
+        
+        // Save to pending retries
+        if (addPendingRetry) {
+          try {
+            await addPendingRetry(gameTitle);
+            console.log(`${logPrefix} 💾 Auto-saved "${gameTitle}" to pending retries (stuck timeout)`);
+          } catch (retryError) {
+            console.error(`${logPrefix} ❌ Error auto-saving "${gameTitle}" to pending retries:`, retryError);
+          }
+        }
+        
+        // Mark as skipped
+        if (setSkippedGames) {
+          setSkippedGames(prev => new Set(prev).add(gameTitle));
+        }
+        
+        setLoadingGames(prev => {
+          const updated = new Set(prev);
+          updated.delete(gameTitle);
+          return updated;
+        });
+        setSearchResults({ ...results });
+        break;
+      }
+      
       try {
         if (retryCount > 0) {
           const backoffMs = Math.min(10000 * Math.pow(2, Math.min(retryCount - 1, 4)), 80000); // Cap at 80s
           console.log(`${logPrefix} 🔄 Retry ${retryCount}/${maxRetries} for "${gameTitle}" after ${backoffMs}ms delay...`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
+          
+          // Check again after backoff delay (user might have skipped during delay)
+          if (isSkipped && isSkipped(gameTitle)) {
+            console.log(`${logPrefix} ⏭️ Skipping "${gameTitle}" after backoff - user chose to try again later`);
+            results[gameTitle] = [];
+            setLoadingGames(prev => {
+              const updated = new Set(prev);
+              updated.delete(gameTitle);
+              return updated;
+            });
+            setSearchResults({ ...results });
+            break;
+          }
         }
         
         // Determine which query to use: cleaned title first, then original if no results
@@ -121,7 +188,16 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           });
           
           if (!searchResults || searchResults.length === 0) {
-            console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - this game may not exist in BGG (successful API call with no results)`);
+            performanceStats.gamesNotFound++;
+            console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - BGG says this game doesn't exist (successful API call with no results after retries)`);
+            // Alert user that BGG says this title doesn't exist
+            Alert.alert(
+              'Game Not Found',
+              `BGG says "${gameTitle}" doesn't exist in their database.`,
+              [{ text: 'OK' }]
+            );
+          } else {
+            performanceStats.gamesFound++;
           }
           
           // Fetch thumbnails for top 3 results only - enough to show user what was found
@@ -299,6 +375,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         const isRateLimited = err.isRateLimited || (err.message && err.message.includes('rate limited'));
         
         if (isRateLimited) {
+          performanceStats.rateLimitHits++;
           console.warn(`${logPrefix} ⚠️ Rate limited for "${gameTitle}" (attempt ${retryCount + 1}/${maxRetries})`, {
             error: err.message,
             willRetry: retryCount < maxRetries,
@@ -335,9 +412,23 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             retryCount++;
             continue; // Retry
           } else {
-            // Exhausted retries - mark as failed
-            console.error(`${logPrefix} ❌ Failed to search for "${gameTitle}" after ${retryCount + 1} attempts`);
+            // Exhausted retries - mark as failed and save for retry
+            console.error(`${logPrefix} ❌ Failed to search for "${gameTitle}" after ${retryCount + 1} attempts - saving for later retry`);
             results[gameTitle] = [];
+            
+            // Save to pending retries for background retry
+            try {
+              await addPendingRetry(gameTitle);
+              console.log(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries for background retry`);
+              // Alert user that search failed but will retry
+              Alert.alert(
+                'Search Failed',
+                `Couldn't search for "${gameTitle}" right now. We'll try again later.`,
+                [{ text: 'OK' }]
+              );
+            } catch (retryError) {
+              console.error(`${logPrefix} ❌ Error saving "${gameTitle}" to pending retries:`, retryError);
+            }
             
             // Set timing data for failed searches
             const totalGameDuration = ((Date.now() - gameSearchStartTime) / 1000).toFixed(2);
@@ -400,6 +491,10 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     ? Math.max(...timings.map(t => t.totalSeconds)).toFixed(2)
     : 0;
   
+  const gamesPerMinute = games.length > 0 && parseFloat(totalSearchDuration) > 0 
+    ? ((games.length / parseFloat(totalSearchDuration)) * 60).toFixed(2)
+    : '0';
+  
   console.log(`${logPrefix} ✅ Completed searching all games. Summary:`, {
     totalGames: games.length,
     gamesWithResults,
@@ -407,10 +502,17 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     gamesSelected: Object.keys(selected).length,
     totalDurationSeconds: totalSearchDuration,
     totalDurationMinutes: (totalSearchDuration / 60).toFixed(2),
+    gamesPerMinute: gamesPerMinute,
     averageTimePerGame: avgTime + 's',
     minTimePerGame: minTime + 's',
     maxTimePerGame: maxTime + 's',
     gamesWithTiming: timings.length,
+    performanceStats: {
+      gamesAutoSkipped: performanceStats.gamesAutoSkipped,
+      rateLimitHits: performanceStats.rateLimitHits,
+      gamesNotFound: performanceStats.gamesNotFound,
+      gamesFound: performanceStats.gamesFound,
+    },
   });
   
   // Log detailed timing for each game

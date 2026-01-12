@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,7 +15,9 @@ import {
 import Button from './common/Button';
 import { formatGameListForBGG } from '../services/claudeVision';
 import { searchForAllGames as searchForAllGamesUtil } from '../utils/gameSearch';
+import { getGameDetails } from '../utils/api';
 import { theme, commonStyles } from '../utils/theme';
+import { addPendingRetry } from '../utils/pendingGameRetries';
 import GameSelectionModal from './GameSelectionModal';
 
 const TextListGameIdentifier = ({ 
@@ -33,6 +35,9 @@ const TextListGameIdentifier = ({
   const [selectedGames, setSelectedGames] = useState({}); // { gameTitle: selectedBggId }
   const [processingGameIndex, setProcessingGameIndex] = useState(null);
   const [loadingGames, setLoadingGames] = useState(new Set()); // Track which games are still loading (including retries)
+  const [stuckGames, setStuckGames] = useState(new Set()); // Track which games have been searching > 10 seconds
+  const [skippedGames, setSkippedGames] = useState(new Set()); // Track which games user chose to skip
+  const [gameSearchStartTimes, setGameSearchStartTimes] = useState({}); // Track when each game search started
 
   const handleFormatList = async () => {
     if (!gameListText.trim()) {
@@ -76,12 +81,51 @@ const TextListGameIdentifier = ({
     }
   };
 
+  // Track when searches start and check for stuck games (> 10 seconds)
+  useEffect(() => {
+    if (Object.keys(gameSearchStartTimes).length === 0) return;
+    
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const stuck = new Set();
+      
+      Object.entries(gameSearchStartTimes).forEach(([gameTitle, startTime]) => {
+        const elapsed = (now - startTime) / 1000;
+        if (elapsed > 10 && loadingGames.has(gameTitle) && !skippedGames.has(gameTitle)) {
+          stuck.add(gameTitle);
+        }
+      });
+      
+      if (stuck.size > 0) {
+        setStuckGames(prev => {
+              const updated = new Set(prev);
+          stuck.forEach(title => updated.add(title));
+                return updated;
+              });
+      }
+    }, 1000); // Check every second
+    
+    return () => clearInterval(interval);
+  }, [gameSearchStartTimes, loadingGames, skippedGames]);
+
   const searchForAllGames = async (games) => {
+    // Reset state
+    setStuckGames(new Set());
+    setSkippedGames(new Set());
+    const startTimes = {};
+    games.forEach(gameTitle => {
+      startTimes[gameTitle] = Date.now();
+    });
+    setGameSearchStartTimes(startTimes);
+    
     await searchForAllGamesUtil(games, {
       setLoadingGames,
       setSearchResults,
       setSelectedGames,
       setProcessingGameIndex,
+      isSkipped: (gameTitle) => skippedGames.has(gameTitle),
+      setSkippedGames,
+      addPendingRetry,
     }, 'text_list_import');
   };
 
@@ -184,6 +228,35 @@ const TextListGameIdentifier = ({
       delete updated[gameTitle];
       return updated;
     });
+    setStuckGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(gameTitle);
+      return updated;
+    });
+    setSkippedGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(gameTitle);
+      return updated;
+    });
+  };
+
+  const handleSkipGame = async (gameTitle) => {
+    console.log('[TextListGameIdentifier] User skipped game, saving for later retry:', gameTitle);
+    
+    // Save to pending retries for later
+    await addPendingRetry(gameTitle);
+    
+    setSkippedGames(prev => new Set(prev).add(gameTitle));
+    setLoadingGames(prev => {
+      const updated = new Set(prev);
+      updated.delete(gameTitle);
+      return updated;
+    });
+    // Mark as no results so it shows message instead of loading
+    setSearchResults(prev => ({
+      ...prev,
+      [gameTitle]: [],
+    }));
   };
 
   const handleReset = () => {
@@ -195,6 +268,9 @@ const TextListGameIdentifier = ({
     setIsProcessing(false);
     setProcessingGameIndex(null);
     setLoadingGames(new Set());
+    setStuckGames(new Set());
+    setSkippedGames(new Set());
+    setGameSearchStartTimes({});
   };
 
   const handleClose = () => {
@@ -246,7 +322,7 @@ const TextListGameIdentifier = ({
           )}
 
           <Button
-            label={isProcessing && formattedGames.length === 0 ? "Formatting List..." : "Submit List"}
+            label={isProcessing && formattedGames.length === 0 ? "Seeing game titles..." : "Submit List"}
             onPress={handleFormatList}
             disabled={isProcessing || !gameListText.trim()}
             style={styles.formatButton}
@@ -263,9 +339,12 @@ const TextListGameIdentifier = ({
         searchResults={searchResults}
         selectedGames={selectedGames}
         loadingGames={loadingGames}
+        stuckGames={stuckGames}
+        skippedGames={skippedGames}
         isProcessing={isProcessing && formattedGames.length > 0}
         onSelectGame={handleSelectGame}
         onRemoveGame={handleRemoveGame}
+        onSkipGame={handleSkipGame}
         onAddGames={handleAddSelectedGames}
       />
     </>

@@ -13,6 +13,7 @@ import Modal from '../components/common/Modal';
 import { getGameDetails } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
+import { retryPendingGameSearches } from '../utils/retryPendingGames';
 
 // All game categories in order (for legacy code - GameCollectionView now handles this)
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
@@ -178,10 +179,37 @@ const CollectionScreen = () => {
   // Component mount/unmount logging
   useEffect(() => {
     console.log('[CollectionScreen] Component mounted');
+    
+    // Retry pending game searches when screen loads
+    const handlePendingRetries = async () => {
+      try {
+        console.log('[CollectionScreen] Checking for pending game retries...');
+        const result = await retryPendingGameSearches(addGameToCollection);
+        
+        if (result.successCount > 0) {
+          console.log('[CollectionScreen] Successfully retried', result.successCount, 'games');
+          Alert.alert(
+            'Games Added!',
+            `We found and added ${result.successCount} game${result.successCount !== 1 ? 's' : ''} from your previous search:\n\n${result.addedGames.join(', ')}`,
+            [{ text: 'OK' }]
+          );
+        } else if (result.failedCount > 0) {
+          console.log('[CollectionScreen]', result.failedCount, 'games still pending (not found)');
+        }
+      } catch (error) {
+        console.error('[CollectionScreen] Error retrying pending games:', error);
+        // Don't show error to user - this is a background operation
+      }
+    };
+    
+    // Run retry check after a short delay to let the screen render
+    const timeoutId = setTimeout(handlePendingRetries, 1000);
+    
     return () => {
+      clearTimeout(timeoutId);
       console.log('[CollectionScreen] Component unmounting');
     };
-  }, []);
+  }, [addGameToCollection]);
 
   // Helper to enrich a single game with BGG data
   const enrichGame = useCallback(async (game) => {
@@ -743,7 +771,7 @@ const CollectionScreen = () => {
                 resizeMode="contain"
               />
               <View style={styles.menuOptionText}>
-                <Text style={styles.menuOptionTitle}>Import pre-existing BGG collection titles</Text>
+                <Text style={styles.menuOptionTitle}>Import by Board Game Geek Username</Text>
               </View>
               <Text style={styles.menuOptionArrow}>→</Text>
             </View>
