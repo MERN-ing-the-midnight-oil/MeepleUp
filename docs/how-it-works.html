@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="How MeepleUp Works - Your Game Night, Simplified">
+    <title>How It Works - MeepleUp</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&family=Garamond:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* Player Aid Card Specific Styles */
+        .player-aid-card {
+            background: linear-gradient(to bottom, #fef8e8 0%, #fef3d6 100%);
+            border-radius: 24px;
+            box-shadow: 
+                0 20px 60px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            width: 100%;
+            padding: 45px;
+            border: 6px solid #c63d2f;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Linen texture overlay */
+        .player-aid-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.03) 2px, rgba(0,0,0,.03) 4px),
+                repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(0,0,0,.03) 2px, rgba(0,0,0,.03) 4px);
+            pointer-events: none;
+            opacity: 0.5;
+        }
+
+        /* Inner border */
+        .player-aid-card::after {
+            content: '';
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            right: 12px;
+            bottom: 12px;
+            border: 2px solid #f4c542;
+            border-radius: 16px;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        /* Corner embellishments */
+        .corner-ornament {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 2px solid #f4c542;
+            opacity: 0.5;
+            z-index: 2;
+        }
+
+        .corner-ornament.top-left {
+            top: 20px;
+            left: 20px;
+            border-right: none;
+            border-bottom: none;
+            border-radius: 12px 0 0 0;
+        }
+
+        .corner-ornament.top-right {
+            top: 20px;
+            right: 20px;
+            border-left: none;
+            border-bottom: none;
+            border-radius: 0 12px 0 0;
+        }
+
+        .corner-ornament.bottom-left {
+            bottom: 20px;
+            left: 20px;
+            border-right: none;
+            border-top: none;
+            border-radius: 0 0 0 12px;
+        }
+
+        .corner-ornament.bottom-right {
+            bottom: 20px;
+            right: 20px;
+            border-left: none;
+            border-top: none;
+            border-radius: 0 0 12px 0;
+        }
+
+        .card-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .card-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .card-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #c63d2f;
+            margin-bottom: 8px;
+            font-family: 'Georgia', serif;
+            letter-spacing: 1px;
+        }
+
+        .card-subtitle {
+            font-size: 16px;
+            color: #a8321b;
+            font-weight: 400;
+            font-style: italic;
+            letter-spacing: 0.5px;
+        }
+
+        .divider {
+            text-align: center;
+            color: #f4c542;
+            margin: 25px 0 30px 0;
+            font-size: 18px;
+            opacity: 0.7;
+        }
+
+        .actions-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .action-item {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 0;
+            padding: 20px;
+            background: rgba(244, 197, 66, 0.15);
+            border-radius: 12px;
+            border: 1px solid rgba(244, 197, 66, 0.3);
+        }
+
+        .action-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .action-separator {
+            display: flex;
+            justify-content: center;
+            margin: 12px 0;
+            list-style: none;
+        }
+
+        .action-icon-wrapper {
+            flex-shrink: 0;
+            margin-right: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .action-icon {
+            width: 48px;
+            height: 48px;
+            stroke: #c63d2f;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .arrow-down {
+            width: 24px;
+            height: 32px;
+            stroke: #f4c542;
+            stroke-width: 2.5;
+            fill: none;
+            margin: 16px 0;
+            opacity: 0.8;
+        }
+
+        .action-content {
+            flex: 1;
+        }
+
+        .action-verb {
+            font-size: 20px;
+            font-weight: 700;
+            color: #c63d2f;
+            margin-bottom: 6px;
+            letter-spacing: 1px;
+            font-variant: small-caps;
+        }
+
+        .action-description {
+            font-size: 15px;
+            color: #5a4d42;
+            line-height: 1.6;
+            font-family: 'Georgia', serif;
+        }
+
+        .card-footer {
+            margin-top: 35px;
+            text-align: center;
+            padding-top: 25px;
+            border-top: 2px solid rgba(244, 197, 66, 0.4);
+        }
+
+        .cta-text {
+            font-size: 14px;
+            color: #a8321b;
+            margin-bottom: 15px;
+            font-style: italic;
+        }
+
+        .cta-button {
+            background: linear-gradient(135deg, #c63d2f 0%, #a8321b 100%);
+            color: #fef8e8;
+            border: 2px solid #8a2817;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-family: 'Georgia', serif;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(198, 61, 47, 0.4);
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1.5rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+
+        .back-link:hover {
+            color: var(--primary-color);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 968px) {
+            .player-aid-card {
+                padding: 35px 30px;
+            }
+
+            .card-title {
+                font-size: 28px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .player-aid-card {
+                padding: 35px 25px;
+            }
+
+            .card-title {
+                font-size: 26px;
+            }
+
+            .action-verb {
+                font-size: 18px;
+            }
+
+            .action-description {
+                font-size: 14px;
+            }
+
+            .action-icon {
+                width: 40px;
+                height: 40px;
+            }
+        }
+
+        /* Print-friendly styles */
+        @media print {
+            .player-aid-card {
+                box-shadow: none;
+                border: 1px solid #ccc;
+            }
+
+            .cta-button {
+                display: none;
+            }
+
+            .back-link {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+  <main class="main-container">
+    <div class="content-wrapper">
+      <!-- Left Side: Logo Section -->
+      <aside class="logo-section" id="logoSection">
+        <figure class="app-icon-container" id="appIconContainer">
+          <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
+        </figure>
+        <figure class="bgg-badge" id="bggBadge">
+          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
+        </figure>
+      </aside>
+
+      <!-- Right Side: Content Section with Player Aid Card -->
+      <section class="content-section">
+        <a href="index.html" class="back-link">← Back to Home</a>
+        
+        <div class="player-aid-card">
+            <div class="corner-ornament top-left"></div>
+            <div class="corner-ornament top-right"></div>
+            <div class="corner-ornament bottom-left"></div>
+            <div class="corner-ornament bottom-right"></div>
+            
+            <div class="card-content">
+                <div class="card-header">
+                    <h1 class="card-title">Player Aid</h1>
+                    <p class="card-subtitle">Plan Apart, Play Together</p>
+                </div>
+
+                <div class="divider">━━◆━━</div>
+
+                <ol class="actions-list">
+                    <li class="action-item">
+                        <div class="action-icon-wrapper">
+                            <svg class="action-icon" viewBox="0 0 24 24">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                                <line x1="16" y1="2" x2="16" y2="6"/>
+                                <line x1="8" y1="2" x2="8" y2="6"/>
+                                <line x1="3" y1="10" x2="21" y2="10"/>
+                                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/>
+                            </svg>
+                        </div>
+                        <div class="action-content">
+                            <div class="action-verb">Confirm</div>
+                            <div class="action-description">Members RSVP for a date</div>
+                        </div>
+                    </li>
+
+                    <li class="action-separator">
+                        <svg class="arrow-down" viewBox="0 0 24 24">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <polyline points="19 12 12 19 5 12"/>
+                        </svg>
+                    </li>
+
+                    <li class="action-item">
+                        <div class="action-icon-wrapper">
+                            <svg class="action-icon" viewBox="0 0 24 24">
+                                <path d="M20 7h-3V4c0-1.1-.9-2-2-2H9c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"/>
+                                <path d="M9 4h6v3H9V4z"/>
+                                <circle cx="12" cy="11" r="2"/>
+                                <path d="M15 17c0-1.66-1.34-3-3-3s-3 1.34-3 3"/>
+                            </svg>
+                        </div>
+                        <div class="action-content">
+                            <div class="action-verb">Propose</div>
+                            <div class="action-description">Confirmed members browse everyone's games and propose their favorite options</div>
+                        </div>
+                    </li>
+
+                    <li class="action-separator">
+                        <svg class="arrow-down" viewBox="0 0 24 24">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <polyline points="19 12 12 19 5 12"/>
+                        </svg>
+                    </li>
+
+                    <li class="action-item">
+                        <div class="action-icon-wrapper">
+                            <svg class="action-icon" viewBox="0 0 24 24">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                            </svg>
+                        </div>
+                        <div class="action-content">
+                            <div class="action-verb">Weigh In</div>
+                            <div class="action-description">Members give star ratings to proposed games</div>
+                        </div>
+                    </li>
+
+                    <li class="action-separator">
+                        <svg class="arrow-down" viewBox="0 0 24 24">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <polyline points="19 12 12 19 5 12"/>
+                        </svg>
+                    </li>
+
+                    <li class="action-item">
+                        <div class="action-icon-wrapper">
+                            <svg class="action-icon" viewBox="0 0 24 24">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                                <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                                <line x1="12" y1="22.08" x2="12" y2="12"/>
+                            </svg>
+                        </div>
+                        <div class="action-content">
+                            <div class="action-verb">Bring</div>
+                            <div class="action-description">Members bring games from their libraries with high interest</div>
+                        </div>
+                    </li>
+                </ol>
+
+                <div class="card-footer">
+                    <p class="cta-text">Ready to streamline your game nights?</p>
+                    <a href="/app/" class="cta-button">Get Started</a>
+                </div>
+            </div>
+        </div>
+      </section>
+    </div>
+    
+    <!-- Legal Links Footer -->
+    <footer class="legal-links-footer">
+      <nav class="legal-links-nav">
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <span class="legal-links-separator">•</span>
+        <a href="terms-of-service.html">Terms of Service</a>
+      </nav>
+    </footer>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
