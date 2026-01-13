@@ -10,7 +10,7 @@ import GameCollectionView from '../components/GameCollectionView';
 import BGGImport from '../components/BGGImport';
 import PoweredByBGG from '../components/PoweredByBGG';
 import Modal from '../components/common/Modal';
-import { getGameDetails } from '../utils/api';
+import { getGames } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
 import { retryPendingGameSearches } from '../utils/retryPendingGames';
@@ -232,7 +232,7 @@ const CollectionScreen = () => {
         return cached;
       }
 
-      const bggData = await getGameDetails(gameId);
+      const bggData = await getGames(gameId);
       if (bggData) {
         if (__DEV__) {
           console.log(`[CollectionScreen] Enriched game ${gameId} (${game.title || 'unknown'}):`, {
@@ -407,7 +407,7 @@ const CollectionScreen = () => {
                 return { gameId, bggData: bggDataCache[gameId] };
               }
 
-              const bggData = await getGameDetails(gameId);
+              const bggData = await getGames(gameId);
               if (bggData) {
                 enrichedGameIdsRef.current.add(gameId);
                 return { gameId, bggData };

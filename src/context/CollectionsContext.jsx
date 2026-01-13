@@ -624,8 +624,8 @@ export const CollectionsProvider = ({ children }) => {
           bggId: gameData.bggId,
         });
 
-        const { getGameById, updateGameWithBGGData } = await import('../services/gameDatabase');
-        const existingGame = await getGameById(gameData.bggId);
+        const { getGamesFromFirebase, updateGameWithBGGData } = await import('../services/gameDatabase');
+        const existingGame = await getGamesFromFirebase(gameData.bggId);
         
         console.log('[Collections] Checked main collection', {
           userId,
@@ -896,14 +896,21 @@ export const CollectionsProvider = ({ children }) => {
   }, [collections]); // YES, depend on collections - it's fine!
 
   const updateGameInCollection = useCallback(async (userId, gameId, updates) => {
-    if (!userId) return;
+    if (!userId || !gameId) return;
     
     // Update local state (full game data)
+    // Match by id (exact match, using string comparison to avoid type issues)
+    const gameIdStr = String(gameId);
     setCollections(prev => ({
       ...prev,
-      [userId]: (prev[userId] || []).map(game =>
-        game.id === gameId ? { ...game, ...updates } : game
-      ),
+      [userId]: (prev[userId] || []).map(game => {
+        // Match by id using string comparison to handle type mismatches
+        const gameIdToCompare = game.id ? String(game.id) : null;
+        if (gameIdToCompare === gameIdStr) {
+          return { ...game, ...updates };
+        }
+        return game;
+      }),
     }));
 
     if (db) {

@@ -13,12 +13,12 @@ import {
   View,
 } from 'react-native';
 import Button from './common/Button';
-import { formatGameListForBGG } from '../services/claudeVision';
+import { titlesFromText } from '../services/claudeVision';
 import { searchForAllGames as searchForAllGamesUtil } from '../utils/gameSearch';
-import { getGameDetails } from '../utils/api';
+import { getGames, searchGamesByName } from '../utils/api';
 import { theme, commonStyles } from '../utils/theme';
 import { addPendingRetry } from '../utils/pendingGameRetries';
-import GameSelectionModal from './GameSelectionModal';
+import ShowGames from './ShowGames';
 
 const TextListGameIdentifier = ({ 
   onAddToCollection, 
@@ -53,7 +53,7 @@ const TextListGameIdentifier = ({
     setLoadingGames(new Set());
 
     try {
-      const result = await formatGameListForBGG(gameListText.trim());
+      const result = await titlesFromText(gameListText.trim());
       
       if (!result.games || result.games.length === 0) {
         setError('No games were found in your list. Please check your input and try again.');
@@ -68,7 +68,7 @@ const TextListGameIdentifier = ({
       
       if (__DEV__) {
         console.log('[TextListGameIdentifier] Set formattedGames:', result.games.length, 'games');
-        console.log('[TextListGameIdentifier] GameSelectionModal should now be visible:', result.games.length > 0);
+        console.log('[TextListGameIdentifier] ShowGames should now be visible:', result.games.length > 0);
       }
       
       // Automatically search for each game
@@ -131,6 +131,7 @@ const TextListGameIdentifier = ({
       setSkippedGames,
       addPendingRetry,
       setStuckGames,
+      setGameSearchStartTimes,
     }, 'text_list_import');
   };
 
@@ -158,7 +159,7 @@ const TextListGameIdentifier = ({
         if (!bggId) continue;
 
         try {
-          const gameDetails = await getGameDetails(bggId);
+          const gameDetails = await getGames(bggId);
           if (gameDetails) {
             const gameData = {
               title: gameDetails.name || gameTitle,
@@ -281,26 +282,140 @@ const TextListGameIdentifier = ({
       return updated;
     });
 
-    // Trigger new search for the revised title
-    await searchForAllGames([newTitle]);
+    // Search for the revised title and merge with existing results (don't clear other games!)
+    try {
+      const cleanedTitle = newTitle.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+      const searchQuery = cleanedTitle !== newTitle ? cleanedTitle : newTitle;
+      
+      // Search for the game
+      let searchResults = await searchGamesByName(searchQuery, true);
+      
+      // If no results with cleaned title, try original
+      if ((!searchResults || searchResults.length === 0) && searchQuery !== newTitle) {
+        searchResults = await searchGamesByName(newTitle, true);
+      }
+      
+      if (searchResults && searchResults.length > 0) {
+        // Fetch thumbnails for top 3 results
+        const MAX_THUMBNAIL_FETCHES = 3;
+        const resultsToEnrich = searchResults.slice(0, MAX_THUMBNAIL_FETCHES);
+        const remainingResults = searchResults.slice(MAX_THUMBNAIL_FETCHES);
+        
+        const enrichedResults = await Promise.all(
+          resultsToEnrich.map(async (result) => {
+            try {
+              const details = await getGames(result.id);
+              return {
+                ...result,
+                thumbnail: details?.thumbnail || result.thumbnail || null,
+                image: details?.image || result.image || null,
+              };
+            } catch (detailError) {
+              console.warn(`[TextListGameIdentifier] Failed to fetch details for revised title result ${result.id}:`, detailError.message);
+              return result;
+            }
+          })
+        );
+        
+        const resultsWithThumbnails = [...enrichedResults, ...remainingResults];
+        
+        // Auto-select best match
+        const normalizedSearchTitle = newTitle.toLowerCase().trim();
+        const scoredResults = resultsWithThumbnails.map(result => {
+          let score = 0;
+          const normalizedResultName = (result.name || '').toLowerCase().trim();
+          
+          if (normalizedResultName === normalizedSearchTitle) score += 1000;
+          else if (normalizedResultName.startsWith(normalizedSearchTitle)) score += 500;
+          else if (normalizedResultName.includes(normalizedSearchTitle)) score += 100;
+          
+          if (result.type === 'boardgame') score += 50;
+          if (result.rank && result.rank > 0) score += Math.max(0, 10000 - result.rank);
+          if (result.thumbnail) score += 10;
+          
+          return { ...result, _matchScore: score };
+        });
+        
+        scoredResults.sort((a, b) => {
+          if (b._matchScore !== a._matchScore) return b._matchScore - a._matchScore;
+          return (a.name || '').localeCompare(b.name || '');
+        });
+        
+        const bestMatch = scoredResults[0];
+        const { _matchScore, ...cleanResult } = bestMatch;
+        const finalResults = scoredResults.map(({ _matchScore, ...clean }) => clean);
+        
+        // MERGE with existing results instead of replacing
+        setSearchResults(prev => ({
+          ...prev, // Keep all existing results
+          [newTitle]: finalResults, // Only update the revised game
+        }));
+        
+        setSelectedGames(prev => ({
+          ...prev, // Keep all existing selections
+          [newTitle]: bestMatch.id, // Only update the revised game
+        }));
+        
+        console.log(`[TextListGameIdentifier] Revised title search complete: "${newTitle}" - found ${finalResults.length} results, auto-selected "${bestMatch.name}"`);
+      } else {
+        // No results - merge empty array
+        setSearchResults(prev => ({
+          ...prev, // Keep all existing results
+          [newTitle]: [], // Only update the revised game
+        }));
+        
+        // Add to pending retries
+        try {
+          await addPendingRetry(newTitle);
+          console.log(`[TextListGameIdentifier] Saved revised title "${newTitle}" to pending retries (no results found)`);
+        } catch (retryError) {
+          console.error(`[TextListGameIdentifier] Error saving revised title to pending retries:`, retryError);
+        }
+      }
+    } catch (error) {
+      console.error(`[TextListGameIdentifier] Error searching for revised title "${newTitle}":`, error);
+      // On error, still merge empty results to preserve other games
+      setSearchResults(prev => ({
+        ...prev,
+        [newTitle]: [],
+      }));
+    } finally {
+      // Remove from loading state
+      setLoadingGames(prev => {
+        const updated = new Set(prev);
+        updated.delete(newTitle);
+        return updated;
+      });
+    }
   };
 
   const handleSkipGame = async (gameTitle) => {
-    console.log('[TextListGameIdentifier] User skipped game, saving for later retry:', gameTitle);
+    console.log('[TextListGameIdentifier] User chose to keep trying for:', gameTitle);
     
-    // Save to pending retries for later
+    // Save to pending retries for background retry
     await addPendingRetry(gameTitle);
     
-    setSkippedGames(prev => new Set(prev).add(gameTitle));
+    // Keep the game in loading state so it shows spinner and "please be patient"
+    // Don't mark as skipped - we want to keep trying
     setLoadingGames(prev => {
+      const updated = new Set(prev);
+      updated.add(gameTitle); // Ensure it's in loading state
+      return updated;
+    });
+    
+    // Remove from stuck games so it doesn't show the stuck message
+    // It will be re-added if it gets stuck again
+    setStuckGames(prev => {
       const updated = new Set(prev);
       updated.delete(gameTitle);
       return updated;
     });
-    // Mark as no results so it shows message instead of loading
+    
+    // Keep the empty results so it shows the "please be patient" message
+    // The game will continue trying in the background
     setSearchResults(prev => ({
       ...prev,
-      [gameTitle]: [],
+      [gameTitle]: prev[gameTitle] || [],
     }));
   };
 
@@ -376,7 +491,7 @@ const TextListGameIdentifier = ({
       </View>
     </Modal>
 
-      <GameSelectionModal
+      <ShowGames
         visible={formattedGames.length > 0}
         onClose={handleClose}
         title="Import Games from List"

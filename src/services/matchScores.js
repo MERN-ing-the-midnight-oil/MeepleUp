@@ -6,7 +6,7 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
-import { getGameDetails } from '../utils/api';
+import { getGames } from '../utils/api';
 
 /**
  * Calculate and store match scores for a game for all members of a meepleup
@@ -30,7 +30,7 @@ export const calculateMatchScoresForGame = async (eventId, gameId, game = null, 
     // Get game data if not provided
     let gameData = game;
     if (!gameData) {
-      gameData = await getGameDetails(gameIdStr);
+      gameData = await getGames(gameIdStr);
       if (!gameData) {
         console.warn(`[MatchScores] Could not fetch game data for ${gameIdStr}`);
         return;
@@ -221,8 +221,8 @@ export const calculateMatchScoresForUser = async (eventId, userId, userCollectio
         let gameData = game;
         if (!gameData.mechanics && !gameData.categories && gameData.bggId) {
           try {
-            const { getGameById } = await import('../services/gameDatabase');
-            const fullGameData = await getGameById(String(gameData.bggId));
+            const { getGamesFromFirebase } = await import('../services/gameDatabase');
+            const fullGameData = await getGamesFromFirebase(String(gameData.bggId));
             if (fullGameData) {
               gameData = {
                 ...gameData,

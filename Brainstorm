@@ -8,6 +8,14 @@ Charlie(going)- charlie@email.com
 
 Diana (going)- diana@email.com
 
+1. titlesFromPhoto — function (was identifyGamesFromImage)
+2. titlesFromText — function (was formatGameListForBGG)
+3. getGames — function (was getGameDetails)
+4. getGamesFromFirebase — function (was getGameById)
+5. getGamesFromGeek — function (was fetchBGGGameDetails)
+6. ShowGames — component (was GameSelectionModal)
+
+
 Eve - eve@email.com
     huge greek beast
 

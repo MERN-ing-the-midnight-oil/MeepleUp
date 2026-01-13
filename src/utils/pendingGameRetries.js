@@ -1,7 +1,7 @@
 /**
  * Utility to manage pending game search retries in local storage
  * When a user skips a game search, we save it to retry later
- * Includes exponential backoff: 10s, 20s, 40s, 80s, 160s, etc.
+ * Fixed delay: 1 second between retries, maximum 5 retries
  */
 
 import storage from './storage';
@@ -11,16 +11,24 @@ const METADATA_KEY = 'pending_game_retries_metadata';
 
 /**
  * Get retry metadata structure for a game
- * @param {number} attemptCount - Number of retry attempts (0 = first retry after 10s)
+ * @param {number} attemptCount - Number of retry attempts (0 = first retry after 1s)
  * @returns {number} Milliseconds to wait before next retry
  */
 export const getRetryDelay = (attemptCount) => {
-  // Exponential backoff: 10s, 20s, 40s, 80s, 160s, 320s, 640s, 1280s, 2560s, 5120s
-  // Cap at 5120 seconds (~85 minutes) to avoid extremely long waits
-  const maxAttempts = 10;
-  const baseDelayMs = 10 * 1000; // 10 seconds in milliseconds
-  const cappedAttempt = Math.min(attemptCount, maxAttempts);
-  return baseDelayMs * Math.pow(2, cappedAttempt);
+  // Fixed delay: 1 second for all retries
+  // Limit to 5 retries max
+  const maxDelayMs = 1 * 1000; // 1 second in milliseconds
+  return maxDelayMs;
+};
+
+/**
+ * Check if a game has exceeded the maximum retry attempts
+ * @param {number} attemptCount - Number of retry attempts
+ * @returns {boolean} True if max retries exceeded
+ */
+export const hasExceededMaxRetries = (attemptCount) => {
+  const MAX_RETRIES = 5;
+  return attemptCount >= MAX_RETRIES;
 };
 
 /**
@@ -76,7 +84,37 @@ const setRetryMetadata = async (metadata) => {
 };
 
 /**
- * Get games that are ready for retry based on exponential backoff
+ * Get the next retry time for a specific game (in milliseconds from now)
+ * @param {string} gameTitle - The game title to check
+ * @returns {Promise<number|null>} Milliseconds until next retry, or null if not in pending retries
+ */
+export const getNextRetryTime = async (gameTitle) => {
+  try {
+    const pendingTitles = await getPendingRetries();
+    if (!pendingTitles.includes(gameTitle)) {
+      return null; // Not in pending retries
+    }
+
+    const metadata = await getRetryMetadata();
+    const gameMetadata = metadata[gameTitle] || { attemptCount: 0, lastRetryAt: null, addedAt: Date.now() };
+    const delayMs = getRetryDelay(gameMetadata.attemptCount);
+    
+    // If there's a lastRetryAt, next retry is lastRetryAt + delay
+    // Otherwise, next retry is addedAt + delay (for first retry)
+    const baseTime = gameMetadata.lastRetryAt || gameMetadata.addedAt || Date.now();
+    const nextRetryAt = baseTime + delayMs;
+    const now = Date.now();
+    
+    // Return milliseconds until next retry (or 0 if ready now)
+    return Math.max(0, nextRetryAt - now);
+  } catch (error) {
+    console.error('[PendingGameRetries] Error getting next retry time:', error);
+    return null;
+  }
+};
+
+/**
+ * Get games that are ready for retry based on fixed delay
  * @returns {Promise<Array<string>>} Array of game titles ready for retry
  */
 export const getGamesReadyForRetry = async () => {
@@ -92,6 +130,12 @@ export const getGamesReadyForRetry = async () => {
 
     for (const gameTitle of pendingTitles) {
       const gameMetadata = metadata[gameTitle] || { attemptCount: 0, lastRetryAt: null };
+      
+      // Skip games that have exceeded max retries
+      if (hasExceededMaxRetries(gameMetadata.attemptCount)) {
+        continue;
+      }
+      
       const delayMs = getRetryDelay(gameMetadata.attemptCount);
       const nextRetryAt = gameMetadata.lastRetryAt 
         ? gameMetadata.lastRetryAt + delayMs 

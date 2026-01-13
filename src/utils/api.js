@@ -26,6 +26,100 @@ export const cleanScannerTitle = (title) => {
 };
 
 /**
+ * Process and score BGG search results with improved matching
+ * Handles reverse matching (when game name is contained in search term)
+ * @param {Array} results - Raw BGG API search results
+ * @param {string} originalQuery - Original search query (for scoring)
+ * @returns {Array} Processed and scored results, sorted by match quality
+ */
+function processBGGSearchResults(results, originalQuery) {
+  if (!results || results.length === 0) {
+    return [];
+  }
+  
+  const normalize = (str) => str.trim().toLowerCase();
+  const normalizedQuery = normalize(originalQuery);
+  
+  // Score and categorize each result
+  const scoredResults = results.map(result => {
+    const resultName = result.name || '';
+    const normalizedResultName = normalize(resultName);
+    let score = 0;
+    let matchType = 'none';
+    
+    // 1. Exact match (highest priority)
+    if (normalizedResultName === normalizedQuery) {
+      score += 1000;
+      matchType = 'exact';
+    }
+    // 2. Starts with match
+    else if (normalizedResultName.startsWith(normalizedQuery)) {
+      score += 500;
+      matchType = 'startsWith';
+    }
+    // 3. Contains match (search term is in game name)
+    else if (normalizedResultName.includes(normalizedQuery)) {
+      score += 100;
+      matchType = 'contains';
+    }
+    // 4. REVERSE contains match (game name is in search term) - NEW!
+    // This handles cases like: search="Feudum: Alter Ego - Forest", game="Feudum: Alter Ego"
+    else if (normalizedResultName.length >= 4 && normalizedQuery.includes(normalizedResultName)) {
+      // Calculate similarity based on how much of the game name matches
+      const matchRatio = normalizedResultName.length / normalizedQuery.length;
+      score += Math.max(80, Math.floor(100 * matchRatio)); // 80-100 points based on match ratio
+      matchType = 'reverseContains';
+    }
+    
+    // Prefer boardgames over expansions
+    if (result.type === 'boardgame') {
+      score += 50;
+    }
+    
+    // Prefer games with better (lower) rank
+    if (result.rank && result.rank > 0) {
+      score += Math.max(0, 10000 - result.rank);
+    }
+    
+    // Prefer games with thumbnails
+    if (result.thumbnail) {
+      score += 10;
+    }
+    
+    return { ...result, _matchScore: score, _matchType: matchType };
+  });
+  
+  // Sort by match type priority first, then by score
+  const typePriority = { 
+    exact: 0, 
+    startsWith: 1, 
+    contains: 2, 
+    reverseContains: 3,  // New: handles cases where game name is in search term
+    none: 4 
+  };
+  
+  scoredResults.sort((a, b) => {
+    const aPriority = typePriority[a._matchType] ?? 4;
+    const bPriority = typePriority[b._matchType] ?? 4;
+    
+    if (aPriority !== bPriority) {
+      return aPriority - bPriority;
+    }
+    
+    // Within same type, sort by score (higher is better)
+    if (b._matchScore !== a._matchScore) {
+      return b._matchScore - a._matchScore;
+    }
+    
+    // Tie-breaker: sort by name
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  
+  // Remove temporary scoring fields
+  return scoredResults.map(({ _matchScore, _matchType, ...clean }) => clean);
+}
+
+/**
  * Search for a game by barcode/UPC using RapidAPI and then search BGG
  * @param {string} barcode - The UPC/EAN barcode number
  * @param {boolean} searchBGG - Whether to automatically search BGG after barcode lookup
@@ -41,7 +135,7 @@ export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
     // If GameUPC already returned verified BGG info, use it
     if (barcodeResult.source === 'gameupc' && barcodeResult.bggInfoStatus === 'verified' && barcodeResult.bggId) {
       try {
-        const bggDetails = await getGameDetails(barcodeResult.bggId);
+        const bggDetails = await getGames(barcodeResult.bggId);
         return {
           ...barcodeResult,
           bggMatch: true,
@@ -76,7 +170,7 @@ export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
       if (bggResults && bggResults.length > 0) {
         // Get detailed info for the first (most relevant) result
         const topResult = bggResults[0];
-        const bggDetails = await getGameDetails(topResult.id);
+        const bggDetails = await getGames(topResult.id);
         
         return {
           ...barcodeResult,
@@ -446,26 +540,102 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             }
           }
           
-          const attemptStartTime = Date.now();
-          const { searchBGGAPI } = await import('../services/bggApi');
-          bggResults = await searchBGGAPI(query, 50, 3); // 3 retries per attempt
-          const attemptDuration = ((Date.now() - attemptStartTime) / 1000).toFixed(2);
-          
-          if (bggResults && bggResults.length > 0) {
-            const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
-            if (__DEV__) {
-              console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}"`, {
-                attemptDurationSeconds: attemptDuration,
-                totalDurationSeconds: totalDuration,
-                attempts: bggRetryCount + 1,
-              });
-              console.log(`[BGG API] Found ${bggResults.length} games`);
+          // Generate search variants for progressive suffix removal
+          const generateSearchVariants = (term) => {
+            const variants = [term]; // Always try original first
+            
+            // Remove common suffixes/patterns
+            let cleaned = term;
+            
+            // Remove " - [word]" patterns (e.g., " - Forest", " - Expansion")
+            cleaned = cleaned.replace(/\s*-\s*[^-:]+$/, '').trim();
+            if (cleaned && cleaned !== term && cleaned.length >= 3) {
+              variants.push(cleaned);
             }
             
+            // Remove ": [word]" patterns (e.g., ": Arrows of the Forest")
+            cleaned = term;
+            cleaned = cleaned.replace(/:\s*[^:]+$/, '').trim();
+            if (cleaned && cleaned !== term && cleaned.length >= 3) {
+              variants.push(cleaned);
+            }
+            
+            // Remove both patterns
+            cleaned = term;
+            cleaned = cleaned.replace(/\s*-\s*[^-:]+$/, '').trim();
+            cleaned = cleaned.replace(/:\s*[^:]+$/, '').trim();
+            if (cleaned && cleaned !== term && cleaned.length >= 3) {
+              variants.push(cleaned);
+            }
+            
+            // Remove last word if it's a common suffix word
+            const suffixWords = ['forest', 'expansion', 'edition', 'promo', 'promotional', 'card', 'cards', 'arrows'];
+            const words = term.split(/\s+/);
+            if (words.length > 2) {
+              const lastWord = words[words.length - 1].toLowerCase().replace(/[^a-z]/g, '');
+              if (suffixWords.includes(lastWord)) {
+                const withoutLastWord = words.slice(0, -1).join(' ').trim();
+                if (withoutLastWord && withoutLastWord !== term && withoutLastWord.length >= 3) {
+                  variants.push(withoutLastWord);
+                }
+              }
+            }
+            
+            // Return unique variants, preserving order
+            return [...new Set(variants)];
+          };
+          
+          const searchVariants = generateSearchVariants(query);
+          let bggResults = [];
+          let attemptDuration = '0.00'; // Initialize outside loop
+          
+          // Try each variant in order
+          for (let variantIndex = 0; variantIndex < searchVariants.length; variantIndex++) {
+            const searchVariant = searchVariants[variantIndex];
+            const isFirstVariant = variantIndex === 0;
+            
+            if (__DEV__ && !isFirstVariant) {
+              console.log(`[Game Search → BGG API] Trying variant ${variantIndex + 1}/${searchVariants.length}: "${searchVariant}"`);
+            }
+            
+            const attemptStartTime = Date.now();
+            const { searchBGGAPI } = await import('../services/bggApi');
+            const variantResults = await searchBGGAPI(searchVariant, 50, 3); // 3 retries per attempt
+            attemptDuration = ((Date.now() - attemptStartTime) / 1000).toFixed(2);
+            
+            if (variantResults && variantResults.length > 0) {
+              // Process and score results with improved matching
+              const processedResults = processBGGSearchResults(variantResults, query);
+              
+              if (processedResults.length > 0) {
+                bggResults = processedResults;
+                const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+                if (__DEV__) {
+                  console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}" (using variant "${searchVariant}")`, {
+                    attemptDurationSeconds: attemptDuration,
+                    totalDurationSeconds: totalDuration,
+                    attempts: bggRetryCount + 1,
+                    variantUsed: searchVariant,
+                  });
+                  console.log(`[BGG API] Found ${bggResults.length} games`);
+                }
+                break; // Found results, stop trying variants
+              }
+            }
+            
+            // If this was the last variant and we still have no results, use empty array
+            if (variantIndex === searchVariants.length - 1 && bggResults.length === 0) {
+              if (__DEV__) {
+                console.log(`[Game Search → BGG API] No results found after trying all ${searchVariants.length} variants`);
+              }
+            }
+          }
+          
+          if (bggResults && bggResults.length > 0) {
             // DO NOT cache incomplete search results to Firestore
             // Search results only contain basic info (id, name, yearPublished) from /search endpoint
             // We should NEVER save incomplete records to Firebase
-            // Full "Thing" data will be fetched and cached when user selects a game via getGameDetails()
+            // Full "Thing" data will be fetched and cached when user selects a game via getGames()
             
             return bggResults;
           } else {
@@ -565,13 +735,13 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
  * Get detailed game information by BGG ID
  * Priority: Firebase Firestore -> BGG API (only if game not found in Firestore)
  */
-export const getGameDetails = async (gameId, source = 'unknown') => {
+export const getGames = async (gameId, source = 'unknown') => {
   try {
     let gameData = null;
 
     // Try Firebase Firestore first
     try {
-      const { getGameById: getFirestoreGame } = await import('../services/gameDatabase');
+      const { getGamesFromFirebase: getFirestoreGame } = await import('../services/gameDatabase');
       const firestoreGame = await getFirestoreGame(gameId);
       
       if (firestoreGame) {
@@ -620,8 +790,8 @@ export const getGameDetails = async (gameId, source = 'unknown') => {
             console.warn(`⚠️ [Game Details] BGG API CALL - Missing data for: ${gameData.name} (${gameId}, Source: ${source})`);
           }
           try {
-            const { fetchBGGGameDetails } = await import('../services/bggApi');
-            const bggData = await fetchBGGGameDetails(gameId);
+            const { getGamesFromGeek } = await import('../services/bggApi');
+            const bggData = await getGamesFromGeek(gameId);
             
             if (bggData) {
               // Merge BGG API data into gameData, prioritizing BGG API data for missing fields
@@ -716,8 +886,8 @@ export const getGameDetails = async (gameId, source = 'unknown') => {
         if (__DEV__) {
           console.log('[BGG API] Game not in database, fetching from BGG API');
         }
-        const { fetchBGGGameDetails } = await import('../services/bggApi');
-        const bggData = await fetchBGGGameDetails(gameId);
+        const { getGamesFromGeek } = await import('../services/bggApi');
+        const bggData = await getGamesFromGeek(gameId);
         
         if (bggData) {
           gameData = {

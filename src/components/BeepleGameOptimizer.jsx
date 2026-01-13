@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { optimizeGameSchedule, generateScheduleSummary } from '../utils/gameOptimizer';
-import { getGameDetails } from '../utils/api';
+import { getGames } from '../utils/api';
 import { theme } from '../utils/theme';
 import BeepleAvatar from './BeepleAvatar';
 import { db } from '../config/firebase';
@@ -108,7 +108,7 @@ const BeepleGameOptimizer = ({
         if (details[gameId]) return; // Already loaded
         
         try {
-          const gameData = await getGameDetails(gameId);
+          const gameData = await getGames(gameId);
           if (gameData) {
             details[gameId] = gameData;
           }

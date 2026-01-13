@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Alert, Linking, Pressable, Image } 
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { useEvents } from '../context/EventsContext';
-import { fetchBGGCollection, getGameDetails } from '../utils/api';
+import { fetchBGGCollection, getGames } from '../utils/api';
 import { calculateMatchScoresForUser } from '../services/matchScores';
 import { bggLogoColor } from './BGGLogoAssets';
 import Input from './common/Input';
@@ -190,11 +190,11 @@ const BGGImport = ({ onImportComplete }) => {
           });
         }
         
-        const { getGameById } = await import('../services/gameDatabase');
+        const { getGamesFromFirebase } = await import('../services/gameDatabase');
         const firestoreChecks = await Promise.all(
           gamesToImport.map(async (game) => {
             try {
-              const cached = await getGameById(game.bggId);
+              const cached = await getGamesFromFirebase(game.bggId);
               return { game, cached };
             } catch {
               return { game, cached: null };

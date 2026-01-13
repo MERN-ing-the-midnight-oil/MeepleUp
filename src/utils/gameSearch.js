@@ -1,6 +1,6 @@
-import { searchGamesByName, getGameDetails } from './api';
+import { searchGamesByName, getGames } from './api';
 import { addPendingRetry } from './pendingGameRetries';
-import { Alert } from 'react-native';
+import logger from './inAppLogger';
 
 /**
  * Shared utility function to search BGG for multiple game titles
@@ -16,12 +16,13 @@ import { Alert } from 'react-native';
  * @returns {Promise<void>}
  */
 export const searchForAllGames = async (games, callbacks, source = 'game_import') => {
-  const { setLoadingGames, setSearchResults, setSelectedGames, setProcessingGameIndex, isSkipped, setSkippedGames, addPendingRetry, setStuckGames } = callbacks;
+  const { setLoadingGames, setSearchResults, setSelectedGames, setProcessingGameIndex, isSkipped, setSkippedGames, addPendingRetry, setStuckGames, setGameSearchStartTimes } = callbacks;
   const results = {};
   const selected = {};
   const searchStartTime = Date.now();
   const gameTimings = {}; // Track timing for each game
   const gameSearchStartTimes = {}; // Track when each game search started
+  const stuckBucket = []; // Collect stuck games to retry after all other games complete
   const performanceStats = {
     gamesAutoSkipped: 0, // Games auto-skipped due to 10s timeout
     rateLimitHits: 0, // Number of times we hit rate limits
@@ -31,6 +32,10 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
 
   const logPrefix = source === 'image_recognition' ? '[ClaudeGameIdentifier → BGG]' : '[TextListGameIdentifier → BGG]';
 
+  logger.info(`🚀 Starting search for ${games.length} games`, {
+    estimatedTimeMinutes: Math.ceil(games.length * 0.5),
+    games,
+  });
   console.log(`${logPrefix} 🚀 Starting search for ${games.length} games`, {
     timestamp: new Date().toISOString(),
     estimatedTimeMinutes: Math.ceil(games.length * 0.5), // ~0.5 min per game (conservative)
@@ -54,6 +59,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     const gameTitle = games[i];
     const cleanedTitle = cleanGameTitle(gameTitle);
     const gameSearchStartTime = Date.now();
+    let firstFailureTime = null; // Track when the first failure occurs (after retries with backoff)
     
     // Update processing index if callback provided (for TextListGameIdentifier)
     if (setProcessingGameIndex) {
@@ -94,34 +100,25 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         break;
       }
       
-      // Check if this search has been running too long (> 10 seconds) - auto-skip to retry bucket
+      // Check if this search has been running too long (> 10 seconds) - add to stuck bucket
       const STUCK_TIMEOUT_MS = 10000; // 10 seconds
       const elapsedMs = Date.now() - gameSearchStartTime;
       if (elapsedMs > STUCK_TIMEOUT_MS) {
         performanceStats.gamesAutoSkipped++;
-        console.log(`${logPrefix} ⏱️ Search for "${gameTitle}" has been running for ${(elapsedMs / 1000).toFixed(1)}s - skipping to retry bucket`);
+        logger.warn(`⏱️ "${gameTitle}" stuck after ${(elapsedMs / 1000).toFixed(1)}s - adding to bucket`, {
+          elapsedSeconds: (elapsedMs / 1000).toFixed(1),
+          bucketSize: stuckBucket.length + 1,
+        });
+        console.log(`${logPrefix} ⏱️ Search for "${gameTitle}" has been running for ${(elapsedMs / 1000).toFixed(1)}s - adding to stuck bucket for batch retry`);
         results[gameTitle] = [];
         
-        // Save to pending retries
-        if (addPendingRetry) {
-          try {
-            await addPendingRetry(gameTitle);
-            console.log(`${logPrefix} 💾 Auto-saved "${gameTitle}" to pending retries (stuck timeout)`);
-          } catch (retryError) {
-            console.error(`${logPrefix} ❌ Error auto-saving "${gameTitle}" to pending retries:`, retryError);
-          }
-        }
+        // Add to stuck bucket instead of immediately adding to pending retries
+        // We'll retry all stuck games together after all other games complete
+        stuckBucket.push(gameTitle);
+        console.log(`${logPrefix} 📦 Added "${gameTitle}" to stuck bucket (${stuckBucket.length} games in bucket)`);
         
-        // Mark as skipped
-        if (setSkippedGames) {
-          setSkippedGames(prev => new Set(prev).add(gameTitle));
-        }
-        
-        setLoadingGames(prev => {
-          const updated = new Set(prev);
-          updated.delete(gameTitle);
-          return updated;
-        });
+        // Keep in loading state - we'll retry it later
+        // Don't mark as skipped yet - let the batch retry handle it
         setSearchResults({ ...results });
         break;
       }
@@ -160,8 +157,21 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         });
         
         const searchAttemptStartTime = Date.now();
+        logger.debug(`Searching for "${searchQuery}"`, {
+          gameTitle,
+          cleanedTitle,
+          attempt: retryCount + 1,
+        });
         searchResults = await searchGamesByName(searchQuery, true);
         const searchAttemptDuration = ((Date.now() - searchAttemptStartTime) / 1000).toFixed(2);
+        
+        // Log if Firebase search might have timed out (took > 2.5 seconds)
+        if (parseFloat(searchAttemptDuration) > 2.5) {
+          logger.warn(`Search for "${searchQuery}" took ${searchAttemptDuration}s - Firebase may have timed out`, {
+            duration: searchAttemptDuration,
+            resultCount: searchResults?.length || 0,
+          });
+        }
         
         // If no results with cleaned title and we haven't tried original, try original
         if ((!searchResults || searchResults.length === 0) && searchQuery === cleanedTitle && cleanedTitle !== gameTitle && !triedOriginal) {
@@ -189,6 +199,37 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           
           if (!searchResults || searchResults.length === 0) {
             performanceStats.gamesNotFound++;
+            
+            // Track when the first failure occurs (after we've tried at least once)
+            // Only start the "stuck" timer after multiple retries with exponential backoff
+            // This ensures we've given BGG API multiple chances before showing "stuck" message
+            if (firstFailureTime === null) {
+              firstFailureTime = Date.now();
+              console.log(`${logPrefix} ⏱️ First failure for "${gameTitle}" at attempt ${retryCount + 1}`);
+            }
+            
+            // Only update the stuck timer start time after we've tried multiple times (retryCount >= 2 means 3+ attempts)
+            // This ensures the 30-second stuck timer only starts after we've tried with exponential backoff
+            if (retryCount >= 2 && setGameSearchStartTimes) {
+              // Update the start time to when we first failed, so the 30-second timer starts from first failure
+              // But only after we've tried multiple times (3+ attempts)
+              setGameSearchStartTimes(prev => {
+                // Only update if not already set to first failure time
+                if (!prev[gameTitle] || prev[gameTitle] > firstFailureTime) {
+                  return {
+                    ...prev,
+                    [gameTitle]: firstFailureTime,
+                  };
+                }
+                return prev;
+              });
+              console.log(`${logPrefix} ⏱️ "${gameTitle}" has failed ${retryCount + 1} times - stuck timer starts from first failure (${((Date.now() - firstFailureTime) / 1000).toFixed(1)}s ago)`);
+            }
+            
+            logger.warn(`⚠️ No results for "${gameTitle}" - adding to pending retries`, {
+              attempt: retryCount + 1,
+              gameTitle,
+            });
             console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - adding to pending retries for later (BGG API may need multiple attempts)`);
             // Add to pending retries instead of showing alert - BGG API often needs multiple attempts
             if (addPendingRetry) {
@@ -223,7 +264,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
               }
               
               try {
-                const gameDetails = await getGameDetails(result.id, source);
+                const gameDetails = await getGames(result.id, source);
                 return {
                   ...result,
                   thumbnail: gameDetails?.thumbnail || null,
@@ -286,19 +327,31 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             // Score each result (higher score = better match)
             const scoredResults = resultsWithThumbnails.map(result => {
               let score = 0;
+              let matchType = 'none';
               const normalizedResultName = (result.name || '').toLowerCase().trim();
               
-              // Exact name match gets highest priority (score +1000)
+              // 1. Exact name match gets highest priority (score +1000)
               if (normalizedResultName === normalizedSearchTitle) {
                 score += 1000;
+                matchType = 'exact';
               }
-              // Starts with search title (score +500)
+              // 2. Starts with search title (score +500)
               else if (normalizedResultName.startsWith(normalizedSearchTitle)) {
                 score += 500;
+                matchType = 'startsWith';
               }
-              // Contains search title (score +100)
+              // 3. Contains search title (score +100)
               else if (normalizedResultName.includes(normalizedSearchTitle)) {
                 score += 100;
+                matchType = 'contains';
+              }
+              // 4. REVERSE contains match (game name is in search term) - NEW!
+              // This handles cases like: search="Feudum: Alter Ego - Forest", game="Feudum: Alter Ego"
+              else if (normalizedResultName.length >= 4 && normalizedSearchTitle.includes(normalizedResultName)) {
+                // Calculate similarity based on how much of the game name matches
+                const matchRatio = normalizedResultName.length / normalizedSearchTitle.length;
+                score += Math.max(80, Math.floor(100 * matchRatio)); // 80-100 points based on match ratio
+                matchType = 'reverseContains';
               }
               
               // Prefer boardgames over expansions (score +50 for boardgame)
@@ -317,25 +370,43 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
                 score += 10;
               }
               
-              return { ...result, _matchScore: score };
+              return { ...result, _matchScore: score, _matchType: matchType };
             });
             
-            // Sort by score (highest first), then by name for tie-breaking
+            // Sort by match type priority first, then by score
+            const typePriority = { 
+              exact: 0, 
+              startsWith: 1, 
+              contains: 2, 
+              reverseContains: 3,
+              none: 4 
+            };
+            
             scoredResults.sort((a, b) => {
+              const aPriority = typePriority[a._matchType] ?? 4;
+              const bPriority = typePriority[b._matchType] ?? 4;
+              
+              if (aPriority !== bPriority) {
+                return aPriority - bPriority;
+              }
+              
+              // Within same type, sort by score (higher is better)
               if (b._matchScore !== a._matchScore) {
                 return b._matchScore - a._matchScore;
               }
+              
+              // Tie-breaker: sort by name
               return (a.name || '').localeCompare(b.name || '');
             });
             
             const bestMatch = scoredResults[0];
             const matchScore = bestMatch._matchScore;
             
-            // Remove the temporary _matchScore field before storing
-            const { _matchScore, ...cleanResult } = bestMatch;
+            // Remove the temporary _matchScore and _matchType fields before storing
+            const { _matchScore, _matchType, ...cleanResult } = bestMatch;
             
-            // Update results with cleaned data (remove _matchScore from all)
-            results[gameTitle] = scoredResults.map(({ _matchScore, ...clean }) => clean);
+            // Update results with cleaned data (remove _matchScore and _matchType from all)
+            results[gameTitle] = scoredResults.map(({ _matchScore, _matchType, ...clean }) => clean);
             
             console.log(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, rank: ${bestMatch.rank || 'N/A'})`);
             
@@ -425,12 +496,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             try {
               await addPendingRetry(gameTitle);
               console.log(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries for background retry`);
-              // Alert user that search failed but will retry
-              Alert.alert(
-                'Search Failed',
-                `Couldn't search for "${gameTitle}" right now. We'll try again later.`,
-                [{ text: 'OK' }]
-              );
+              // No alert - BGG API retries with exponential backoff, so failures are expected and will retry automatically
             } catch (retryError) {
               console.error(`${logPrefix} ❌ Error saving "${gameTitle}" to pending retries:`, retryError);
             }
@@ -512,6 +578,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     minTimePerGame: minTime + 's',
     maxTimePerGame: maxTime + 's',
     gamesWithTiming: timings.length,
+    stuckBucketSize: stuckBucket.length,
     performanceStats: {
       gamesAutoSkipped: performanceStats.gamesAutoSkipped,
       rateLimitHits: performanceStats.rateLimitHits,
@@ -525,6 +592,156 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
 
   setSearchResults(results);
   setSelectedGames(selected);
+  
+  // Retry all stuck games in the bucket now that other games are done
+  if (stuckBucket.length > 0) {
+    console.log(`${logPrefix} 🔄 Retrying ${stuckBucket.length} stuck games from bucket...`);
+    const bucketRetryStartTime = Date.now();
+    
+    for (const stuckGameTitle of stuckBucket) {
+      // Skip if user manually skipped this game
+      if (isSkipped && isSkipped(stuckGameTitle)) {
+        console.log(`${logPrefix} ⏭️ Skipping bucket retry for "${stuckGameTitle}" - user chose to skip`);
+        continue;
+      }
+      
+      console.log(`${logPrefix} 🔄 Retrying stuck game: "${stuckGameTitle}"`);
+      
+      // Mark as loading again
+      setLoadingGames(prev => new Set(prev).add(stuckGameTitle));
+      
+      const cleanedTitle = cleanGameTitle(stuckGameTitle);
+      let bucketRetrySuccess = false;
+      let bucketRetryResults = null;
+      
+      try {
+        // Try cleaned title first, then original
+        const queriesToTry = cleanedTitle !== stuckGameTitle ? [cleanedTitle, stuckGameTitle] : [stuckGameTitle];
+        
+        for (const query of queriesToTry) {
+          try {
+            console.log(`${logPrefix} 📡 Bucket retry: searching for "${query}" (from "${stuckGameTitle}")`);
+            bucketRetryResults = await searchGamesByName(query, true);
+            
+            if (bucketRetryResults && bucketRetryResults.length > 0) {
+              bucketRetrySuccess = true;
+              console.log(`${logPrefix} ✅ Bucket retry SUCCESS for "${stuckGameTitle}" - found ${bucketRetryResults.length} results`);
+              break;
+            }
+          } catch (queryError) {
+            console.warn(`${logPrefix} ⚠️ Bucket retry query "${query}" failed:`, queryError.message);
+            // Try next query
+            continue;
+          }
+        }
+        
+        if (bucketRetrySuccess && bucketRetryResults && bucketRetryResults.length > 0) {
+          // Success! Process results similar to main loop
+          const MAX_THUMBNAIL_FETCHES = 3;
+          const resultsToEnrich = bucketRetryResults.slice(0, MAX_THUMBNAIL_FETCHES);
+          const remainingResults = bucketRetryResults.slice(MAX_THUMBNAIL_FETCHES);
+          
+          const enrichedResults = await Promise.all(
+            resultsToEnrich.map(async (result) => {
+              try {
+                const details = await getGames(result.id);
+                return {
+                  ...result,
+                  thumbnail: details?.thumbnail || result.thumbnail || null,
+                  image: details?.image || result.image || null,
+                };
+              } catch (detailError) {
+                console.warn(`${logPrefix} ⚠️ Failed to fetch details for bucket retry result ${result.id}:`, detailError.message);
+                return result;
+              }
+            })
+          );
+          
+          const resultsWithThumbnails = [...enrichedResults, ...remainingResults];
+          results[stuckGameTitle] = resultsWithThumbnails;
+          
+          // Auto-select best match
+          if (resultsWithThumbnails.length > 0) {
+            const normalizedSearchTitle = stuckGameTitle.toLowerCase().trim();
+            const scoredResults = resultsWithThumbnails.map(result => {
+              let score = 0;
+              const normalizedResultName = (result.name || '').toLowerCase().trim();
+              
+              if (normalizedResultName === normalizedSearchTitle) score += 1000;
+              else if (normalizedResultName.startsWith(normalizedSearchTitle)) score += 500;
+              else if (normalizedResultName.includes(normalizedSearchTitle)) score += 100;
+              
+              if (result.type === 'boardgame') score += 50;
+              if (result.rank && result.rank > 0) score += Math.max(0, 10000 - result.rank);
+              if (result.thumbnail) score += 10;
+              
+              return { ...result, _matchScore: score };
+            });
+            
+            scoredResults.sort((a, b) => {
+              if (b._matchScore !== a._matchScore) return b._matchScore - a._matchScore;
+              return (a.name || '').localeCompare(b.name || '');
+            });
+            
+            const bestMatch = scoredResults[0];
+            const { _matchScore, ...cleanResult } = bestMatch;
+            results[stuckGameTitle] = scoredResults.map(({ _matchScore, ...clean }) => clean);
+            selected[stuckGameTitle] = bestMatch.id;
+            setSelectedGames({ ...selected });
+            
+            console.log(`${logPrefix} ✅ Bucket retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${stuckGameTitle}"`);
+            performanceStats.gamesFound++;
+          }
+        } else {
+          // Bucket retry also failed - add to pending retries for background retry
+          console.log(`${logPrefix} ⚠️ Bucket retry failed for "${stuckGameTitle}" - adding to pending retries`);
+          results[stuckGameTitle] = [];
+          
+          if (addPendingRetry) {
+            try {
+              await addPendingRetry(stuckGameTitle);
+              console.log(`${logPrefix} 💾 Saved "${stuckGameTitle}" to pending retries (bucket retry failed)`);
+            } catch (retryError) {
+              console.error(`${logPrefix} ❌ Error saving "${stuckGameTitle}" to pending retries:`, retryError);
+            }
+          }
+          
+          performanceStats.gamesNotFound++;
+        }
+      } catch (bucketError) {
+        console.error(`${logPrefix} ❌ Error during bucket retry for "${stuckGameTitle}":`, bucketError);
+        results[stuckGameTitle] = [];
+        
+        // Add to pending retries on error
+        if (addPendingRetry) {
+          try {
+            await addPendingRetry(stuckGameTitle);
+            console.log(`${logPrefix} 💾 Saved "${stuckGameTitle}" to pending retries (bucket retry error)`);
+          } catch (retryError) {
+            console.error(`${logPrefix} ❌ Error saving "${stuckGameTitle}" to pending retries:`, retryError);
+          }
+        }
+      } finally {
+        // Always update loading state and results
+        setLoadingGames(prev => {
+          const updated = new Set(prev);
+          updated.delete(stuckGameTitle);
+          return updated;
+        });
+        setSearchResults({ ...results });
+        setSelectedGames({ ...selected });
+      }
+    }
+    
+    const bucketRetryDuration = ((Date.now() - bucketRetryStartTime) / 1000).toFixed(2);
+    const bucketSuccessCount = stuckBucket.filter(title => results[title] && results[title].length > 0).length;
+    logger.info(`✅ Bucket retry complete: ${bucketSuccessCount}/${stuckBucket.length} games resolved`, {
+      successCount: bucketSuccessCount,
+      totalStuck: stuckBucket.length,
+      durationSeconds: bucketRetryDuration,
+    });
+    console.log(`${logPrefix} ✅ Bucket retry complete: ${bucketSuccessCount}/${stuckBucket.length} games resolved (${bucketRetryDuration}s)`);
+  }
   
   // Clear processing index if callback provided
   if (setProcessingGameIndex) {

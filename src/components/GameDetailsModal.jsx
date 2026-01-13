@@ -3,7 +3,7 @@ import { View, Text, Image, StyleSheet, Modal, ScrollView, KeyboardAvoidingView,
 import { useNavigation } from '@react-navigation/native';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import DottedHeart from './DottedHeart';
-import { getGameById } from '../services/gameDatabase';
+import { getGamesFromFirebase } from '../services/gameDatabase';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import CategoryBadge from './CategoryBadge';
 import { useAuth } from '../context/AuthContext';

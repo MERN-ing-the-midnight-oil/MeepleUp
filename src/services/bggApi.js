@@ -393,7 +393,7 @@ function parseBGGXMLFromItem(item) {
  * @param {string|number} gameId - BGG game ID
  * @returns {Promise<Object|null>} Game object with all available data
  */
-export async function fetchBGGGameDetails(gameId) {
+export async function getGamesFromGeek(gameId) {
   if (!gameId) {
     return null;
   }

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Pre-populate Top 1000 Games Script
- * Fetches the top 1000 BGG-ranked games and stores them in Firestore
+ * Pre-populate Top 10,000 Games Script
+ * Fetches the top 10,000 BGG-ranked games and stores them in Firestore
  * Spreads downloads over several hours to be extra respectful to BGG API
  * 
  * Rate limits:
  * - 6-8 seconds between batches (within a group)
  * - 15-20 minutes between batch groups (spreads over hours)
  * - Processes ~200 games per group, then takes a break
- * - 1000 games will take approximately 2-3 hours total
+ * - 10,000 games will take approximately 20-30 hours total
  * 
  * Usage: node scripts/pre-populate-top-games.js
  */
@@ -28,7 +28,9 @@ admin.initializeApp({
 
 const db = admin.firestore();
 const BGG_API_BASE = 'https://boardgamegeek.com/xmlapi2';
+const TARGET_GAME_COUNT = 10000; // Target number of top games to fetch
 const BATCH_SIZE = 20; // BGG API supports up to 20 games per request
+const BROWSE_LIMIT = 100; // BGG browse API limit per request
 const MIN_DELAY_MS = 6000; // 6 seconds minimum (slightly more than BGG's 5 second recommendation)
 const MAX_DELAY_MS = 8000; // 8 seconds maximum (adds randomization to look less automated)
 
@@ -36,31 +38,15 @@ const MAX_DELAY_MS = 8000; // 8 seconds maximum (adds randomization to look less
 const BATCHES_PER_GROUP = 10; // Process 10 batches (200 games) before taking a longer break
 const MIN_BREAK_MS = 15 * 60 * 1000; // 15 minutes minimum break between groups
 const MAX_BREAK_MS = 20 * 60 * 1000; // 20 minutes maximum break (adds randomization)
-// This spreads 1000 games over ~2-3 hours total
+// This spreads 10,000 games over ~20-30 hours total
 
 /**
- * Top 1000 BGG Game IDs
- * 
- * To get the current top 1000 game IDs:
- * 1. Visit: https://boardgamegeek.com/browse/boardgame
- * 2. Navigate through pages (50 games per page, so pages 1-20 for top 1000)
- * 3. The game IDs are in the URL when you click on each game (e.g., /boardgame/174430)
- * 4. Or use a browser extension/script to extract them from the rankings page
- * 
- * Alternatively, you can manually curate a list of popular games you know are commonly owned.
- * 
- * Example of well-known top games (update with actual current rankings):
- * - Gloomhaven: 174430
- * - Pandemic Legacy: Season 1: 161936
- * - Brass: Birmingham: 224517
- * - Terraforming Mars: 167791
- * - Twilight Imperium: 233078
- * - etc.
- * 
- * Note: You can start with fewer games (e.g., top 200) and the script will work fine.
- * It will just take proportionally less time.
+ * Fetch top N game IDs from BGG browse API
+ * Uses BGG's browse endpoint to get ranked games dynamically
  */
-const TOP_1000_GAME_IDS = [
+
+// Old hardcoded array removed - now fetching dynamically from BGG API
+const _UNUSED_TOP_1000_GAME_IDS = [
   224517, 342942, 161936, 174430, 316554, 233078, 397598, 115746, 167791, 187645,
   162886, 291457, 220308, 12333, 84876, 182028, 193738, 295770, 246900, 418059,
   28720, 338960, 173346, 169786, 167355, 177736, 266507, 421006, 124361, 312484,
@@ -506,64 +492,155 @@ async function saveGameToFirestore(gameData) {
 }
 
 /**
- * Get top 1000 game IDs
- * For now, uses the static TOP_1000_GAME_IDS array
- * In the future, could fetch from BGG's API or a ranking service
+ * Fetch top N game IDs from BGG browse API
+ * @param {number} count - Number of games to fetch (default: TARGET_GAME_COUNT)
+ * @returns {Promise<number[]>} Array of game IDs
  */
-async function getTop1000GameIds() {
-  // Return the static list - user should populate it
-  return TOP_1000_GAME_IDS;
+async function fetchTopGameIds(count = TARGET_GAME_COUNT) {
+  console.log(`\n📡 Fetching top ${count} game IDs from BGG browse API...\n`);
+  
+  const gameIds = [];
+  const totalRequests = Math.ceil(count / BROWSE_LIMIT);
+  
+  for (let i = 0; i < totalRequests; i++) {
+    const offset = i * BROWSE_LIMIT;
+    const limit = Math.min(BROWSE_LIMIT, count - offset);
+    
+    if (limit <= 0) break;
+    
+    console.log(`   Fetching games ${offset + 1}-${offset + limit} (request ${i + 1}/${totalRequests})...`);
+    
+    try {
+      // Add delay between browse requests to be respectful
+      if (i > 0) {
+        const delay = getRandomDelay();
+        await sleep(delay);
+      }
+      
+      const ids = await fetchBGGBrowsePage(offset, limit);
+      gameIds.push(...ids);
+      
+      console.log(`   ✅ Fetched ${ids.length} game IDs (total: ${gameIds.length})\n`);
+      
+      // If we got fewer than requested, we've reached the end
+      if (ids.length < limit) {
+        console.log(`   ℹ️  Reached end of available games at ${gameIds.length} total\n`);
+        break;
+      }
+    } catch (error) {
+      console.error(`   ❌ Error fetching browse page ${i + 1}:`, error.message);
+      // Continue with what we have
+      break;
+    }
+  }
+  
+  console.log(`✅ Successfully fetched ${gameIds.length} game IDs from BGG\n`);
+  return gameIds;
+}
+
+/**
+ * Fetch a single page of game IDs from BGG browse API
+ * @param {number} offset - Offset for pagination
+ * @param {number} limit - Number of games to fetch (max 100)
+ * @returns {Promise<number[]>} Array of game IDs
+ */
+function fetchBGGBrowsePage(offset, limit) {
+  return new Promise((resolve, reject) => {
+    const url = `${BGG_API_BASE}/browse?type=boardgame&sort=rank&limit=${limit}&offset=${offset}`;
+    
+    https.get(url, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        if (res.statusCode === 429) {
+          reject(new Error('RATE_LIMITED'));
+          return;
+        }
+        
+        if (res.statusCode !== 200) {
+          reject(new Error(`BGG API returned status ${res.statusCode}`));
+          return;
+        }
+        
+        try {
+          const gameIds = parseBGGBrowseXML(data);
+          resolve(gameIds);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }).on('error', reject);
+  });
+}
+
+/**
+ * Parse BGG browse XML response to extract game IDs
+ * @param {string} xmlText - XML response from BGG browse API
+ * @returns {number[]} Array of game IDs
+ */
+function parseBGGBrowseXML(xmlText) {
+  const gameIds = [];
+  
+  // Match all <item> tags with id attribute
+  const itemRegex = /<item[^>]*id="(\d+)"[^>]*>/g;
+  let match;
+  
+  while ((match = itemRegex.exec(xmlText)) !== null) {
+    const gameId = parseInt(match[1], 10);
+    if (gameId && !isNaN(gameId)) {
+      gameIds.push(gameId);
+    }
+  }
+  
+  return gameIds;
 }
 
 /**
  * Main function to pre-populate top games
  */
 async function prePopulateTopGames() {
-  console.log('\n🎲 Starting Pre-population of Top 1000 Games...\n');
-  console.log('⏰ This will be spread over several hours to be respectful to BGG API\n');
+  console.log('\n🎲 Starting Pre-population of Top 10,000 Games...\n');
+  console.log('⏰ This will be spread over 20-30 hours to be respectful to BGG API\n');
   
   try {
-    // Get list of top 1000 game IDs
-    let gameIds = TOP_1000_GAME_IDS;
-    
-    // If list is empty or placeholder, try to get from function
-    if (!gameIds || gameIds.length === 0) {
-      gameIds = await getTop1000GameIds();
-    }
+    // Fetch list of top game IDs from BGG browse API
+    const gameIds = await fetchTopGameIds(TARGET_GAME_COUNT);
     
     if (!gameIds || gameIds.length === 0) {
-      console.log('❌ No game IDs provided. Please update TOP_1000_GAME_IDS in the script.');
-      console.log('');
-      console.log('📝 How to get top 1000 BGG game IDs:');
-      console.log('   1. Visit: https://boardgamegeek.com/browse/boardgame');
-      console.log('   2. Navigate through pages 1-20 (50 games per page = 1000 games)');
-      console.log('   3. The game ID is in each game\'s URL (e.g., /boardgame/174430 → ID is 174430)');
-      console.log('   4. Copy the IDs for the top 1000 games into the TOP_1000_GAME_IDS array');
-      console.log('   5. Or manually curate a list of popular games you know users commonly own');
-      console.log('');
-      console.log('💡 Tip: You can start with fewer games (e.g., top 200) and add more later.');
-      console.log('   The script will work with any number of games.');
+      console.log('❌ Failed to fetch game IDs from BGG browse API.');
+      console.log('   Please check your internet connection and BGG API availability.');
       process.exit(1);
     }
     
-    // Use all provided games (up to 1000, but can handle more)
-    const targetGameIds = gameIds.slice(0, 1000);
+    // Use all fetched games (up to target count)
+    const targetGameIds = gameIds.slice(0, TARGET_GAME_COUNT);
     console.log(`📋 Target: ${targetGameIds.length} games\n`);
     
     // Check which games already exist in Firestore
+    // Use batch reads for efficiency
     console.log('🔍 Checking Firestore for existing games...\n');
     const existingGames = new Set();
-    let checkCount = 0;
+    const BATCH_CHECK_SIZE = 100; // Check 100 games at a time
     
-    for (const gameId of targetGameIds) {
-      checkCount++;
-      if (checkCount % 50 === 0) {
-        console.log(`   Checked ${checkCount}/${targetGameIds.length} games...`);
-      }
+    for (let i = 0; i < targetGameIds.length; i += BATCH_CHECK_SIZE) {
+      const batch = targetGameIds.slice(i, i + BATCH_CHECK_SIZE);
+      const batchPromises = batch.map(gameId => 
+        gameExistsInFirestore(gameId.toString()).then(exists => ({ gameId, exists }))
+      );
       
-      const exists = await gameExistsInFirestore(gameId.toString());
-      if (exists) {
-        existingGames.add(gameId.toString());
+      const results = await Promise.all(batchPromises);
+      results.forEach(({ gameId, exists }) => {
+        if (exists) {
+          existingGames.add(gameId.toString());
+        }
+      });
+      
+      if ((i + BATCH_CHECK_SIZE) % 500 === 0 || i + BATCH_CHECK_SIZE >= targetGameIds.length) {
+        console.log(`   Checked ${Math.min(i + BATCH_CHECK_SIZE, targetGameIds.length)}/${targetGameIds.length} games... (${existingGames.size} found)`);
       }
     }
     
@@ -586,13 +663,18 @@ async function prePopulateTopGames() {
     // Time per group: (BATCHES_PER_GROUP batches × avg delay) + break time
     const timePerGroup = (BATCHES_PER_GROUP * avgDelay) + avgBreakDelay;
     const estimatedHours = (timePerGroup * totalGroups) / (1000 * 60 * 60);
+    const estimatedDays = estimatedHours / 24;
     
     console.log(`📊 Processing Plan:`);
     console.log(`   Total batches: ${totalBatches}`);
     console.log(`   Batch groups: ${totalGroups} (${BATCHES_PER_GROUP} batches per group)`);
     console.log(`   Games per group: ${BATCHES_PER_GROUP * BATCH_SIZE}`);
     console.log(`   Break between groups: ${(MIN_BREAK_MS / 60000).toFixed(0)}-${(MAX_BREAK_MS / 60000).toFixed(0)} minutes`);
-    console.log(`⏱️  Estimated total time: ~${estimatedHours.toFixed(1)} hours`);
+    if (estimatedDays >= 1) {
+      console.log(`⏱️  Estimated total time: ~${estimatedDays.toFixed(1)} days (${estimatedHours.toFixed(1)} hours)`);
+    } else {
+      console.log(`⏱️  Estimated total time: ~${estimatedHours.toFixed(1)} hours`);
+    }
     console.log(`   (Spread over time to be respectful to BGG API)\n`);
     console.log(`🚀 Starting batch fetching...\n`);
     

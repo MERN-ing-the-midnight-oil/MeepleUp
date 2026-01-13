@@ -334,6 +334,123 @@ const parseClaudeJson = (text) => {
 };
 
 /**
+ * Shared function to call Claude API with retry logic and error handling.
+ * @param {Array} userContent - Content array for the user message (text, image, audio, etc.)
+ * @param {Object} options - Optional configuration
+ * @param {number} [options.maxTokens=4096] - Maximum tokens for the response
+ * @param {string} [options.system] - System message (defaults to JSON output instruction)
+ * @param {Object} [options.additionalHeaders={}] - Additional headers to include
+ * @param {string} [options.logPrefix='[Claude API]'] - Prefix for log messages
+ * @returns {Promise<string>} Raw text response from Claude
+ */
+const callClaudeAPI = async (userContent, options = {}) => {
+  const {
+    maxTokens = 4096,
+    system = 'Always produce output in strict JSON that conforms to the documented schema. Do not use Markdown code blocks. Return only the raw JSON object.',
+    additionalHeaders = {},
+    logPrefix = '[Claude API]',
+  } = options;
+
+  if (!API_CONFIG.ANTHROPIC_API_KEY) {
+    throw new Error('Anthropic API key is not configured. Set EXPO_PUBLIC_ANTHROPIC_API_KEY before using this feature.');
+  }
+
+  const payload = {
+    model: API_CONFIG.ANTHROPIC_DEFAULT_MODEL,
+    max_tokens: maxTokens,
+    temperature: 0,
+    system,
+    messages: [
+      {
+        role: 'user',
+        content: userContent,
+      },
+    ],
+  };
+
+  const headers = {
+    'x-api-key': API_CONFIG.ANTHROPIC_API_KEY,
+    'anthropic-version': API_CONFIG.ANTHROPIC_VERSION,
+    'content-type': 'application/json',
+    ...additionalHeaders,
+  };
+
+  const endpoint = `${API_CONFIG.ANTHROPIC_BASE_URL}/v1/messages`;
+
+  // Retry logic for "Overloaded" errors
+  const maxRetries = 3;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Exponential backoff: wait 1s, 2s, 4s before retries
+      if (attempt > 0) {
+        const delayMs = Math.pow(2, attempt - 1) * 1000;
+        if (__DEV__) {
+          console.log(`${logPrefix} Retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      const response = await axios.post(endpoint, payload, { headers });
+      
+      if (__DEV__) {
+        console.log(`${logPrefix} Full response structure:`, JSON.stringify(response.data, null, 2).substring(0, 1000));
+      }
+      
+      const rawText = extractTextFromClaudeResponse(response.data?.content);
+      
+      if (__DEV__) {
+        console.log(`${logPrefix} Extracted raw text length:`, rawText?.length || 0);
+      }
+      
+      if (!rawText || rawText.trim().length === 0) {
+        throw new Error('Claude returned an empty response. The API response may be malformed.');
+      }
+      
+      return rawText;
+    } catch (error) {
+      lastError = error;
+      
+      // If this is a JSON parsing error, include more context
+      if (error.message && error.message.includes('unreadable response')) {
+        if (error.originalText && __DEV__) {
+          console.error(`${logPrefix} Original response that failed:`, error.originalText.substring(0, 2000));
+        }
+        if (error.cleanedText && __DEV__) {
+          console.error(`${logPrefix} Cleaned text that failed:`, error.cleanedText.substring(0, 2000));
+        }
+      }
+      
+      const errorMessage =
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        error.message ||
+        'Unknown error';
+
+      // If it's an "Overloaded" error and we have retries left, retry
+      if (errorMessage.toLowerCase().includes('overloaded') && attempt < maxRetries) {
+        if (__DEV__) {
+          console.warn(`${logPrefix} Overloaded error, will retry (attempt ${attempt + 1}/${maxRetries})`);
+        }
+        continue; // Retry the request
+      }
+
+      // For other errors or if we're out of retries, throw immediately
+      const message =
+        errorMessage === 'Overloaded'
+          ? 'Claude API is temporarily overloaded. Please wait a moment and try again.'
+          : errorMessage;
+
+      throw new Error(message);
+    }
+  }
+
+  // Should never reach here, but just in case
+  throw lastError || new Error('Failed to contact Claude after multiple attempts.');
+};
+
+/**
  * Identify games present in an image using Claude.
  * @param {Object} params
  * @param {string} params.imageBase64 - base64-encoded image without data URI prefix.
@@ -345,17 +462,13 @@ const parseClaudeJson = (text) => {
  * @param {Array<string>} [params.rejectedTitles] - Titles previously rejected by the user.
  * @returns {Promise<{ games: Array, comments: string, rawText: string }>}
  */
-export const identifyGamesFromImage = async ({
+export const titlesFromPhoto = async ({
   imageBase64,
   imageMediaType = 'image/jpeg',
   narrationText,
   audioNarration,
   rejectedTitles,
 }) => {
-  if (!API_CONFIG.ANTHROPIC_API_KEY) {
-    throw new Error('Anthropic API key is not configured. Set EXPO_PUBLIC_ANTHROPIC_API_KEY before using this feature.');
-  }
-
   if (!imageBase64) {
     throw new Error('A photo is required to identify games.');
   }
@@ -386,108 +499,24 @@ export const identifyGamesFromImage = async ({
     });
   }
 
-  const payload = {
-    model: API_CONFIG.ANTHROPIC_DEFAULT_MODEL,
-    max_tokens: 4096, // Increased to handle multiple games with detailed styling information
-    temperature: 0,
-    system: 'Always produce output in strict JSON that conforms to the documented schema. Do not use Markdown code blocks. Return only the raw JSON object.',
-    messages: [
-      {
-        role: 'user',
-        content: userContent,
-      },
-    ],
-  };
-
-  const headers = {
-    'x-api-key': API_CONFIG.ANTHROPIC_API_KEY,
-    'anthropic-version': API_CONFIG.ANTHROPIC_VERSION,
-    'content-type': 'application/json',
-  };
-
+  const additionalHeaders = {};
   if (audioNarration?.data) {
-    headers['anthropic-beta'] = 'audio';
+    additionalHeaders['anthropic-beta'] = 'audio';
   }
 
-  const endpoint = `${API_CONFIG.ANTHROPIC_BASE_URL}/v1/messages`;
+  const rawText = await callClaudeAPI(userContent, {
+    maxTokens: 4096, // Increased to handle multiple games with detailed styling information
+    additionalHeaders,
+    logPrefix: '[Claude API]',
+  });
 
-  // Retry logic for "Overloaded" errors
-  const maxRetries = 3;
-  let lastError = null;
+  const parsed = parseClaudeJson(rawText);
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // Exponential backoff: wait 1s, 2s, 4s before retries
-      if (attempt > 0) {
-        const delayMs = Math.pow(2, attempt - 1) * 1000;
-        if (__DEV__) {
-          console.log(`[Claude API] Retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-
-      const response = await axios.post(endpoint, payload, { headers });
-      
-      if (__DEV__) {
-        console.log('[Claude API] Full response structure:', JSON.stringify(response.data, null, 2).substring(0, 1000));
-      }
-      
-      const rawText = extractTextFromClaudeResponse(response.data?.content);
-      
-      if (__DEV__) {
-        console.log('[Claude API] Extracted raw text length:', rawText?.length || 0);
-      }
-      
-      if (!rawText || rawText.trim().length === 0) {
-        throw new Error('Claude returned an empty response. The API response may be malformed.');
-      }
-      
-      const parsed = parseClaudeJson(rawText);
-
-      return {
-        games: parsed.games ?? [],
-        comments: parsed.comments ?? '',
-        rawText,
-      };
-    } catch (error) {
-      lastError = error;
-      
-      // If this is a JSON parsing error, include more context
-      if (error.message && error.message.includes('unreadable response')) {
-        if (error.originalText && __DEV__) {
-          console.error('[Claude API] Original response that failed:', error.originalText.substring(0, 2000));
-        }
-        if (error.cleanedText && __DEV__) {
-          console.error('[Claude API] Cleaned text that failed:', error.cleanedText.substring(0, 2000));
-        }
-      }
-      
-      const errorMessage =
-        error.response?.data?.error?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        'Unknown error';
-
-      // If it's an "Overloaded" error and we have retries left, retry
-      if (errorMessage.toLowerCase().includes('overloaded') && attempt < maxRetries) {
-        if (__DEV__) {
-          console.warn(`[Claude API] Overloaded error, will retry (attempt ${attempt + 1}/${maxRetries})`);
-        }
-        continue; // Retry the request
-      }
-
-      // For other errors or if we're out of retries, throw immediately
-      const message =
-        errorMessage === 'Overloaded'
-          ? 'Claude API is temporarily overloaded. Please wait a moment and try again.'
-          : errorMessage;
-
-      throw new Error(message);
-    }
-  }
-
-  // Should never reach here, but just in case
-  throw lastError || new Error('Failed to contact Claude after multiple attempts.');
+  return {
+    games: parsed.games ?? [],
+    comments: parsed.comments ?? '',
+    rawText,
+  };
 };
 
 export const buildGameIdentificationPrompt = buildPrompt;
@@ -499,15 +528,11 @@ export const buildGameIdentificationPrompt = buildPrompt;
  * @param {string} gameListText - Raw text list of game titles or descriptive query (can be messy, unformatted)
  * @returns {Promise<{ games: Array<string>, rawText: string }>}
  */
-export const formatGameListForBGG = async (gameListText) => {
-  console.log('[Claude → BGG] Starting formatGameListForBGG with input text:');
+export const titlesFromText = async (gameListText) => {
+  console.log('[Claude → BGG] Starting titlesFromText with input text:');
   console.log('[Claude → BGG] Input length:', gameListText?.length || 0);
   console.log('[Claude → BGG] Input preview:', gameListText?.substring(0, 200) || 'empty');
   
-  if (!API_CONFIG.ANTHROPIC_API_KEY) {
-    throw new Error('Anthropic API key is not configured. Set EXPO_PUBLIC_ANTHROPIC_API_KEY before using this feature.');
-  }
-
   if (!gameListText || !gameListText.trim()) {
     throw new Error('A game list is required to format.');
   }
@@ -550,102 +575,28 @@ Return ONLY valid JSON, no additional commentary, no Markdown formatting.
 User's input:
 ${gameListText.trim()}`;
 
-  const payload = {
-    model: API_CONFIG.ANTHROPIC_DEFAULT_MODEL,
-    max_tokens: 4096,
-    temperature: 0,
-    system: 'Always produce output in strict JSON that conforms to the documented schema. Do not use Markdown code blocks. Return only the raw JSON object.',
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
+  const userContent = [{ type: 'text', text: prompt }];
+
+  const rawText = await callClaudeAPI(userContent, {
+    maxTokens: 4096,
+    logPrefix: '[Claude API]',
+  });
+  
+  const parsed = parseClaudeJson(rawText);
+
+  const gamesList = parsed.games ?? [];
+  
+  // Log what titles Claude identified
+  console.log('[Claude → BGG] Claude identified the following game titles:');
+  console.log(`[Claude → BGG] Total titles: ${gamesList.length}`);
+  gamesList.forEach((title, index) => {
+    console.log(`[Claude → BGG] ${index + 1}. "${title}"`);
+  });
+
+  return {
+    games: gamesList,
+    rawText,
   };
-
-  const headers = {
-    'x-api-key': API_CONFIG.ANTHROPIC_API_KEY,
-    'anthropic-version': API_CONFIG.ANTHROPIC_VERSION,
-    'content-type': 'application/json',
-  };
-
-  const endpoint = `${API_CONFIG.ANTHROPIC_BASE_URL}/v1/messages`;
-
-  // Retry logic for "Overloaded" errors
-  const maxRetries = 3;
-  let lastError = null;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // Exponential backoff: wait 1s, 2s, 4s before retries
-      if (attempt > 0) {
-        const delayMs = Math.pow(2, attempt - 1) * 1000;
-        if (__DEV__) {
-          console.log(`[Claude API] Retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-
-      const response = await axios.post(endpoint, payload, { headers });
-      
-      if (__DEV__) {
-        console.log('[Claude API] Format list response structure:', JSON.stringify(response.data, null, 2).substring(0, 1000));
-      }
-      
-      const rawText = extractTextFromClaudeResponse(response.data?.content);
-      
-      if (__DEV__) {
-        console.log('[Claude API] Extracted raw text length:', rawText?.length || 0);
-      }
-      
-      if (!rawText || rawText.trim().length === 0) {
-        throw new Error('Claude returned an empty response. The API response may be malformed.');
-      }
-      
-      const parsed = parseClaudeJson(rawText);
-
-      const gamesList = parsed.games ?? [];
-      
-      // Log what titles Claude identified
-      console.log('[Claude → BGG] Claude identified the following game titles:');
-      console.log(`[Claude → BGG] Total titles: ${gamesList.length}`);
-      gamesList.forEach((title, index) => {
-        console.log(`[Claude → BGG] ${index + 1}. "${title}"`);
-      });
-
-      return {
-        games: gamesList,
-        rawText,
-      };
-    } catch (error) {
-      lastError = error;
-      
-      const errorMessage =
-        error.response?.data?.error?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        'Unknown error';
-
-      // If it's an "Overloaded" error and we have retries left, retry
-      if (errorMessage.toLowerCase().includes('overloaded') && attempt < maxRetries) {
-        if (__DEV__) {
-          console.warn(`[Claude API] Overloaded error, will retry (attempt ${attempt + 1}/${maxRetries})`);
-        }
-        continue; // Retry the request
-      }
-
-      // For other errors or if we're out of retries, throw immediately
-      const message =
-        errorMessage === 'Overloaded'
-          ? 'Claude API is temporarily overloaded. Please wait a moment and try again.'
-          : errorMessage;
-
-      throw new Error(message);
-    }
-  }
-
-  // Should never reach here, but just in case
-  throw lastError || new Error('Failed to contact Claude after multiple attempts.');
 };
 
 

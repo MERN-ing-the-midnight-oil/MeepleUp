@@ -3,7 +3,7 @@
  * This is called when user visits CollectionScreen or EventHub (Gameplan tab)
  */
 
-import { searchGamesByName, getGameDetails } from './api';
+import { searchGamesByName, getGames } from './api';
 import { getPendingRetries, removePendingRetries } from './pendingGameRetries';
 
 /**
@@ -96,7 +96,7 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
       console.log('[RetryPendingGames] Auto-selected best match for', gameTitle, ':', bestMatch.name, '(BGG ID:', bestMatch.id, ')');
       
       // Get full game details
-      const gameDetails = await getGameDetails(bestMatch.id, 'pending_retry');
+      const gameDetails = await getGames(bestMatch.id, 'pending_retry');
       
       if (!gameDetails) {
         console.log('[RetryPendingGames] Failed to get game details for:', gameTitle, 'BGG ID:', bestMatch.id);

@@ -66,10 +66,22 @@ export async function searchGamesByName(query, limit = 10) {
   }
 
   try {
-    const searchTerm = query.toLowerCase().trim();
+    const originalSearchTerm = query.toLowerCase().trim();
+    
+    // Import logger for in-app logging (for TestFlight debugging)
+    let logger = null;
+    try {
+      logger = (await import('../utils/inAppLogger')).default;
+    } catch (loggerError) {
+      // Logger not available, continue without it
+    }
+    
+    if (logger) {
+      logger.debug(`[Firebase] Starting search for: "${originalSearchTerm}"`);
+    }
     
     if (__DEV__) {
-      console.log('[Game Database] Starting search for:', searchTerm);
+      console.log('[Game Database] Starting search for:', originalSearchTerm);
       console.log('[Game Database] db object:', db ? 'exists' : 'null');
       console.log('[Game Database] db type:', typeof db);
     }
@@ -78,6 +90,59 @@ export async function searchGamesByName(query, limit = 10) {
     
     if (__DEV__) {
       console.log('[Game Database] Collection reference created');
+    }
+    
+    // Strategy: Try progressive suffix removal for better matching
+    // Example: "Feudum: Alter Ego - Forest" -> try "Feudum: Alter Ego" -> try "Feudum"
+    // This helps find games when the search term has extra suffixes
+    const generateSearchVariants = (term) => {
+      const variants = [term]; // Always try original first
+      
+      // Remove common suffixes/patterns
+      // Pattern: " - something" or ": something" at the end
+      let cleaned = term;
+      
+      // Remove " - [word]" patterns (e.g., " - Forest", " - Expansion")
+      cleaned = cleaned.replace(/\s*-\s*[^-:]+$/, '').trim();
+      if (cleaned && cleaned !== term && cleaned.length >= 3) {
+        variants.push(cleaned);
+      }
+      
+      // Remove ": [word]" patterns (e.g., ": Arrows of the Forest")
+      cleaned = term;
+      cleaned = cleaned.replace(/:\s*[^:]+$/, '').trim();
+      if (cleaned && cleaned !== term && cleaned.length >= 3) {
+        variants.push(cleaned);
+      }
+      
+      // Remove both patterns
+      cleaned = term;
+      cleaned = cleaned.replace(/\s*-\s*[^-:]+$/, '').trim();
+      cleaned = cleaned.replace(/:\s*[^:]+$/, '').trim();
+      if (cleaned && cleaned !== term && cleaned.length >= 3) {
+        variants.push(cleaned);
+      }
+      
+      // Remove last word if it's a common suffix word
+      const suffixWords = ['forest', 'expansion', 'edition', 'promo', 'promotional', 'card', 'cards'];
+      const words = term.split(/\s+/);
+      if (words.length > 2) {
+        const lastWord = words[words.length - 1].toLowerCase().replace(/[^a-z]/g, '');
+        if (suffixWords.includes(lastWord)) {
+          const withoutLastWord = words.slice(0, -1).join(' ').trim();
+          if (withoutLastWord && withoutLastWord !== term && withoutLastWord.length >= 3) {
+            variants.push(withoutLastWord);
+          }
+        }
+      }
+      
+      // Return unique variants, preserving order
+      return [...new Set(variants)];
+    };
+    
+    const searchVariants = generateSearchVariants(originalSearchTerm);
+    if (__DEV__ && searchVariants.length > 1) {
+      console.log('[Game Database] Generated search variants:', searchVariants);
     }
     
     // Add timeout wrapper to prevent hanging
@@ -98,7 +163,19 @@ export async function searchGamesByName(query, limit = 10) {
           return result;
         }),
         new Promise((_, reject) => {
-          setTimeout(() => {
+          setTimeout(async () => {
+            // Try to log timeout via logger if available
+            try {
+              const logger = (await import('../utils/inAppLogger')).default;
+              logger.error(`[Firebase] Query timeout for "${searchTermForLog || queryName}"`, {
+                timeoutSeconds: QUERY_TIMEOUT_MS / 1000,
+                queryName,
+                searchTerm: searchTermForLog,
+              });
+            } catch (loggerError) {
+              // Logger not available, continue
+            }
+            
             if (__DEV__) {
               // Use warn instead of error - timeouts are expected for games that don't exist
               console.warn(`[Game Database] ${queryName} timed out after ${QUERY_TIMEOUT_MS/1000} seconds${searchInfo}`);
@@ -111,21 +188,30 @@ export async function searchGamesByName(query, limit = 10) {
     
     // Test query removed - it was just diagnostic and caused unnecessary error logs
 
-    // Try optimized query with index first (if index exists)
-    try {
-      if (__DEV__) {
-        console.log('[Game Database] Attempting indexed query with nameLower field');
-        console.log('[Game Database] Search term:', searchTerm);
+    // Try each search variant in order (exact first, then progressively shorter)
+    for (let variantIndex = 0; variantIndex < searchVariants.length; variantIndex++) {
+      const searchTerm = searchVariants[variantIndex];
+      const isFirstVariant = variantIndex === 0;
+      
+      if (__DEV__ && !isFirstVariant) {
+        console.log(`[Game Database] Trying variant ${variantIndex + 1}/${searchVariants.length}: "${searchTerm}"`);
       }
       
-      // Use range query for prefix matching (starts with)
-      // This requires a composite index on nameLower
-      // Get more results to allow for partial (contains) and fuzzy matching
-      // For better partial matching, use a shorter prefix to catch games that contain the search term
-      // For "cat chaos", we want to find "cat chaos card game" - so we use just "cat" as the lower bound
-      // and extend the upper bound to catch all games starting with the first word
-      const words = searchTerm.split(/\s+/);
-      const firstWord = words[0];
+      // Try optimized query with index first (if index exists)
+      try {
+        if (__DEV__ && isFirstVariant) {
+          console.log('[Game Database] Attempting indexed query with nameLower field');
+          console.log('[Game Database] Search term:', searchTerm);
+        }
+        
+        // Use range query for prefix matching (starts with)
+        // This requires a composite index on nameLower
+        // Get more results to allow for partial (contains) and fuzzy matching
+        // For better partial matching, use a shorter prefix to catch games that contain the search term
+        // For "cat chaos", we want to find "cat chaos card game" - so we use just "cat" as the lower bound
+        // and extend the upper bound to catch all games starting with the first word
+        const words = searchTerm.split(/\s+/);
+        const firstWord = words[0];
       
       // For multi-word searches, try using the full search term as prefix first
       // This is more efficient and will find exact matches faster
@@ -162,6 +248,14 @@ export async function searchGamesByName(query, limit = 10) {
       
       const snapshot = await queryWithTimeout(queryRef.get(), 'indexed query', searchTerm);
       
+      if (logger) {
+        logger.info(`[Firebase] Query completed for "${searchTerm}"`, {
+          empty: snapshot.empty,
+          size: snapshot.size,
+          searchTerm,
+        });
+      }
+      
       if (__DEV__) {
         console.log('[Game Database] Indexed query returned, empty:', snapshot.empty, 'size:', snapshot.size);
         if (!snapshot.empty) {
@@ -191,8 +285,9 @@ export async function searchGamesByName(query, limit = 10) {
       
       if (!snapshot.empty) {
         // Process all results (not limited) to allow for partial matching
-        // The limit will be applied in processSearchResults for final return
-        const results = processSearchResults(snapshot, searchTerm, limit);
+        // Use the ORIGINAL search term for processing to maintain match quality scoring
+        // This ensures reverseContains matches work correctly
+        const results = processSearchResults(snapshot, originalSearchTerm, limit);
         if (__DEV__) {
           console.log('[Game Database] Processed', results.length, 'results from indexed query (showing top', limit, ')');
           if (results.length > 0) {
@@ -201,8 +296,24 @@ export async function searchGamesByName(query, limit = 10) {
           }
         }
         
+        // If we found good matches, return them (prioritize exact/startsWith over reverseContains)
+        // Only continue to next variant if we only got reverseContains matches and this is the first variant
+        const hasGoodMatches = results.some(r => 
+          r.matchType === 'exact' || 
+          r.matchType === 'startsWith' || 
+          r.matchType === 'contains'
+        );
+        
+        if (results.length > 0 && (hasGoodMatches || variantIndex === searchVariants.length - 1)) {
+          // Found good matches or this is the last variant - return results
+          return results;
+        }
+        
         // If we used full term and got no good matches, try falling back to first word only
         if (results.length === 0 && useFullTerm && words.length > 1) {
+          if (logger) {
+            logger.debug(`[Firebase] No results with full term "${searchTerm}", trying first word "${firstWord}"`);
+          }
           if (__DEV__) {
             console.log('[Game Database] No results with full term, trying first word only:', firstWord);
           }
@@ -229,7 +340,7 @@ export async function searchGamesByName(query, limit = 10) {
                 }));
                 console.log('[Game Database] Sample games from fallback query:', sampleGames);
               }
-              const fallbackResults = processSearchResults(fallbackSnapshot, searchTerm, limit);
+              const fallbackResults = processSearchResults(fallbackSnapshot, originalSearchTerm, limit);
               if (__DEV__) {
                 console.log('[Game Database] Fallback query found', fallbackResults.length, 'results after filtering');
                 if (fallbackResults.length === 0 && fallbackSnapshot.size > 0) {
@@ -248,7 +359,11 @@ export async function searchGamesByName(query, limit = 10) {
           }
         }
         
-        return results;
+        // If we got results (even if only reverseContains), return them
+        // Otherwise continue to next variant
+        if (results.length > 0) {
+          return results;
+        }
       } else {
         // Indexed query succeeded but returned no results
         // For multi-word searches, try falling back to first word only
@@ -297,7 +412,18 @@ export async function searchGamesByName(query, limit = 10) {
           }
         }
         
-        // No results found
+        // No results found for this variant - continue to next variant
+        if (variantIndex < searchVariants.length - 1) {
+          continue; // Try next variant
+        }
+        
+        // This was the last variant - return empty
+        if (logger) {
+          logger.warn(`[Firebase] No results found for "${originalSearchTerm}" after trying all variants`, {
+            searchTerm: originalSearchTerm,
+            variants: searchVariants,
+          });
+        }
         if (__DEV__) {
           console.log('[Game Database] Indexed query returned empty - game not found in database');
           console.log('[Game Database] Returning empty array');
@@ -305,46 +431,69 @@ export async function searchGamesByName(query, limit = 10) {
         return [];
       }
     } catch (indexError) {
-      // If index doesn't exist or query fails, fall back to simpler approach
-      if (__DEV__) {
-        console.log('[Game Database] Indexed query failed, using fallback:', indexError.message);
-        console.log('[Game Database] Index error details:', indexError);
-      }
-      
-      // Fallback: Get a smaller batch and filter client-side
-      // Reduced from 1000 to 200 to improve performance
-      try {
-        if (__DEV__) {
-          console.log('[Game Database] Attempting fallback query (limit 200)...');
-        }
-        
-        const snapshot = await queryWithTimeout(gamesRef.limit(200).get(), 'fallback query', searchTerm); // Reduced limit for better performance
-        
-        if (__DEV__) {
-          console.log('[Game Database] Fallback query returned, empty:', snapshot.empty, 'size:', snapshot.size);
-        }
-        
-        if (!snapshot.empty) {
-          const results = processSearchResults(snapshot, searchTerm, limit);
+        // Error for this variant - continue to next variant unless it's the last one
+        if (variantIndex < searchVariants.length - 1) {
           if (__DEV__) {
-            console.log('[Game Database] Processed', results.length, 'results from fallback query');
+            console.warn(`[Game Database] Error with variant "${searchTerm}", trying next variant:`, indexError.message);
+          }
+          continue;
+        }
+        // If index doesn't exist or query fails, fall back to simpler approach
+        if (__DEV__) {
+          console.log('[Game Database] Indexed query failed, using fallback:', indexError.message);
+          console.log('[Game Database] Index error details:', indexError);
+        }
+        
+        // Fallback: Get a smaller batch and filter client-side
+        // Reduced from 1000 to 200 to improve performance
+        try {
+          if (__DEV__) {
+            console.log('[Game Database] Attempting fallback query (limit 200)...');
+          }
+          
+          const snapshot = await queryWithTimeout(gamesRef.limit(200).get(), 'fallback query', searchTerm); // Reduced limit for better performance
+          
+          if (__DEV__) {
+            console.log('[Game Database] Fallback query returned, empty:', snapshot.empty, 'size:', snapshot.size);
+          }
+          
+          if (!snapshot.empty) {
+            const results = processSearchResults(snapshot, originalSearchTerm, limit);
+            if (__DEV__) {
+              console.log('[Game Database] Processed', results.length, 'results from fallback query');
+              if (results.length > 0) {
+                console.log('[Game Database] Fallback games found:', results.map(r => r.name).join(', '));
+                console.log('[Game Database] Top 10 fallback game titles:', results.slice(0, 10).map(r => `"${r.name}" (rank: ${r.rank || 'N/A'}, match: ${r.matchType || 'unknown'})`));
+              }
+            }
             if (results.length > 0) {
-              console.log('[Game Database] Fallback games found:', results.map(r => r.name).join(', '));
-              console.log('[Game Database] Top 10 fallback game titles:', results.slice(0, 10).map(r => `"${r.name}" (rank: ${r.rank || 'N/A'}, match: ${r.matchType || 'unknown'})`));
+              return results;
             }
           }
-          return results;
+          
+          // Fallback also failed - continue to next variant unless it's the last one
+          if (variantIndex < searchVariants.length - 1) {
+            continue;
+          }
+        } catch (fallbackError) {
+          if (__DEV__) {
+            console.error('[Game Database] Fallback query also failed:', fallbackError.message);
+            console.error('[Game Database] Fallback error details:', fallbackError);
+          }
+          // Continue to next variant unless it's the last one
+          if (variantIndex < searchVariants.length - 1) {
+            continue;
+          }
+          // Last variant failed - return empty
+          return [];
         }
-      } catch (fallbackError) {
-        if (__DEV__) {
-          console.error('[Game Database] Fallback query also failed:', fallbackError.message);
-          console.error('[Game Database] Fallback error details:', fallbackError);
-        }
-        // Return empty - will fall back to BGG API
-        return [];
       }
-    }
+    } // End of variant loop
     
+    // If we get here, all variants were tried but none returned results
+    if (__DEV__) {
+      console.log('[Game Database] All search variants exhausted, returning empty array');
+    }
     return [];
   } catch (error) {
     console.error('[Game Database] Firestore search error:', error);
@@ -401,62 +550,87 @@ function calculateSimilarity(str1, str2) {
 /**
  * Process search results and filter by match type with fuzzy matching
  * Only uses fuzzy matching if we don't have enough exact/startsWith/contains matches
+ * Now handles reverse matching: when game name is contained in search term (e.g., "Feudum: Alter Ego" matches "Feudum: Alter Ego - Forest")
  */
 function processSearchResults(snapshot, searchTerm, limit) {
   const exactMatches = [];
   const startsWithMatches = [];
   const containsMatches = [];
+  const reverseContainsMatches = []; // When game name is contained in search term (handles extra suffixes)
   const fuzzyMatches = []; // For typo-tolerant matches
   const nonMatches = []; // Store non-matching docs for potential fuzzy matching later
   
-  // First pass: collect exact, startsWith, and contains matches
+  // Helper to normalize strings for comparison
+  const normalize = (str) => str.trim().toLowerCase().replace(/\s+/g, ' ').trim();
+  const normalizeNoSpaces = (str) => str.trim().toLowerCase().replace(/\s+/g, '');
+  
+  // First pass: collect exact, startsWith, contains, and reverse contains matches
   snapshot.forEach((doc) => {
     const game = doc.data();
     const gameNameLower = game.nameLower || game.name?.toLowerCase() || '';
     
-    // Normalize both strings for comparison (remove extra spaces, punctuation)
-    // Also remove spaces for better matching (e.g., "small world" matches "smallworld")
-    const normalizedSearch = searchTerm.trim().toLowerCase().replace(/\s+/g, '');
-    const normalizedGame = gameNameLower.trim().toLowerCase().replace(/\s+/g, '');
+    // Normalize both strings for comparison
+    const normalizedSearch = normalizeNoSpaces(searchTerm);
+    const normalizedGame = normalizeNoSpaces(gameNameLower);
     
     // Also keep version with spaces for exact matching
-    const searchWithSpaces = searchTerm.trim().toLowerCase();
-    const gameWithSpaces = gameNameLower.trim().toLowerCase();
+    const searchWithSpaces = normalize(searchTerm);
+    const gameWithSpaces = normalize(gameNameLower);
     
+    // 1. Exact matches (highest priority)
     if (gameWithSpaces === searchWithSpaces) {
       exactMatches.push({ doc, game, similarity: 1.0, matchType: 'exact' });
+      return; // Skip other checks for exact matches
     } else if (normalizedGame === normalizedSearch) {
       // Exact match when spaces are removed (e.g., "smallworld" = "small world")
       exactMatches.push({ doc, game, similarity: 0.98, matchType: 'exact' });
-    } else if (gameWithSpaces.startsWith(searchWithSpaces)) {
+      return;
+    }
+    
+    // 2. Starts with matches
+    if (gameWithSpaces.startsWith(searchWithSpaces)) {
       startsWithMatches.push({ doc, game, similarity: 1.0, matchType: 'startsWith' });
+      return;
     } else if (normalizedGame.startsWith(normalizedSearch)) {
-      // Starts with match when spaces are removed
       startsWithMatches.push({ doc, game, similarity: 0.98, matchType: 'startsWith' });
-    } else if (gameWithSpaces.includes(searchWithSpaces)) {
+      return;
+    }
+    
+    // 3. Contains matches (search term is in game name)
+    if (gameWithSpaces.includes(searchWithSpaces)) {
       containsMatches.push({ doc, game, similarity: 1.0, matchType: 'contains' });
+      return;
     } else if (normalizedGame.includes(normalizedSearch)) {
-      // Contains match when spaces are removed
       containsMatches.push({ doc, game, similarity: 0.95, matchType: 'contains' });
+      return;
+    }
+    
+    // 4. REVERSE contains matches (game name is in search term) - NEW!
+    // This handles cases like: search="Feudum: Alter Ego - Forest", game="Feudum: Alter Ego"
+    // Only check if game name is substantial (at least 4 chars) to avoid false positives
+    if (gameWithSpaces.length >= 4 && searchWithSpaces.includes(gameWithSpaces)) {
+      // Calculate similarity based on how much of the game name matches
+      const matchRatio = gameWithSpaces.length / searchWithSpaces.length;
+      const similarity = Math.max(0.85, matchRatio); // Higher similarity for closer matches
+      reverseContainsMatches.push({ doc, game, similarity, matchType: 'reverseContains' });
+      return;
+    } else if (normalizedGame.length >= 4 && normalizedSearch.includes(normalizedGame)) {
+      const matchRatio = normalizedGame.length / normalizedSearch.length;
+      const similarity = Math.max(0.80, matchRatio);
+      reverseContainsMatches.push({ doc, game, similarity, matchType: 'reverseContains' });
+      return;
+    }
+    
+    // 5. Store for potential fuzzy matching
+    if (normalizedSearch.length >= 4 && normalizedGame.length >= 4) {
+      nonMatches.push({ doc, game, gameNameLower: normalizedGame });
     } else {
-      // Also check if search term is contained in game name (reverse check)
-      // This helps with cases like searching "imperius" but game is "imperious"
-      if (normalizedSearch.length >= 4 && normalizedGame.length >= normalizedSearch.length) {
-        // Check if search term is a substring of game name
-        if (normalizedGame.includes(normalizedSearch)) {
-          containsMatches.push({ doc, game, similarity: 0.95, matchType: 'contains' });
-        } else {
-          // Store for potential fuzzy matching (only if we need more results)
-          nonMatches.push({ doc, game, gameNameLower: normalizedGame });
-        }
-      } else {
-        nonMatches.push({ doc, game, gameNameLower: normalizedGame });
-      }
+      nonMatches.push({ doc, game, gameNameLower: normalizedGame });
     }
   });
   
-  // Count how many good matches we have
-  const goodMatchesCount = exactMatches.length + startsWithMatches.length + containsMatches.length;
+  // Count how many good matches we have (including reverse contains)
+  const goodMatchesCount = exactMatches.length + startsWithMatches.length + containsMatches.length + reverseContainsMatches.length;
   
   // Only do expensive fuzzy matching if we don't have enough good matches
   // This significantly improves performance for common games
@@ -484,8 +658,8 @@ function processSearchResults(snapshot, searchTerm, limit) {
     console.log(`[Game Database] Found ${goodMatchesCount} good matches (>= ${limit}), skipping fuzzy matching for performance`);
   }
   
-  // Combine results in priority order
-  const allMatches = [...exactMatches, ...startsWithMatches, ...containsMatches, ...fuzzyMatches];
+  // Combine results in priority order: exact > startsWith > contains > reverseContains > fuzzy
+  const allMatches = [...exactMatches, ...startsWithMatches, ...containsMatches, ...reverseContainsMatches, ...fuzzyMatches];
   
   // Convert to result format
   const results = allMatches.map(({ game, doc, similarity, matchType }) => ({
@@ -513,12 +687,18 @@ function processSearchResults(snapshot, searchTerm, limit) {
   
   // Sort by match type priority first, then by rank, then by similarity
   results.sort((a, b) => {
-    // Priority: exact > starts with > contains > fuzzy
+    // Priority: exact > startsWith > contains > reverseContains > fuzzy
     const aType = a.matchType || 'fuzzy';
     const bType = b.matchType || 'fuzzy';
-    const typePriority = { exact: 0, startsWith: 1, contains: 2, fuzzy: 3 };
-    const aPriority = typePriority[aType] ?? 3;
-    const bPriority = typePriority[bType] ?? 3;
+    const typePriority = { 
+      exact: 0, 
+      startsWith: 1, 
+      contains: 2, 
+      reverseContains: 3,  // New: handles cases where game name is in search term
+      fuzzy: 4 
+    };
+    const aPriority = typePriority[aType] ?? 4;
+    const bPriority = typePriority[bType] ?? 4;
     
     if (aPriority !== bPriority) {
       return aPriority - bPriority;
@@ -546,7 +726,7 @@ function processSearchResults(snapshot, searchTerm, limit) {
  * @param {string} gameId - BGG game ID
  * @returns {Promise<Object|null>} Game object or null if not found
  */
-export async function getGameById(gameId) {
+export async function getGamesFromFirebase(gameId) {
   if (!gameId) return null;
 
   try {
@@ -823,7 +1003,7 @@ export async function updateGameWithBGGData(gameId, bggData) {
  * Search results only contain basic info (id, name, yearPublished) from the /search endpoint.
  * We should NEVER save incomplete records to Firebase.
  * 
- * Full "Thing" data must be fetched using fetchBGGGameDetails() before saving to Firestore.
+ * Full "Thing" data must be fetched using getGamesFromGeek() before saving to Firestore.
  * This ensures Firebase always has complete game records with all BGG data.
  * 
  * @param {Array} searchResults - Array of game search results from BGG API (basic info only)
@@ -832,7 +1012,7 @@ export async function updateGameWithBGGData(gameId, bggData) {
 export async function cacheBGGSearchResults(searchResults) {
   // DO NOT save incomplete records to Firestore
   // Search results only have id, name, yearPublished - not full "Thing" data
-  // Games should only be saved to Firestore after fetching complete data via fetchBGGGameDetails()
+  // Games should only be saved to Firestore after fetching complete data via getGamesFromGeek()
   if (__DEV__) {
     console.log(`[Game Database] Skipping cache of ${searchResults?.length || 0} search results - incomplete data. Full "Thing" data will be fetched and cached when games are selected.`);
   }

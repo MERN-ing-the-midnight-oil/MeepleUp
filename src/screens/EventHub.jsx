@@ -28,7 +28,7 @@ import Modal from '../components/common/Modal';
 import CalendarDatePicker from '../components/common/CalendarDatePicker';
 import GameCard from '../components/GameCard';
 import GameDetailsModal from '../components/GameDetailsModal';
-import { getGameById } from '../services/gameDatabase';
+import { getGamesFromFirebase } from '../services/gameDatabase';
 import { generateIcalEvent, downloadIcalFile, generateGoogleCalendarUrl } from '../utils/icalExport';
 import { formatDate, formatTime } from '../utils/helpers';
 import { getStarRating } from '../utils/gameBadges';
@@ -2566,13 +2566,16 @@ const EventHub = () => {
             onPress: () => {
               // Proceed with deletion by calling toggleDate logic
               const dateKey = getDateKey(date);
-              const newSelectedDates = optimisticCalendarDates.filter(cd => {
-                const cdDate = cd.date instanceof Date ? cd.date : new Date(cd.date);
-                return getDateKey(cdDate) !== dateKey;
+              // Use functional update to avoid stale closure issues
+              setOptimisticCalendarDates(prevDates => {
+                const newSelectedDates = prevDates.filter(cd => {
+                  const cdDate = cd.date instanceof Date ? cd.date : new Date(cd.date);
+                  return getDateKey(cdDate) !== dateKey;
+                });
+                // Call handleCalendarDatesChange with the new dates after state update
+                setTimeout(() => handleCalendarDatesChange(newSelectedDates), 0);
+                return newSelectedDates;
               });
-              // Update optimistic state immediately for instant UI feedback
-              setOptimisticCalendarDates(newSelectedDates);
-              handleCalendarDatesChange(newSelectedDates);
             },
           },
         ]
@@ -2610,19 +2613,21 @@ const EventHub = () => {
         endTime,
       };
       
-      const newSelectedDates = [...optimisticCalendarDates, newDateObj];
-      // Sort dates
-      newSelectedDates.sort((a, b) => {
-        const dateA = a.date instanceof Date ? a.date : new Date(a.date);
-        const dateB = b.date instanceof Date ? b.date : new Date(b.date);
-        return dateA.getTime() - dateB.getTime();
+      // Use functional update to avoid stale closure issues and ensure immediate UI update
+      setOptimisticCalendarDates(prevDates => {
+        const newSelectedDates = [...prevDates, newDateObj];
+        // Sort dates
+        newSelectedDates.sort((a, b) => {
+          const dateA = a.date instanceof Date ? a.date : new Date(a.date);
+          const dateB = b.date instanceof Date ? b.date : new Date(b.date);
+          return dateA.getTime() - dateB.getTime();
+        });
+        // Call handleCalendarDatesChange with the new dates after state update
+        setTimeout(() => handleCalendarDatesChange(newSelectedDates), 0);
+        return newSelectedDates;
       });
-      
-      // Update optimistic state immediately for instant UI feedback
-      setOptimisticCalendarDates(newSelectedDates);
-      handleCalendarDatesChange(newSelectedDates);
     }
-  }, [isOrganizerOrCoOrganizer, optimisticCalendarDates, event, handleCalendarDatesChange]);
+  }, [isOrganizerOrCoOrganizer, event, handleCalendarDatesChange]);
 
   // Helper to schedule delayed notification for announcement edits
   const scheduleAnnouncementNotification = useCallback((announcementId, isNew = false) => {

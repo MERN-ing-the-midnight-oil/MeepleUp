@@ -17,12 +17,12 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import Button from './common/Button';
-import { identifyGamesFromImage } from '../services/claudeVision';
-import { getGameDetails } from '../utils/api';
+import { titlesFromPhoto } from '../services/claudeVision';
+import { getGames, searchGamesByName } from '../utils/api';
 import { searchForAllGames as searchForAllGamesUtil } from '../utils/gameSearch';
 import { theme, commonStyles } from '../utils/theme';
 import { addPendingRetry } from '../utils/pendingGameRetries';
-import GameSelectionModal from './GameSelectionModal';
+import ShowGames from './ShowGames';
 
 const defaultAudioState = {
   uri: null,
@@ -197,8 +197,10 @@ const ClaudeGameIdentifier = ({
   const [cameraReady, setCameraReady] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [photo, setPhoto] = useState(null);
+  const [photoCaptured, setPhotoCaptured] = useState(false); // Track if photo has been captured to disable button
   const [narrationText, setNarrationText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [debugLogs, setDebugLogs] = useState([]); // Temporary on-screen debug logging
   const [comments, setComments] = useState('');
   const [error, setError] = useState(null);
   const [recording, setRecording] = useState(null);
@@ -221,6 +223,19 @@ const ClaudeGameIdentifier = ({
   useEffect(() => {
     gameCandidatesRef.current = gameCandidates;
   }, [gameCandidates]);
+
+  // Debug: Track formattedGames changes
+  useEffect(() => {
+    if (formattedGames.length > 0) {
+      addDebugLog(`📊 formattedGames updated: ${formattedGames.length} game(s) ready for carousels`);
+      if (__DEV__) {
+        console.log('[ClaudeGameIdentifier] formattedGames updated:', {
+          count: formattedGames.length,
+          games: formattedGames,
+        });
+      }
+    }
+  }, [formattedGames, addDebugLog]);
 
   // Track which candidates have had their BGG fetch triggered
   const processedCandidatesRef = useRef(new Set());
@@ -655,20 +670,20 @@ const ClaudeGameIdentifier = ({
             let details = null;
             try {
               if (searchResults[0].id) {
-                // Use getGameDetails which checks Firestore first, then BGG API if needed
+                // Use getGames which checks Firestore first, then BGG API if needed
                 // This ensures proper caching and minimizes BGG API calls
-                const bggDetails = await getGameDetails(searchResults[0].id);
+                const bggDetails = await getGames(searchResults[0].id);
                 
                 if (bggDetails) {
                   details = bggDetails;
                 }
               }
             } catch (detailError) {
-              console.warn('[ClaudeGameIdentifier] Detail fetch failed, trying getGameDetails:', detailError);
-              // Fallback to getGameDetails if BGG API fails
+              console.warn('[ClaudeGameIdentifier] Detail fetch failed, trying getGames:', detailError);
+              // Fallback to getGames if BGG API fails
               try {
                 if (searchResults[0].id) {
-                  details = await getGameDetails(searchResults[0].id);
+                  details = await getGames(searchResults[0].id);
                 }
               } catch (fallbackError) {
                 console.warn('[ClaudeGameIdentifier] Fallback detail fetch also failed:', fallbackError);
@@ -742,8 +757,8 @@ const ClaudeGameIdentifier = ({
               const gameIds = topResults.map(r => r.id);
               
               // Use batch API call to fetch all games at once instead of individual calls
-              const { fetchBGGGameDetailsBatch } = await import('../services/bggApi');
-              fetchBGGGameDetailsBatch(gameIds)
+              const { getGamesFromGeekBatch } = await import('../services/bggApi');
+              getGamesFromGeekBatch(gameIds)
                 .then((batchDetails) => {
                   // Create a map of gameId -> details for quick lookup
                   const detailsMap = new Map();
@@ -874,20 +889,20 @@ const ClaudeGameIdentifier = ({
 
         try {
           if (primaryResult.id) {
-            // Use getGameDetails which checks Firestore first, then BGG API if needed
+            // Use getGames which checks Firestore first, then BGG API if needed
             // This ensures proper caching and minimizes BGG API calls
-            const bggDetails = await getGameDetails(primaryResult.id);
+            const bggDetails = await getGames(primaryResult.id);
             
             if (bggDetails) {
               details = bggDetails;
             }
           }
         } catch (detailError) {
-          console.warn('[ClaudeGameIdentifier] BGG detail fetch failed, trying getGameDetails:', detailError);
-          // Fallback to getGameDetails if BGG API fails
+          console.warn('[ClaudeGameIdentifier] BGG detail fetch failed, trying getGames:', detailError);
+          // Fallback to getGames if BGG API fails
           try {
             if (primaryResult.id) {
-              details = await getGameDetails(primaryResult.id);
+              details = await getGames(primaryResult.id);
             }
           } catch (fallbackError) {
             console.warn('[ClaudeGameIdentifier] Fallback detail fetch also failed:', fallbackError);
@@ -1150,7 +1165,8 @@ const ClaudeGameIdentifier = ({
   );
 
   // Search function (shared utility from TextListGameIdentifier)
-  const searchForAllGames = useCallback(async (games) => {
+  // Use regular function (not useCallback) to match TextListGameIdentifier and avoid stale closures
+  const searchForAllGames = async (games) => {
     // Reset state
     setStuckGames(new Set());
     setSkippedGames(new Set());
@@ -1168,8 +1184,23 @@ const ClaudeGameIdentifier = ({
       setSkippedGames,
       addPendingRetry,
       setStuckGames,
+      setGameSearchStartTimes,
     }, 'image_recognition');
-  }, [skippedGames]);
+  };
+
+  // Helper function to add debug logs (temporary for testing)
+  const addDebugLog = useCallback((message) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `[${timestamp}] ${message}`;
+    setDebugLogs((prev) => {
+      const newLogs = [...prev, logEntry];
+      // Keep only last 10 logs to avoid memory issues
+      return newLogs.slice(-10);
+    });
+    if (__DEV__) {
+      console.log('[ClaudeGameIdentifier DEBUG]', logEntry);
+    }
+  }, []);
 
   const beginIdentificationWorkflow = useCallback(
     async (capturedPhoto, sessionKey) => {
@@ -1177,15 +1208,18 @@ const ClaudeGameIdentifier = ({
       setError(null);
       setComments('');
       setGameCandidates([]);
+      addDebugLog('beginIdentificationWorkflow started');
 
       try {
+        addDebugLog('Converting photo to base64...');
         const imageBase64 =
           capturedPhoto.base64 ||
           (await FileSystem.readAsStringAsync(capturedPhoto.uri, {
             encoding: FileSystem.EncodingType.Base64,
           }));
 
-        const result = await identifyGamesFromImage({
+        addDebugLog('Calling Claude API...');
+        const result = await titlesFromPhoto({
           imageBase64,
           imageMediaType: capturedPhoto?.mimeType || 'image/jpeg',
           narrationText,
@@ -1194,25 +1228,43 @@ const ClaudeGameIdentifier = ({
             : undefined,
           rejectedTitles: [],
         });
+        const claudeGameCount = result.games?.length || 0;
+        addDebugLog(`Claude returned ${claudeGameCount} games`);
+        
+        if (claudeGameCount > 0) {
+          const rawTitles = result.games.map(g => g.title || 'Untitled').join(', ');
+          addDebugLog(`Raw titles: ${rawTitles.substring(0, 200)}${rawTitles.length > 200 ? '...' : ''}`);
+        }
 
         setComments(result.comments || '');
         const rawGames = Array.isArray(result.games) ? result.games : [];
+        addDebugLog(`Processing ${rawGames.length} raw games...`);
 
         const uniqueTitles = new Set();
+        const duplicateTitles = [];
         const filteredGames = rawGames.filter((game) => {
-          const titleKey = `${game.title}`.toLowerCase();
+          // Ensure we have a title (even if empty, it will become 'Untitled')
+          const title = game.title || '';
+          const titleKey = title.toLowerCase();
           if (uniqueTitles.has(titleKey)) {
+            duplicateTitles.push(title);
             return false;
           }
           uniqueTitles.add(titleKey);
           return true;
         });
+        
+        addDebugLog(`After filtering: ${filteredGames.length} unique games (from ${rawGames.length} raw games)`);
+        if (duplicateTitles.length > 0) {
+          addDebugLog(`Removed ${duplicateTitles.length} duplicate(s): ${duplicateTitles.join(', ')}`);
+        }
 
         if (__DEV__) {
           console.log('Claude identified titles:', filteredGames.map((game) => game.title));
         }
 
         if (!filteredGames.length) {
+          addDebugLog('No games found, showing error');
           // Check if comments contain lighting/glare guidance
           const comments = result.comments || '';
           const hasLightingGuidance = comments.toLowerCase().includes('light') || 
@@ -1226,26 +1278,55 @@ const ClaudeGameIdentifier = ({
           } else {
             setError('Claude could not recognise any games in this photo.');
           }
+          setPhotoCaptured(false); // Reset so user can try again
           return;
         }
 
         // Convert to TextListGameIdentifier format
-        const gameTitles = filteredGames.map(game => game.title || 'Untitled');
+        // Ensure all games are included, even if they have empty titles
+        const gameTitles = filteredGames.map(game => {
+          const title = game.title?.trim() || 'Untitled';
+          return title;
+        }).filter(title => title); // Remove any completely empty titles (shouldn't happen, but just in case)
+        
+        addDebugLog(`Setting ${gameTitles.length} formatted games (from ${filteredGames.length} filtered games)`);
+        
+        if (gameTitles.length !== filteredGames.length) {
+          const removedCount = filteredGames.length - gameTitles.length;
+          addDebugLog(`⚠️ WARNING: ${removedCount} game(s) removed (empty titles)`);
+          console.warn(`[ClaudeGameIdentifier] Warning: Some games were filtered out. Expected ${filteredGames.length}, got ${gameTitles.length}`);
+        }
+        
+        if (gameTitles.length > 0) {
+          const titlesList = gameTitles.join(', ');
+          addDebugLog(`Final game titles (${gameTitles.length}): ${titlesList.substring(0, 200)}${titlesList.length > 200 ? '...' : ''}`);
+        }
+        
+        addDebugLog(`✅ Creating ${gameTitles.length} carousel(s) for ShowGames`);
+        
         setFormattedGames(gameTitles);
         setSearchResults({});
         setSelectedGames({});
-        setLoadingGames(new Set(gameTitles));
+        setLoadingGames(new Set(gameTitles)); // All games start in loading state
+        
+        // Clear processing state immediately so processing modal disappears
+        if (sessionKey === activeSessionRef.current) {
+          setIsProcessing(false);
+          addDebugLog('Processing complete, hiding spinner');
+        }
         
         if (__DEV__) {
           console.log('[ClaudeGameIdentifier] Set formattedGames:', gameTitles.length, 'games');
-          console.log('[ClaudeGameIdentifier] GameSelectionModal should now be visible:', gameTitles.length > 0);
+          console.log('[ClaudeGameIdentifier] ShowGames should now be visible:', gameTitles.length > 0);
           console.log('[ClaudeGameIdentifier] showCameraModal:', showCameraModal, 'showResultsModal:', showResultsModal);
         }
         
         // Start searching for all games (async, don't await - let it run in background)
         // Use the same search logic as TextListGameIdentifier
+        addDebugLog(`Starting BGG search for ${gameTitles.length} game(s)...`);
         searchForAllGames(gameTitles).catch(err => {
           console.error('[ClaudeGameIdentifier] Error in searchForAllGames:', err);
+          addDebugLog(`BGG search error: ${err.message}`);
         });
 
         // OLD CODE - keeping for now but will be removed:
@@ -1319,6 +1400,7 @@ const ClaudeGameIdentifier = ({
       } catch (identifyError) {
         console.error('Claude identification failed:', identifyError);
         const errorMessage = identifyError.message || 'Failed to identify games. Please try again.';
+        addDebugLog(`ERROR: ${errorMessage}`);
         
         // Provide more helpful error messages
         let userFriendlyMessage = errorMessage;
@@ -1329,18 +1411,20 @@ const ClaudeGameIdentifier = ({
         }
         
         setError(userFriendlyMessage);
+        setPhotoCaptured(false); // Reset so user can try again on error
       } finally {
         if (sessionKey === activeSessionRef.current) {
           setIsProcessing(false);
+          addDebugLog('Workflow finished (finally block)');
         }
       }
     },
-    [audioClip, narrationText, scheduleBGGFetch, searchForAllGames]
+    [audioClip, narrationText, addDebugLog]
   );
 
   const handleCapturePhoto = async () => {
     setError(null);
-    if (!cameraRef.current || !cameraReady) {
+    if (!cameraRef.current || !cameraReady || photoCaptured) {
       return;
     }
 
@@ -1348,8 +1432,10 @@ const ClaudeGameIdentifier = ({
       console.log('[ClaudeGameIdentifier] Clearing pending fetch timers before capture:', pendingFetchTimersRef.current.length);
     }
     clearPendingFetchTimers();
+    addDebugLog('Starting photo capture...');
 
     try {
+      addDebugLog('Taking picture...');
       const capturedPhoto = await cameraRef.current.takePictureAsync({
         quality: 0.7,
         base64: true,
@@ -1360,17 +1446,24 @@ const ClaudeGameIdentifier = ({
       activeSessionRef.current = sessionKey;
 
       setPhoto(capturedPhoto);
+      setPhotoCaptured(true); // Mark photo as captured to disable button
+      setIsProcessing(true); // Set processing state immediately for spinner
+      addDebugLog('Photo captured, closing camera...');
       
-      // Close camera modal immediately after capture to allow GameSelectionModal to show
+      // Close camera modal immediately after capture to allow processing spinner to show
       if (onCameraModalClose) {
         onCameraModalClose();
       }
       
+      addDebugLog('Starting Claude identification...');
       // Start identification workflow
       beginIdentificationWorkflow(capturedPhoto, sessionKey);
     } catch (captureError) {
       console.error('Error capturing photo:', captureError);
+      addDebugLog(`ERROR: ${captureError.message || 'Unknown error'}`);
       setError('Unable to capture photo. Please try again.');
+      setPhotoCaptured(false); // Reset on error
+      setIsProcessing(false);
     }
   };
 
@@ -1378,6 +1471,8 @@ const ClaudeGameIdentifier = ({
     clearPendingFetchTimers();
     activeSessionRef.current = null;
     setPhoto(null);
+    setPhotoCaptured(false); // Reset photo captured state
+    setDebugLogs([]); // Clear debug logs on reset
     // Only clear pending candidates, keep confirmed ones
     setGameCandidates((prev) => prev.filter((c) => c.status === 'confirmed'));
     setComments('');
@@ -1396,6 +1491,8 @@ const ClaudeGameIdentifier = ({
     clearPendingFetchTimers();
     activeSessionRef.current = null;
     setPhoto(null);
+    setPhotoCaptured(false); // Reset photo captured state
+    setDebugLogs([]); // Clear debug logs on reset
     setGameCandidates([]);
     setComments('');
     setAudioClip(defaultAudioState);
@@ -1704,7 +1801,8 @@ const ClaudeGameIdentifier = ({
       setCorrectionSuggestions([]);
 
       try {
-        const matches = await searchGamesByName(queryToSearch);
+        // Check Firebase first, then BGG API if needed
+        const matches = await searchGamesByName(queryToSearch, true);
 
         if (__DEV__) {
           console.log('[Correction Modal] Found matches:', matches.length);
@@ -1722,14 +1820,14 @@ const ClaudeGameIdentifier = ({
           limitedMatches.map(async (match) => {
             try {
               // Always fetch from BGG API first to ensure we get thumbnails
-              const { fetchBGGGameDetails } = await import('../services/bggApi');
+              const { getGamesFromGeek } = await import('../services/bggApi');
               let details = null;
               try {
-                const bggDetails = await fetchBGGGameDetails(match.id);
+                const bggDetails = await getGamesFromGeek(match.id);
                 if (bggDetails && bggDetails.thumbnail) {
                   details = bggDetails;
                 } else {
-                  details = await getGameDetails(match.id);
+                  details = await getGames(match.id);
                   // Merge BGG API thumbnail if available
                   if (bggDetails && bggDetails.thumbnail) {
                     details.thumbnail = bggDetails.thumbnail;
@@ -1737,8 +1835,8 @@ const ClaudeGameIdentifier = ({
                   }
                 }
               } catch (bggError) {
-                // Fallback to getGameDetails if BGG API fails
-                details = await getGameDetails(match.id);
+                // Fallback to getGames if BGG API fails
+                details = await getGames(match.id);
               }
               
               return {
@@ -1909,31 +2007,11 @@ const ClaudeGameIdentifier = ({
           console.log('[Inline Correction] Searching backend first for:', searchQuery);
         }
 
-        // Try backend first (no BGG fallback)
-        let matches = await searchGamesByName(searchQuery, false);
-        
-        // If no backend results, try BGG API
-        if (matches.length === 0) {
-          if (__DEV__) {
-            console.log('[Inline Correction] No backend results, trying BGG API...');
-          }
-          try {
-            const { searchBGGAPI } = await import('../services/bggApi');
-            const bggResults = await searchBGGAPI(searchQuery, 50);
-            if (bggResults && bggResults.length > 0) {
-              matches = bggResults;
-            }
-          } catch (bggError) {
-            console.warn('[Inline Correction] BGG API search failed:', bggError);
-          }
-        }
+        // Check Firebase first, then BGG API if needed (searchGamesByName handles this)
+        const matches = await searchGamesByName(searchQuery, true);
 
         if (!matches || matches.length === 0) {
-          Alert.alert(
-            'No matches found',
-            `No games found for "${searchQuery}". Try a different spelling or search term.`,
-            [{ text: 'OK' }]
-          );
+          // Don't show alert - just silently fail and let the user use the buttons in ShowGames
           setInlineCorrectionSearching((prev) => ({
             ...prev,
             [candidateId]: false,
@@ -1948,13 +2026,13 @@ const ClaudeGameIdentifier = ({
         try {
           if (selectedMatch.id) {
             // Always fetch from BGG API first to ensure we get thumbnails
-            const { fetchBGGGameDetails } = await import('../services/bggApi');
+            const { getGamesFromGeek } = await import('../services/bggApi');
             try {
-              const bggDetails = await fetchBGGGameDetails(selectedMatch.id);
+              const bggDetails = await getGamesFromGeek(selectedMatch.id);
               if (bggDetails && bggDetails.thumbnail) {
                 details = bggDetails;
               } else {
-                details = await getGameDetails(selectedMatch.id);
+                details = await getGames(selectedMatch.id);
                 // Merge BGG API thumbnail if available
                 if (bggDetails && bggDetails.thumbnail) {
                   details.thumbnail = bggDetails.thumbnail;
@@ -1962,8 +2040,8 @@ const ClaudeGameIdentifier = ({
                 }
               }
             } catch (bggError) {
-              // Fallback to getGameDetails if BGG API fails
-              details = await getGameDetails(selectedMatch.id);
+              // Fallback to getGames if BGG API fails
+              details = await getGames(selectedMatch.id);
             }
           }
         } catch (detailError) {
@@ -2043,13 +2121,13 @@ const ClaudeGameIdentifier = ({
         try {
           if (selectedResult.id) {
             // Always fetch from BGG API first to ensure we get thumbnails
-            const { fetchBGGGameDetails } = await import('../services/bggApi');
+            const { getGamesFromGeek } = await import('../services/bggApi');
             try {
-              const bggDetails = await fetchBGGGameDetails(selectedResult.id);
+              const bggDetails = await getGamesFromGeek(selectedResult.id);
               if (bggDetails && bggDetails.thumbnail) {
                 details = bggDetails;
               } else {
-                details = await getGameDetails(selectedResult.id);
+                details = await getGames(selectedResult.id);
                 // Merge BGG API thumbnail if available
                 if (bggDetails && bggDetails.thumbnail) {
                   details.thumbnail = bggDetails.thumbnail;
@@ -2057,8 +2135,8 @@ const ClaudeGameIdentifier = ({
                 }
               }
             } catch (bggError) {
-              // Fallback to getGameDetails if BGG API fails
-              details = await getGameDetails(selectedResult.id);
+              // Fallback to getGames if BGG API fails
+              details = await getGames(selectedResult.id);
             }
           }
         } catch (detailError) {
@@ -2281,28 +2359,12 @@ const ClaudeGameIdentifier = ({
                       }));
                       
                       try {
-                        // Try backend first (no BGG fallback)
-                        let results = await searchGamesByName(searchQuery, false);
-                        
-                        // If no backend results, try BGG API
-                        if (results.length === 0) {
-                          if (__DEV__) {
-                            console.log('[ClaudeGameIdentifier] No backend results, trying BGG API...');
-                          }
-                          try {
-                            const { searchBGGAPI } = await import('../services/bggApi');
-                            const bggResults = await searchBGGAPI(searchQuery, 50);
-                            if (bggResults && bggResults.length > 0) {
-                              results = bggResults;
-                            }
-                          } catch (bggError) {
-                            console.warn('[ClaudeGameIdentifier] BGG API search failed:', bggError);
-                          }
-                        }
+                        // Check Firebase first, then BGG API if needed (searchGamesByName handles this)
+                        const results = await searchGamesByName(searchQuery, true);
                         
                         if (results && results.length > 0) {
                           // Load details for first result
-                          const details = await getGameDetails(results[0].id);
+                          const details = await getGames(results[0].id);
                           updateCandidate(candidate.id, (c) => ({
                             ...c,
                             bggStatus: 'matched',
@@ -2353,44 +2415,27 @@ const ClaudeGameIdentifier = ({
                     try {
                       let resultsToShow = candidate.bggSearchResults || [];
                       
-                      // If we only have backend results and user wants more, try BGG API
-                      if (resultsToShow.length > 0 && resultsToShow.length < 10) {
+                      // If we need more results, search again (searchGamesByName checks Firebase first, then BGG)
+                      if (resultsToShow.length < 10) {
                         const query = candidate.claudeTitle || '';
                         if (query) {
                           if (__DEV__) {
-                            console.log('[ClaudeGameIdentifier] User wants more titles, searching BGG API...');
+                            console.log('[ClaudeGameIdentifier] User wants more titles, searching (Firebase first, then BGG)...');
                           }
                           try {
-                            const { searchBGGAPI } = await import('../services/bggApi');
-                            const bggResults = await searchBGGAPI(query, 50);
-                            if (bggResults && bggResults.length > 0) {
-                              // Combine backend and BGG results, removing duplicates
+                            // searchGamesByName checks Firebase first, then BGG API if needed
+                            const additionalResults = await searchGamesByName(query, true);
+                            if (additionalResults && additionalResults.length > 0) {
+                              // Combine results, removing duplicates
                               const existingIds = new Set(resultsToShow.map(r => r.id));
-                              const newBggResults = bggResults.filter(r => !existingIds.has(r.id));
-                              resultsToShow = [...resultsToShow, ...newBggResults];
+                              const newResults = additionalResults.filter(r => !existingIds.has(r.id));
+                              resultsToShow = [...resultsToShow, ...newResults];
                               if (__DEV__) {
-                                console.log(`[ClaudeGameIdentifier] Added ${newBggResults.length} BGG API results`);
+                                console.log(`[ClaudeGameIdentifier] Added ${newResults.length} additional results (from Firebase or BGG)`);
                               }
                             }
-                          } catch (bggError) {
-                            console.warn('[ClaudeGameIdentifier] BGG API search failed:', bggError);
-                          }
-                        }
-                      } else if (resultsToShow.length === 0) {
-                        // No results at all, try BGG API
-                        const query = candidate.claudeTitle || '';
-                        if (query) {
-                          if (__DEV__) {
-                            console.log('[ClaudeGameIdentifier] No results, trying BGG API...');
-                          }
-                          try {
-                            const { searchBGGAPI } = await import('../services/bggApi');
-                            const bggResults = await searchBGGAPI(query, 50);
-                            if (bggResults && bggResults.length > 0) {
-                              resultsToShow = bggResults;
-                            }
-                          } catch (bggError) {
-                            console.warn('[ClaudeGameIdentifier] BGG API search failed:', bggError);
+                          } catch (searchError) {
+                            console.warn('[ClaudeGameIdentifier] Search failed:', searchError);
                           }
                         }
                       }
@@ -2400,14 +2445,14 @@ const ClaudeGameIdentifier = ({
                             resultsToShow.slice(0, 10).map(async (result) => {
                               try {
                                 // Always fetch from BGG API first to ensure we get thumbnails
-                                const { fetchBGGGameDetails } = await import('../services/bggApi');
+                                const { getGamesFromGeek } = await import('../services/bggApi');
                                 let details = null;
                                 try {
-                                  const bggDetails = await fetchBGGGameDetails(result.id);
+                                  const bggDetails = await getGamesFromGeek(result.id);
                                   if (bggDetails && bggDetails.thumbnail) {
                                     details = bggDetails;
                                   } else {
-                                    details = await getGameDetails(result.id);
+                                    details = await getGames(result.id);
                                     // Merge BGG API thumbnail if available
                                     if (bggDetails && bggDetails.thumbnail) {
                                       details.thumbnail = bggDetails.thumbnail;
@@ -2415,8 +2460,8 @@ const ClaudeGameIdentifier = ({
                                     }
                                   }
                                 } catch (bggError) {
-                                  // Fallback to getGameDetails if BGG API fails
-                                  details = await getGameDetails(result.id);
+                                  // Fallback to getGames if BGG API fails
+                                  details = await getGames(result.id);
                                 }
                                 
                                 return {
@@ -2454,7 +2499,10 @@ const ClaudeGameIdentifier = ({
               </View>
             ) : candidate.bggStatus === 'no_match' || candidate.bggStatus === 'error' ? (
               <View style={styles.gameStatusContainer}>
-                <Text style={styles.gameStatusMessage}>{candidate.bggErrorMessage || 'Error loading data'}</Text>
+                <View style={styles.processingRow}>
+                  <ActivityIndicator size="small" color={theme.colors.meepleRed} />
+                  <Text style={styles.gameStatusMessage}>Please be patient, we're still trying...</Text>
+                </View>
                 {candidate.bggStatus === 'no_match' && (
                   <View style={styles.inlineCorrectionContainer}>
                     <Text style={styles.inlineCorrectionLabel}>Not the right title? Enter it here:</Text>
@@ -2583,7 +2631,7 @@ const ClaudeGameIdentifier = ({
 
   // Camera Modal - Just camera and capture button
   // Only check permissions when camera modal is shown - don't render permission UI unless modal is open
-  // Hide camera modal when GameSelectionModal should be visible (React Native doesn't support nested modals)
+  // Hide camera modal when ShowGames should be visible (React Native doesn't support nested modals)
   const renderCameraModal = () => (
     <Modal
       animationType="slide"
@@ -2655,7 +2703,7 @@ const ClaudeGameIdentifier = ({
                     label="Capture Photo" 
                     onPress={handleCapturePhoto} 
                     style={styles.captureButtonModal}
-                    disabled={!cameraReady}
+                    disabled={!cameraReady || photoCaptured}
                   />
                 </View>
               </View>
@@ -2837,7 +2885,7 @@ const ClaudeGameIdentifier = ({
     </Modal>
   );
 
-  // Handlers for GameSelectionModal
+  // Handlers for ShowGames
   const handleSelectGame = useCallback((gameTitle, bggId) => {
     setSelectedGames(prev => ({
       ...prev,
@@ -2910,37 +2958,142 @@ const ClaudeGameIdentifier = ({
       return updated;
     });
 
-    // Trigger new search for the revised title
-    // Note: searchForAllGames is defined in this component, but we need to call it properly
-    // We'll use the utility directly to avoid dependency issues
-    const { searchForAllGames: searchForAllGamesUtil } = await import('../utils/gameSearch');
-    await searchForAllGamesUtil([newTitle], {
-      setLoadingGames,
-      setSearchResults,
-      setSelectedGames,
-      isSkipped: (gameTitle) => skippedGames.has(gameTitle),
-      setSkippedGames,
-      addPendingRetry,
-      setStuckGames,
-    }, 'image_recognition');
-  }, [skippedGames, setLoadingGames, setSearchResults, setSelectedGames, setSkippedGames]);
+    // Search for the revised title and merge with existing results (don't clear other games!)
+    try {
+      const cleanedTitle = newTitle.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+      const searchQuery = cleanedTitle !== newTitle ? cleanedTitle : newTitle;
+      
+      // Search for the game
+      let searchResults = await searchGamesByName(searchQuery, true);
+      
+      // If no results with cleaned title, try original
+      if ((!searchResults || searchResults.length === 0) && searchQuery !== newTitle) {
+        searchResults = await searchGamesByName(newTitle, true);
+      }
+      
+      if (searchResults && searchResults.length > 0) {
+        // Fetch thumbnails for top 3 results
+        const MAX_THUMBNAIL_FETCHES = 3;
+        const resultsToEnrich = searchResults.slice(0, MAX_THUMBNAIL_FETCHES);
+        const remainingResults = searchResults.slice(MAX_THUMBNAIL_FETCHES);
+        
+        const enrichedResults = await Promise.all(
+          resultsToEnrich.map(async (result) => {
+            try {
+              const details = await getGames(result.id);
+              return {
+                ...result,
+                thumbnail: details?.thumbnail || result.thumbnail || null,
+                image: details?.image || result.image || null,
+              };
+            } catch (detailError) {
+              console.warn(`[ClaudeGameIdentifier] Failed to fetch details for revised title result ${result.id}:`, detailError.message);
+              return result;
+            }
+          })
+        );
+        
+        const resultsWithThumbnails = [...enrichedResults, ...remainingResults];
+        
+        // Auto-select best match
+        const normalizedSearchTitle = newTitle.toLowerCase().trim();
+        const scoredResults = resultsWithThumbnails.map(result => {
+          let score = 0;
+          const normalizedResultName = (result.name || '').toLowerCase().trim();
+          
+          if (normalizedResultName === normalizedSearchTitle) score += 1000;
+          else if (normalizedResultName.startsWith(normalizedSearchTitle)) score += 500;
+          else if (normalizedResultName.includes(normalizedSearchTitle)) score += 100;
+          
+          if (result.type === 'boardgame') score += 50;
+          if (result.rank && result.rank > 0) score += Math.max(0, 10000 - result.rank);
+          if (result.thumbnail) score += 10;
+          
+          return { ...result, _matchScore: score };
+        });
+        
+        scoredResults.sort((a, b) => {
+          if (b._matchScore !== a._matchScore) return b._matchScore - a._matchScore;
+          return (a.name || '').localeCompare(b.name || '');
+        });
+        
+        const bestMatch = scoredResults[0];
+        const { _matchScore, ...cleanResult } = bestMatch;
+        const finalResults = scoredResults.map(({ _matchScore, ...clean }) => clean);
+        
+        // MERGE with existing results instead of replacing
+        setSearchResults(prev => ({
+          ...prev, // Keep all existing results
+          [newTitle]: finalResults, // Only update the revised game
+        }));
+        
+        setSelectedGames(prev => ({
+          ...prev, // Keep all existing selections
+          [newTitle]: bestMatch.id, // Only update the revised game
+        }));
+        
+        console.log(`[ClaudeGameIdentifier] Revised title search complete: "${newTitle}" - found ${finalResults.length} results, auto-selected "${bestMatch.name}"`);
+      } else {
+        // No results - merge empty array
+        setSearchResults(prev => ({
+          ...prev, // Keep all existing results
+          [newTitle]: [], // Only update the revised game
+        }));
+        
+        // Add to pending retries
+        if (addPendingRetry) {
+          try {
+            await addPendingRetry(newTitle);
+            console.log(`[ClaudeGameIdentifier] Saved revised title "${newTitle}" to pending retries (no results found)`);
+          } catch (retryError) {
+            console.error(`[ClaudeGameIdentifier] Error saving revised title to pending retries:`, retryError);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[ClaudeGameIdentifier] Error searching for revised title "${newTitle}":`, error);
+      // On error, still merge empty results to preserve other games
+      setSearchResults(prev => ({
+        ...prev,
+        [newTitle]: [],
+      }));
+    } finally {
+      // Remove from loading state
+      setLoadingGames(prev => {
+        const updated = new Set(prev);
+        updated.delete(newTitle);
+        return updated;
+      });
+    }
+  }, [addPendingRetry]);
 
   const handleSkipGame = useCallback(async (gameTitle) => {
-    console.log('[ClaudeGameIdentifier] User skipped game, saving for later retry:', gameTitle);
+    console.log('[ClaudeGameIdentifier] User chose to keep trying for:', gameTitle);
     
-    // Save to pending retries for later
+    // Save to pending retries for background retry
     await addPendingRetry(gameTitle);
     
-    setSkippedGames(prev => new Set(prev).add(gameTitle));
+    // Keep the game in loading state so it shows spinner and "please be patient"
+    // Don't mark as skipped - we want to keep trying
     setLoadingGames(prev => {
+      const updated = new Set(prev);
+      updated.add(gameTitle); // Ensure it's in loading state
+      return updated;
+    });
+    
+    // Remove from stuck games so it doesn't show the stuck message
+    // It will be re-added if it gets stuck again
+    setStuckGames(prev => {
       const updated = new Set(prev);
       updated.delete(gameTitle);
       return updated;
     });
-    // Mark as no results so it shows message instead of loading
+    
+    // Keep the empty results so it shows the "please be patient" message
+    // The game will continue trying in the background
     setSearchResults(prev => ({
       ...prev,
-      [gameTitle]: [],
+      [gameTitle]: prev[gameTitle] || [],
     }));
   }, []);
 
@@ -2961,7 +3114,7 @@ const ClaudeGameIdentifier = ({
         if (!bggId) continue;
 
         try {
-          const gameDetails = await getGameDetails(bggId);
+          const gameDetails = await getGames(bggId);
           if (gameDetails) {
             const gameData = {
               title: gameDetails.name || gameTitle,
@@ -3030,11 +3183,12 @@ const ClaudeGameIdentifier = ({
     }
   }, [selectedGames, onAddToCollection, onDone, onCameraModalClose]);
 
-  // Render GameSelectionModal whenever we have formatted games, regardless of camera modal state
+  // Render ShowGames whenever we have formatted games, regardless of camera modal state
   const gameSelectionModal = formattedGames.length > 0 ? (
-    <GameSelectionModal
+    <ShowGames
       visible={formattedGames.length > 0}
       onClose={() => {
+        addDebugLog(`Closing ShowGames (had ${formattedGames.length} carousel(s))`);
         setFormattedGames([]);
         setSearchResults({});
         setSelectedGames({});
@@ -3062,11 +3216,39 @@ const ClaudeGameIdentifier = ({
     />
   ) : null;
 
+  // Processing spinner modal - shows while Claude processes the image
+  const renderProcessingModal = () => (
+    <Modal
+      animationType="fade"
+      transparent={true}
+      visible={isProcessing && formattedGames.length === 0 && !showCameraModal}
+      onRequestClose={() => {}} // Prevent closing during processing
+    >
+      <View style={styles.processingModalBackdrop}>
+        <View style={styles.processingModalContent}>
+          <ActivityIndicator size="large" color="#4a90e2" />
+          <Text style={styles.processingModalText}>Extracting title text from photo</Text>
+          {debugLogs.length > 0 && (
+            <ScrollView 
+              style={styles.debugLogContainer}
+              contentContainerStyle={styles.debugLogContent}
+            >
+              {debugLogs.map((log, index) => (
+                <Text key={index} style={styles.debugLogText}>{log}</Text>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+
   // If using modals, render them
   if (showCameraModal || showResultsModal) {
     return (
       <>
         {renderCameraModal()}
+        {renderProcessingModal()}
         {/* renderResultsModal removed - games shown in camera modal instead */}
         {gameSelectionModal}
         {renderMultipleResultsModal()}
@@ -3126,10 +3308,11 @@ const ClaudeGameIdentifier = ({
     );
   }
 
-  // Render GameSelectionModal even when camera modal is closed (if we have formatted games)
+  // Render ShowGames even when camera modal is closed (if we have formatted games)
   // This allows the modal to show after submitting the list
   return (
     <>
+      {renderProcessingModal()}
       {gameSelectionModal}
       {/* Correction modal for editing games */}
       <Modal
@@ -3972,6 +4155,45 @@ const styles = StyleSheet.create({
   captureButtonModal: {
     flex: 1,
     maxWidth: 300,
+  },
+  // Processing Modal Styles
+  processingModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  processingModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 200,
+    maxWidth: '90%',
+  },
+  processingModalText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#222',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  debugLogContainer: {
+    marginTop: 20,
+    maxHeight: 150,
+    width: '100%',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 8,
+  },
+  debugLogContent: {
+    padding: 4,
+  },
+  debugLogText: {
+    fontSize: 10,
+    color: '#666',
+    fontFamily: 'monospace',
+    marginBottom: 2,
   },
   // Results Modal Styles
   resultsModalContent: {

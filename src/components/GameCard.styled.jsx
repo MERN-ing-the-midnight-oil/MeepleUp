@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Image, StyleSheet, Pressable, Platform } from 'react-native';
-import { getGameById } from '../services/gameDatabase';
+import { getGamesFromFirebase } from '../services/gameDatabase';
 import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import { mapFontNameToFamily, shouldUseBoldWeight } from '../utils/fontMapper';
 import { loadFontOnDemand, isFontLoaded } from '../utils/fontLoader';
@@ -23,9 +23,9 @@ const GameCard = ({ game, onDelete }) => {
       // If game has bggId, try to load full BGG data for badges
       if (game.bggId) {
         try {
-          // Use getGameDetails to get full data including thumbnails from BGG API
-          const { getGameDetails } = await import('../utils/api');
-          const fullGameData = await getGameDetails(game.bggId);
+          // Use getGames to get full data including thumbnails from BGG API
+          const { getGames } = await import('../utils/api');
+          const fullGameData = await getGames(game.bggId);
           
           if (fullGameData) {
             setBggData(fullGameData);
@@ -45,9 +45,9 @@ const GameCard = ({ game, onDelete }) => {
           }
         } catch (error) {
           console.error('Error loading BGG data for game:', error);
-          // Fallback to getGameById if getGameDetails fails
+          // Fallback to getGamesFromFirebase if getGames fails
           try {
-            const fallbackData = await getGameById(game.bggId);
+            const fallbackData = await getGamesFromFirebase(game.bggId);
             if (fallbackData) {
               setBggData(fallbackData);
               const gameBadges = getGameBadges(fallbackData);

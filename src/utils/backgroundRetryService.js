@@ -1,16 +1,13 @@
 /**
- * Background service for retrying pending game searches with exponential backoff
+ * Background service for retrying pending game searches
  * Retries happen automatically while the app is active/foreground:
- * - After 10 seconds
- * - After 20 seconds  
- * - After 40 seconds
- * - After 80 seconds
- * - After 160 seconds
- * - etc. (exponential backoff)
+ * - Fixed delay: 1 second between retries
+ * - Maximum 5 retries per game
+ * - Games that exceed 5 retries are automatically removed
  */
 
 import { AppState, Platform } from 'react-native';
-import { getGamesReadyForRetry, markGameRetried, removePendingRetries } from './pendingGameRetries';
+import { getGamesReadyForRetry, markGameRetried, removePendingRetries, getRetryMetadata, hasExceededMaxRetries } from './pendingGameRetries';
 import { retryPendingGameSearches } from './retryPendingGames';
 
 const CHECK_INTERVAL_MS = 10 * 1000; // Check every 10 seconds for games ready to retry
@@ -124,6 +121,26 @@ const checkAndRetryReadyGames = async () => {
   }
 
   try {
+    // First, clean up games that have exceeded max retries
+    const { getPendingRetries } = await import('./pendingGameRetries');
+    const allPendingTitles = await getPendingRetries();
+    const metadata = await getRetryMetadata();
+    const gamesToRemove = [];
+    
+    for (const gameTitle of allPendingTitles) {
+      const gameMetadata = metadata[gameTitle];
+      if (gameMetadata && hasExceededMaxRetries(gameMetadata.attemptCount)) {
+        gamesToRemove.push(gameTitle);
+      }
+    }
+    
+    if (gamesToRemove.length > 0) {
+      if (__DEV__) {
+        console.log('[BackgroundRetryService] Removing', gamesToRemove.length, 'games that exceeded max retries:', gamesToRemove);
+      }
+      await removePendingRetries(gamesToRemove);
+    }
+
     const readyGames = await getGamesReadyForRetry();
 
     if (readyGames.length === 0) {
@@ -136,7 +153,7 @@ const checkAndRetryReadyGames = async () => {
     }
 
     // Mark all ready games as retried (update metadata before attempting)
-    // This ensures exponential backoff continues even if retry fails
+    // This ensures retry count is tracked correctly
     for (const gameTitle of readyGames) {
       await markGameRetried(gameTitle);
     }
@@ -169,7 +186,7 @@ const checkAndRetryReadyGames = async () => {
  */
 const retryPendingGameSearchesFiltered = async (addGameToCollection, gameTitles = []) => {
   const { getPendingRetries } = await import('./pendingGameRetries');
-  const { searchGamesByName, getGameDetails } = await import('./api');
+  const { searchGamesByName, getGames } = await import('./api');
   
   const allPendingTitles = await getPendingRetries();
   
@@ -206,7 +223,7 @@ const retryPendingGameSearchesFiltered = async (addGameToCollection, gameTitles 
       const searchResults = await searchGamesByName(searchQuery, true);
       
       if (!searchResults || searchResults.length === 0) {
-        // No results - will retry again later with exponential backoff
+        // No results - will retry again later (up to 5 retries total)
         failedGames.push(gameTitle);
         failedCount++;
         continue;
@@ -249,7 +266,7 @@ const retryPendingGameSearchesFiltered = async (addGameToCollection, gameTitles 
       }
 
       // Get full game details
-      const gameDetails = await getGameDetails(bestMatch.id, 'background_retry');
+      const gameDetails = await getGames(bestMatch.id, 'background_retry');
 
       if (!gameDetails) {
         failedGames.push(gameTitle);
