@@ -55,20 +55,46 @@
         <!-- Beta Signup Section -->
         <section class="beta-signup-section">
           <h2 class="beta-heading">Join the Beta</h2>
-          <p class="beta-description">Get early access on iOS (TestFlight) or Android (Google Play Beta)</p>
+          <p class="beta-description">Sign up to get early access on iOS or Android</p>
           
-          <div class="beta-buttons-container">
-            <a href="https://testflight.apple.com/join/YOUR_TESTFLIGHT_CODE" class="web-app-button" target="_blank" rel="noopener noreferrer">
-              📱 Join iOS Beta (TestFlight)
-            </a>
-            <a href="https://play.google.com/apps/internaltest/YOUR_GOOGLE_PLAY_CODE" class="web-app-button" target="_blank" rel="noopener noreferrer">
-              🤖 Join Android Beta (Google Play)
-            </a>
+          <!-- Signup Form -->
+          <form id="betaSignupForm" class="beta-signup-form">
+            <div class="form-row">
+              <input 
+                type="email" 
+                id="emailInput" 
+                name="email" 
+                placeholder="Enter your email address" 
+                required 
+                class="beta-input"
+              >
+            </div>
+            <div class="form-row platform-row">
+              <label class="platform-label">
+                <input type="checkbox" name="platform" value="ios" class="platform-checkbox"> 
+                <span class="platform-icon">📱</span> iOS (TestFlight)
+              </label>
+              <label class="platform-label">
+                <input type="checkbox" name="platform" value="android" class="platform-checkbox"> 
+                <span class="platform-icon">🤖</span> Android
+              </label>
+            </div>
+            <button type="submit" class="web-app-button signup-button" id="submitButton">
+              Sign Up for Beta Access
+            </button>
+          </form>
+          
+          <!-- Success Message (hidden by default) -->
+          <div id="successMessage" class="success-message" style="display: none;">
+            <span class="success-icon">🎉</span>
+            <h3>You're on the list!</h3>
+            <p>We'll send you an invite to join the beta soon. Check your email!</p>
           </div>
           
-          <p class="beta-note">
-            <strong>Don't have a code?</strong> Email us at <a href="mailto:beta@meepleup.com" class="beta-email-link">beta@meepleup.com</a> and we'll add you to the beta program.
-          </p>
+          <!-- Error Message (hidden by default) -->
+          <div id="errorMessage" class="error-message" style="display: none;">
+            <p>Something went wrong. Please try again or email us directly.</p>
+          </div>
         </section>
 
         <!-- Web App Link -->
@@ -103,6 +129,76 @@
       </nav>
     </footer>
   </main>
+  
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  
+  <script>
+    // Firebase configuration - using your existing Firebase project
+    // Note: You may need to add a web app in Firebase Console to get a proper web appId
+    // Go to: Firebase Console → Project Settings → Your apps → Add app → Web
+    const firebaseConfig = {
+      apiKey: "AIzaSyAjVgWb8wApwT1n0hSe_63nI5S3NgROAbI",
+      authDomain: "meepleup-951a1.firebaseapp.com",
+      projectId: "meepleup-951a1",
+      storageBucket: "meepleup-951a1.firebasestorage.app",
+      messagingSenderId: "177622732549",
+      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"  // Using iOS appId - works for Firestore
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    // Form submission handler
+    document.getElementById('betaSignupForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const email = document.getElementById('emailInput').value.trim();
+      const submitButton = document.getElementById('submitButton');
+      const form = document.getElementById('betaSignupForm');
+      const successMessage = document.getElementById('successMessage');
+      const errorMessage = document.getElementById('errorMessage');
+      
+      // Get selected platforms
+      const platformCheckboxes = document.querySelectorAll('input[name="platform"]:checked');
+      const platforms = Array.from(platformCheckboxes).map(cb => cb.value);
+      
+      // Validate email
+      if (!email || !email.includes('@')) {
+        alert('Please enter a valid email address');
+        return;
+      }
+      
+      // Disable button and show loading state
+      submitButton.disabled = true;
+      submitButton.textContent = 'Signing up...';
+      errorMessage.style.display = 'none';
+      
+      try {
+        // Save to Firestore
+        await db.collection('betaSignups').add({
+          email: email,
+          platforms: platforms.length > 0 ? platforms : ['ios', 'android'], // Default to both if none selected
+          signupDate: firebase.firestore.FieldValue.serverTimestamp(),
+          status: 'pending', // pending, invited, added
+          source: 'landing_page'
+        });
+        
+        // Show success message
+        form.style.display = 'none';
+        successMessage.style.display = 'block';
+        
+      } catch (error) {
+        console.error('Error saving signup:', error);
+        errorMessage.style.display = 'block';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Sign Up for Beta Access';
+      }
+    });
+  </script>
+  
   <script src="script.js"></script>
 </body>
 </html>
