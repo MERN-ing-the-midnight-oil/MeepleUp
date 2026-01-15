@@ -491,6 +491,19 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     } catch (firestoreError) {
       // Firestore error or timeout - mark as failed and fall through to BGG if fallback enabled
       firestoreFailed = true;
+      
+      // Log Firebase failure with logger
+      try {
+        const logger = (await import('./inAppLogger')).default;
+        logger.warn(`[searchGamesByName] ❌ Firebase failed/timed out`, {
+          query,
+          error: firestoreError.message,
+          willFallbackToBGG: fallbackToBGG,
+        });
+      } catch (loggerError) {
+        // Logger not available, continue
+      }
+      
       if (__DEV__) {
         console.warn(`[Game Search] Firestore search error for "${query}":`, firestoreError.message);
         console.log('[Firestore] Not available or error, trying BGG API:', firestoreError.message);
@@ -502,6 +515,19 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     // Note: For search, we'll allow BGG API calls since we don't know the publication year yet
     // The filtering will happen when we fetch individual game details
     if (fallbackToBGG && (firestoreFailed || !firestoreResults || firestoreResults.length === 0)) {
+      // Log BGG fallback attempt
+      try {
+        const logger = (await import('./inAppLogger')).default;
+        logger.info(`[searchGamesByName] 🔄 Attempting BGG API fallback`, {
+          query,
+          firestoreFailed,
+          firestoreResultsCount: firestoreResults?.length || 0,
+          reason: firestoreFailed ? 'firebase_error' : 'no_results',
+        });
+      } catch (loggerError) {
+        // Logger not available, continue
+      }
+      
       if (__DEV__) {
         console.log('[Game Search] Firestore failed or returned no results, trying BGG API...');
       }
@@ -600,10 +626,37 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             
             const attemptStartTime = Date.now();
             const { searchBGGAPI } = await import('../services/bggApi');
+            
+            // Log BGG API call attempt
+            try {
+              const logger = (await import('./inAppLogger')).default;
+              logger.debug(`[searchGamesByName] 📡 Calling BGG API`, {
+                query,
+                variant: searchVariant,
+                variantIndex: variantIndex + 1,
+                totalVariants: searchVariants.length,
+                retryCount: bggRetryCount,
+              });
+            } catch (loggerError) {
+              // Logger not available, continue
+            }
+            
             const variantResults = await searchBGGAPI(searchVariant, 50, 3); // 3 retries per attempt
             attemptDuration = ((Date.now() - attemptStartTime) / 1000).toFixed(2);
             
             if (variantResults && variantResults.length > 0) {
+              // Log BGG API success
+              try {
+                const logger = (await import('./inAppLogger')).default;
+                logger.info(`[searchGamesByName] ✅ BGG API SUCCESS`, {
+                  query,
+                  variant: searchVariant,
+                  resultCount: variantResults.length,
+                  durationSeconds: attemptDuration,
+                });
+              } catch (loggerError) {
+                // Logger not available, continue
+              }
               // Process and score results with improved matching
               const processedResults = processBGGSearchResults(variantResults, query);
               
@@ -657,6 +710,21 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           const attemptDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
           const isRateLimited = bggError.message && bggError.message.includes('rate limited');
           
+          // Log BGG API error
+          try {
+            const logger = (await import('./inAppLogger')).default;
+            logger.error(`[searchGamesByName] ❌ BGG API ERROR`, {
+              query,
+              error: bggError.message,
+              isRateLimited,
+              retryCount: bggRetryCount,
+              maxRetries: maxBggRetries,
+              willRetry: isRateLimited && bggRetryCount < maxBggRetries,
+            });
+          } catch (loggerError) {
+            // Logger not available, continue
+          }
+          
           // Check if it's a rate limit error - keep retrying
           if (isRateLimited) {
             if (bggRetryCount < maxBggRetries) {
@@ -703,6 +771,20 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       // If we exhausted retries and still have an error, throw it so caller can handle it
       if (lastError && lastError.message && lastError.message.includes('rate limited')) {
         const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+        
+        // Log final BGG failure (rate limited)
+        try {
+          const logger = (await import('./inAppLogger')).default;
+          logger.error(`[searchGamesByName] ❌ BGG API FAILED (rate limited after all retries)`, {
+            query,
+            totalDurationSeconds: totalDuration,
+            retries: bggRetryCount,
+            maxRetries: maxBggRetries,
+          });
+        } catch (loggerError) {
+          // Logger not available, continue
+        }
+        
         console.error(`[Game Search → BGG API] ❌ Exhausted all retries for "${query}" due to rate limiting. Game may exist but BGG API is overloaded.`, {
           totalDurationSeconds: totalDuration,
         });
@@ -714,6 +796,20 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     }
 
     // No results found (successful API call returned empty, not rate-limited)
+    // Log final BGG result (no results or failed)
+    try {
+      const logger = (await import('./inAppLogger')).default;
+      logger.warn(`[searchGamesByName] ⚠️ BGG API returned no results or failed`, {
+        query,
+        hadError: !!lastError,
+        errorMessage: lastError?.message || null,
+        retries: bggRetryCount,
+        reason: lastError ? 'bgg_api_error' : 'no_results',
+      });
+    } catch (loggerError) {
+      // Logger not available, continue
+    }
+    
     if (__DEV__) {
       console.warn(`[Game Search] No results found for "${query}" (successful API call with no results)`);
     }
@@ -722,6 +818,19 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     }
     return [];
   } catch (error) {
+    // Log final error
+    try {
+      const logger = (await import('./inAppLogger')).default;
+      logger.error(`[searchGamesByName] ❌ FINAL ERROR`, {
+        query,
+        error: error.message,
+        isRateLimited: error.isRateLimited || error.message?.includes('rate limited'),
+        willRethrow: error.isRateLimited || error.message?.includes('rate limited'),
+      });
+    } catch (loggerError) {
+      // Logger not available, continue
+    }
+    
     // Re-throw rate-limit errors so caller can handle them (keep game in loading state)
     if (error.isRateLimited || (error.message && error.message.includes('rate limited'))) {
       throw error;
@@ -738,6 +847,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
 export const getGames = async (gameId, source = 'unknown') => {
   try {
     let gameData = null;
+    let dataSource = null; // Track where the data came from: 'firebase', 'bgg', or 'firebase+bgg'
 
     // Try Firebase Firestore first
     try {
@@ -745,6 +855,26 @@ export const getGames = async (gameId, source = 'unknown') => {
       const firestoreGame = await getFirestoreGame(gameId);
       
       if (firestoreGame) {
+        // Log Firebase success
+        try {
+          const logger = (await import('./inAppLogger')).default;
+          logger.info(`[getGames] ✅ SUCCESS from getGamesFromFirebase`, {
+            gameId,
+            gameName: firestoreGame.name,
+            source,
+            hasThumbnail: !!firestoreGame.thumbnail,
+            hasImage: !!firestoreGame.image,
+            hasDescription: !!firestoreGame.description,
+          });
+        } catch (loggerError) {
+          // Logger not available, continue
+        }
+        
+        if (__DEV__) {
+          console.log(`[getGames] ✅ Found in Firebase: ${firestoreGame.name} (${gameId})`);
+        }
+        
+        dataSource = 'firebase';
         // Format to match BGG API response format
         gameData = {
           id: firestoreGame.id,
@@ -794,6 +924,27 @@ export const getGames = async (gameId, source = 'unknown') => {
             const bggData = await getGamesFromGeek(gameId);
             
             if (bggData) {
+              // Log BGG API success (enrichment)
+              try {
+                const logger = (await import('./inAppLogger')).default;
+                logger.info(`[getGames] ✅ SUCCESS from getGamesFromGeek (enrichment)`, {
+                  gameId,
+                  gameName: bggData.name,
+                  source,
+                  enrichedFrom: 'firebase',
+                  hasThumbnail: !!bggData.thumbnail,
+                  hasImage: !!bggData.image,
+                  hasDescription: !!bggData.description,
+                });
+              } catch (loggerError) {
+                // Logger not available, continue
+              }
+              
+              if (__DEV__) {
+                console.log(`[getGames] ✅ Enriched from BGG API: ${bggData.name} (${gameId})`);
+              }
+              
+              dataSource = 'firebase+bgg';
               // Merge BGG API data into gameData, prioritizing BGG API data for missing fields
               // This ensures we get the full "thing" object data including large images
               gameData = {
@@ -890,6 +1041,27 @@ export const getGames = async (gameId, source = 'unknown') => {
         const bggData = await getGamesFromGeek(gameId);
         
         if (bggData) {
+          // Log BGG API success (fallback)
+          try {
+            const logger = (await import('./inAppLogger')).default;
+            logger.info(`[getGames] ✅ SUCCESS from getGamesFromGeek (fallback)`, {
+              gameId,
+              gameName: bggData.name,
+              source,
+              hasThumbnail: !!bggData.thumbnail,
+              hasImage: !!bggData.image,
+              hasDescription: !!bggData.description,
+            });
+          } catch (loggerError) {
+            // Logger not available, continue
+          }
+          
+          if (__DEV__) {
+            console.log(`[getGames] ✅ Found in BGG API (fallback): ${bggData.name} (${gameId})`);
+          }
+          
+          dataSource = 'bgg';
+          
           gameData = {
             id: bggData.id,
             name: bggData.name,
@@ -945,10 +1117,42 @@ export const getGames = async (gameId, source = 'unknown') => {
     }
 
     if (!gameData) {
+      // Log failure
+      try {
+        const logger = (await import('./inAppLogger')).default;
+        logger.warn(`[getGames] ❌ NOT FOUND`, {
+          gameId,
+          source,
+          dataSource: 'none',
+        });
+      } catch (loggerError) {
+        // Logger not available, continue
+      }
+      
       if (__DEV__) {
         console.warn('[Game Details] Game not found:', gameId);
       }
       return null;
+    }
+
+    // Log final success with data source
+    try {
+      const logger = (await import('./inAppLogger')).default;
+      logger.info(`[getGames] ✅ FINAL RESULT`, {
+        gameId,
+        gameName: gameData.name,
+        source,
+        dataSource: dataSource || 'unknown',
+        hasThumbnail: !!gameData.thumbnail,
+        hasImage: !!gameData.image,
+        hasDescription: !!gameData.description,
+      });
+    } catch (loggerError) {
+      // Logger not available, continue
+    }
+    
+    if (__DEV__ && dataSource) {
+      console.log(`[getGames] ✅ Final result from ${dataSource}: ${gameData.name} (${gameId})`);
     }
 
     return gameData;

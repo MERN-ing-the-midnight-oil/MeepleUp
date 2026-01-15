@@ -23,11 +23,95 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
   const gameTimings = {}; // Track timing for each game
   const gameSearchStartTimes = {}; // Track when each game search started
   const stuckBucket = []; // Collect stuck games to retry after all other games complete
+  const zeroResultGames = []; // Collect games with zero results for alternative strategy retry
   const performanceStats = {
     gamesAutoSkipped: 0, // Games auto-skipped due to 10s timeout
     rateLimitHits: 0, // Number of times we hit rate limits
     gamesNotFound: 0, // Games BGG said don't exist
     gamesFound: 0, // Games with results
+  };
+  
+  /**
+   * Generate alternative search strategies for games that returned zero results
+   * Examples: "quadukt" -> ["aquadukt", "quaduct", etc.]
+   * 
+   * Uses a fixed, small list of common prefixes/suffixes - NOT all possible combinations
+   * Limited to ~10-15 strategies per game to keep API calls reasonable
+   */
+  const generateAlternativeStrategies = (title) => {
+    const strategies = [];
+    const normalized = title.toLowerCase().trim();
+    
+    // Strategy 1: Add common prefixes (FIXED LIST - only 8 common prefixes)
+    // These are the most common prefixes in game names, not all possible combinations
+    const commonPrefixes = ['a', 'the', 'le', 'la', 'el', 'der', 'die', 'das'];
+    for (const prefix of commonPrefixes) {
+      strategies.push(`${prefix}${normalized}`); // No space (e.g., "aquadukt")
+      strategies.push(`${prefix} ${normalized}`); // With space (e.g., "a quadukt")
+    }
+    // This generates max 16 strategies (8 prefixes × 2 variations)
+    
+    // Strategy 2: Character substitutions (common typos)
+    // q -> aq (quadukt -> aquadukt) - specific case for your example
+    if (normalized.startsWith('q') && normalized.length > 1) {
+      strategies.push(`a${normalized}`);
+    }
+    
+    // Strategy 3: Remove first character if it's a single letter
+    // Handles cases where a prefix was incorrectly included
+    if (normalized.length > 1 && normalized.match(/^[a-z]\w+$/)) {
+      strategies.push(normalized.substring(1));
+    }
+    
+    // Strategy 4: Remove duplicate characters (e.g., "book" -> "bok" if someone typed "boook")
+    // Only check first few positions to limit variations
+    for (let i = 0; i < Math.min(normalized.length - 1, 5); i++) {
+      if (normalized[i] === normalized[i + 1]) {
+        strategies.push(normalized.slice(0, i) + normalized.slice(i + 1));
+        break; // Only remove first duplicate to limit variations
+      }
+    }
+    
+    // Strategy 5: Common character swaps (e.g., "ie" -> "ei", "ck" -> "k")
+    // Only apply if the pattern exists in the string
+    if (normalized.includes('ie')) strategies.push(normalized.replace(/ie/g, 'ei'));
+    if (normalized.includes('ei')) strategies.push(normalized.replace(/ei/g, 'ie'));
+    if (normalized.includes('ck')) strategies.push(normalized.replace(/ck/g, 'k'));
+    if (normalized.includes('ph')) strategies.push(normalized.replace(/ph/g, 'f'));
+    
+    // Strategy 6: Remove spaces and try as one word
+    if (normalized.includes(' ')) {
+      strategies.push(normalized.replace(/\s+/g, ''));
+    }
+    
+    // Strategy 7: Split on spaces and try longest word (if multi-word)
+    const words = normalized.split(/\s+/);
+    if (words.length > 1) {
+      // Try longest word (likely the game name)
+      const longestWord = words.reduce((a, b) => a.length > b.length ? a : b);
+      if (longestWord.length >= 4) {
+        strategies.push(longestWord);
+      }
+    }
+    
+    // Strategy 8: Add missing vowels - LIMITED to first position only for efficiency
+    // Only try if word starts with consonant cluster (like "quadukt" -> "aquadukt")
+    if (normalized.length <= 10 && normalized.match(/^[bcdfghjklmnpqrstvwxyz]{2,}/)) {
+      const vowels = ['a', 'e', 'i', 'o', 'u'];
+      // Only add vowel at the start (most common case)
+      for (const vowel of vowels) {
+        strategies.push(`${vowel}${normalized}`);
+      }
+    }
+    
+    // Remove duplicates and filter out invalid strategies
+    const uniqueStrategies = [...new Set(strategies)]
+      .filter(s => s.length >= 3 && s.length <= 50) // Reasonable length
+      .filter(s => s !== normalized); // Don't include the original
+    
+    // Limit to 12 strategies max to keep API calls reasonable
+    // This ensures we don't make too many expensive BGG API calls
+    return uniqueStrategies.slice(0, 12);
   };
 
   const logPrefix = source === 'image_recognition' ? '[ClaudeGameIdentifier → BGG]' : '[TextListGameIdentifier → BGG]';
@@ -544,6 +628,13 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
       };
       console.warn(`${logPrefix} ⚠️ No timing data for "${gameTitle}" - set default timing`, gameTimings[gameTitle]);
     }
+    
+    // If we completed the search loop with zero results, add to zero-result games for alternative strategy retry
+    // Check if results exist and are empty (not just undefined/null)
+    if ((!results[gameTitle] || results[gameTitle].length === 0) && !zeroResultGames.includes(gameTitle)) {
+      zeroResultGames.push(gameTitle);
+      console.log(`${logPrefix} 📦 Added "${gameTitle}" to zero-result games bucket for alternative strategy retry (${zeroResultGames.length} games)`);
+    }
   }
 
   const totalSearchDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
@@ -741,6 +832,160 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
       durationSeconds: bucketRetryDuration,
     });
     console.log(`${logPrefix} ✅ Bucket retry complete: ${bucketSuccessCount}/${stuckBucket.length} games resolved (${bucketRetryDuration}s)`);
+  }
+  
+  // Retry zero-result games with alternative search strategies
+  if (zeroResultGames.length > 0) {
+    console.log(`${logPrefix} 🔄 Retrying ${zeroResultGames.length} zero-result games with alternative strategies...`);
+    const strategyRetryStartTime = Date.now();
+    
+    for (const zeroResultGameTitle of zeroResultGames) {
+      // Skip if user manually skipped this game
+      if (isSkipped && isSkipped(zeroResultGameTitle)) {
+        console.log(`${logPrefix} ⏭️ Skipping strategy retry for "${zeroResultGameTitle}" - user chose to skip`);
+        continue;
+      }
+      
+      // Skip if we already found results for this game
+      if (results[zeroResultGameTitle] && results[zeroResultGameTitle].length > 0) {
+        continue;
+      }
+      
+      console.log(`${logPrefix} 🔄 Retrying "${zeroResultGameTitle}" with alternative strategies...`);
+      
+      // Mark as loading again
+      setLoadingGames(prev => new Set(prev).add(zeroResultGameTitle));
+      
+      const cleanedTitle = cleanGameTitle(zeroResultGameTitle);
+      const strategies = generateAlternativeStrategies(cleanedTitle);
+      let strategyRetrySuccess = false;
+      let strategyRetryResults = null;
+      
+      try {
+        // Try each alternative strategy
+        for (const strategy of strategies) {
+          try {
+            console.log(`${logPrefix} 📡 Strategy retry: searching for "${strategy}" (from "${zeroResultGameTitle}")`);
+            strategyRetryResults = await searchGamesByName(strategy, true);
+            
+            if (strategyRetryResults && strategyRetryResults.length > 0) {
+              strategyRetrySuccess = true;
+              console.log(`${logPrefix} ✅ Strategy retry SUCCESS for "${zeroResultGameTitle}" using strategy "${strategy}" - found ${strategyRetryResults.length} results`);
+              break;
+            }
+          } catch (strategyError) {
+            console.warn(`${logPrefix} ⚠️ Strategy retry "${strategy}" failed:`, strategyError.message);
+            // Try next strategy
+            continue;
+          }
+        }
+        
+        if (strategyRetrySuccess && strategyRetryResults && strategyRetryResults.length > 0) {
+          // Success! Process results similar to main loop
+          const MAX_THUMBNAIL_FETCHES = 3;
+          const resultsToEnrich = strategyRetryResults.slice(0, MAX_THUMBNAIL_FETCHES);
+          const remainingResults = strategyRetryResults.slice(MAX_THUMBNAIL_FETCHES);
+          
+          const enrichedResults = await Promise.all(
+            resultsToEnrich.map(async (result) => {
+              try {
+                const details = await getGames(result.id);
+                return {
+                  ...result,
+                  thumbnail: details?.thumbnail || result.thumbnail || null,
+                  image: details?.image || result.image || null,
+                };
+              } catch (detailError) {
+                console.warn(`${logPrefix} ⚠️ Failed to fetch details for strategy retry result ${result.id}:`, detailError.message);
+                return result;
+              }
+            })
+          );
+          
+          const resultsWithThumbnails = [...enrichedResults, ...remainingResults];
+          results[zeroResultGameTitle] = resultsWithThumbnails;
+          
+          // Auto-select best match
+          if (resultsWithThumbnails.length > 0) {
+            const normalizedSearchTitle = zeroResultGameTitle.toLowerCase().trim();
+            const scoredResults = resultsWithThumbnails.map(result => {
+              let score = 0;
+              const normalizedResultName = (result.name || '').toLowerCase().trim();
+              
+              if (normalizedResultName === normalizedSearchTitle) score += 1000;
+              else if (normalizedResultName.startsWith(normalizedSearchTitle)) score += 500;
+              else if (normalizedResultName.includes(normalizedSearchTitle)) score += 100;
+              
+              if (result.type === 'boardgame') score += 50;
+              if (result.rank && result.rank > 0) score += Math.max(0, 10000 - result.rank);
+              if (result.thumbnail) score += 10;
+              
+              return { ...result, _matchScore: score };
+            });
+            
+            scoredResults.sort((a, b) => {
+              if (b._matchScore !== a._matchScore) return b._matchScore - a._matchScore;
+              return (a.name || '').localeCompare(b.name || '');
+            });
+            
+            const bestMatch = scoredResults[0];
+            const { _matchScore, ...cleanResult } = bestMatch;
+            results[zeroResultGameTitle] = scoredResults.map(({ _matchScore, ...clean }) => clean);
+            selected[zeroResultGameTitle] = bestMatch.id;
+            setSelectedGames({ ...selected });
+            
+            console.log(`${logPrefix} ✅ Strategy retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${zeroResultGameTitle}"`);
+            performanceStats.gamesFound++;
+          }
+        } else {
+          // Strategy retry also failed - add to pending retries for background retry
+          console.log(`${logPrefix} ⚠️ Strategy retry failed for "${zeroResultGameTitle}" - adding to pending retries`);
+          results[zeroResultGameTitle] = [];
+          
+          if (addPendingRetry) {
+            try {
+              await addPendingRetry(zeroResultGameTitle);
+              console.log(`${logPrefix} 💾 Saved "${zeroResultGameTitle}" to pending retries (strategy retry failed)`);
+            } catch (retryError) {
+              console.error(`${logPrefix} ❌ Error saving "${zeroResultGameTitle}" to pending retries:`, retryError);
+            }
+          }
+          
+          performanceStats.gamesNotFound++;
+        }
+      } catch (strategyError) {
+        console.error(`${logPrefix} ❌ Error during strategy retry for "${zeroResultGameTitle}":`, strategyError);
+        results[zeroResultGameTitle] = [];
+        
+        // Add to pending retries on error
+        if (addPendingRetry) {
+          try {
+            await addPendingRetry(zeroResultGameTitle);
+            console.log(`${logPrefix} 💾 Saved "${zeroResultGameTitle}" to pending retries (strategy retry error)`);
+          } catch (retryError) {
+            console.error(`${logPrefix} ❌ Error saving "${zeroResultGameTitle}" to pending retries:`, retryError);
+          }
+        }
+      } finally {
+        // Always update loading state and results
+        setLoadingGames(prev => {
+          const updated = new Set(prev);
+          updated.delete(zeroResultGameTitle);
+          return updated;
+        });
+        setSearchResults({ ...results });
+        setSelectedGames({ ...selected });
+      }
+    }
+    
+    const strategyRetryDuration = ((Date.now() - strategyRetryStartTime) / 1000).toFixed(2);
+    const strategySuccessCount = zeroResultGames.filter(title => results[title] && results[title].length > 0).length;
+    logger.info(`✅ Strategy retry complete: ${strategySuccessCount}/${zeroResultGames.length} games resolved`, {
+      successCount: strategySuccessCount,
+      totalZeroResult: zeroResultGames.length,
+      durationSeconds: strategyRetryDuration,
+    });
+    console.log(`${logPrefix} ✅ Strategy retry complete: ${strategySuccessCount}/${zeroResultGames.length} games resolved (${strategyRetryDuration}s)`);
   }
   
   // Clear processing index if callback provided

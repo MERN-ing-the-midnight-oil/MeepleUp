@@ -42,7 +42,8 @@ export const getPendingRetries = async () => {
       return [];
     }
     const retries = JSON.parse(data);
-    if (__DEV__) {
+    // Only log when there are actually pending retries to avoid noise
+    if (__DEV__ && retries.length > 0) {
       console.log('[PendingGameRetries] Retrieved pending retries:', retries.length, 'titles');
     }
     return Array.isArray(retries) ? retries : [];

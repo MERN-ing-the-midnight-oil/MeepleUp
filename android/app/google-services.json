@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "177622732549",
+    "project_id": "meepleup-951a1",
+    "storage_bucket": "meepleup-951a1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:177622732549:android:6d2785b6fa473f8f42716c",
+        "android_client_info": {
+          "package_name": "com.meepleup.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "177622732549-fcs381b9m3obb0jafdlcsvakg998kt8b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCVMK8ZmfTvMXMQt5GJjvCfeCdv4C-SSkM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "177622732549-fcs381b9m3obb0jafdlcsvakg998kt8b.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "177622732549-7b4p8i1c5gopt58uamjlbrmlo56vtppf.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.rhyssmoker.meepleup",
+                "app_store_id": "6754894730"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

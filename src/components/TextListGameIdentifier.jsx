@@ -148,6 +148,16 @@ const TextListGameIdentifier = ({
       return;
     }
 
+    // Filter out games without valid bggId before processing
+    const validGames = Object.entries(selectedGames).filter(([gameTitle, bggId]) => {
+      return bggId && bggId.toString().trim() !== '';
+    });
+
+    if (validGames.length === 0) {
+      Alert.alert('No Valid Games', 'The selected games do not have valid game data. Please wait for the search to complete or select different games.');
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
@@ -155,13 +165,46 @@ const TextListGameIdentifier = ({
     let failCount = 0;
 
     try {
-      for (const [gameTitle, bggId] of Object.entries(selectedGames)) {
-        if (!bggId) continue;
+      for (const [gameTitle, bggId] of validGames) {
 
         try {
-          const gameDetails = await getGames(bggId);
-          if (gameDetails) {
-            const gameData = {
+          // Use the search results we already have instead of fetching again!
+          // Find the selected game in the search results
+          const resultsForGame = searchResults[gameTitle] || [];
+          const selectedResult = resultsForGame.find(result => result.id === bggId.toString() || result.id === bggId);
+          
+          let gameData;
+          
+          if (selectedResult) {
+            // We have the data from search - use it directly!
+            gameData = {
+              title: selectedResult.name || gameTitle,
+              bggId: bggId.toString(),
+              image: selectedResult.image || null,
+              thumbnail: selectedResult.thumbnail || null,
+              description: selectedResult.description || null,
+              yearPublished: selectedResult.yearPublished || null,
+              minPlayers: selectedResult.minPlayers || null,
+              maxPlayers: selectedResult.maxPlayers || null,
+              playingTime: selectedResult.playingTime || null,
+              // Include fields needed for GameCard to show heart instead of "?"
+              mechanics: selectedResult.mechanics || null,
+              categories: selectedResult.categories || null,
+              publishers: selectedResult.publishers || null,
+              publisher: selectedResult.publisher || null,
+              complexity: selectedResult.complexity || selectedResult.averageWeight || null,
+              averageWeight: selectedResult.averageWeight || selectedResult.complexity || null,
+              source: 'text_list',
+            };
+          } else {
+            // Fallback: if search result not found, fetch it (shouldn't happen normally)
+            console.warn(`[TextListGameIdentifier] Selected game ${gameTitle} (${bggId}) not found in search results, fetching...`);
+            const gameDetails = await getGames(bggId);
+            if (!gameDetails) {
+              failCount++;
+              continue;
+            }
+            gameData = {
               title: gameDetails.name || gameTitle,
               bggId: bggId.toString(),
               image: gameDetails.image || null,
@@ -171,8 +214,6 @@ const TextListGameIdentifier = ({
               minPlayers: gameDetails.minPlayers || null,
               maxPlayers: gameDetails.maxPlayers || null,
               playingTime: gameDetails.playingTime || null,
-              // Include fields needed for GameCard to show heart instead of "?"
-              // GameCard checks for publisher, mechanics, categories, and complexity
               mechanics: gameDetails.mechanics || null,
               categories: gameDetails.categories || null,
               publishers: gameDetails.publishers || null,
@@ -181,13 +222,11 @@ const TextListGameIdentifier = ({
               averageWeight: gameDetails.averageWeight || gameDetails.complexity || null,
               source: 'text_list',
             };
+          }
 
-            if (onAddToCollection) {
-              onAddToCollection(gameData);
-              successCount++;
-            }
-          } else {
-            failCount++;
+          if (onAddToCollection) {
+            onAddToCollection(gameData);
+            successCount++;
           }
         } catch (err) {
           console.error(`[TextListGameIdentifier] Error adding game ${gameTitle}:`, err);

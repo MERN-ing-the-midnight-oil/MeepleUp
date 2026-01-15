@@ -265,109 +265,112 @@ const ShowGames = ({
             )}
           </>
         ) : !isSkipped ? (
-          // Show options for games that have no results
-          <View style={styles.processingContainer}>
-            {hasNoResults && (
-              <View style={styles.stuckContainer}>
-                {hasExceededRetries && (
-                  <Text style={styles.stuckText}>
-                    We couldn't find this game title.
-                  </Text>
-                )}
-                {!hasExceededRetries && isLoading && (
-                  <View style={styles.processingRow}>
-                    <ActivityIndicator size="small" color={theme.colors.meepleRed} />
-                    <Text style={styles.processingText}>Loading...</Text>
-                  </View>
-                )}
-                {isRevisingThis ? (
-                  <View style={styles.reviseContainer}>
-                    <TextInput
-                      style={styles.reviseInput}
-                      value={revisedTitle}
-                      onChangeText={(text) => {
-                        setRevisingGames(prev => ({ ...prev, [gameTitle]: text }));
-                      }}
-                      placeholder="Enter revised game title"
-                      autoFocus
-                      returnKeyType="done"
-                      onSubmitEditing={() => {
-                        if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
-                          onReviseTitle(gameTitle, revisedTitle.trim());
-                          setIsRevising(prev => {
-                            const updated = new Set(prev);
-                            updated.delete(gameTitle);
-                            return updated;
-                          });
-                          setRevisingGames(prev => {
-                            const updated = { ...prev };
-                            delete updated[gameTitle];
-                            return updated;
-                          });
-                        }
-                      }}
-                    />
-                    <View style={styles.reviseButtonRow}>
-                      <Pressable
-                        onPress={() => {
-                          if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
-                            onReviseTitle(gameTitle, revisedTitle.trim());
-                          }
-                          setIsRevising(prev => {
-                            const updated = new Set(prev);
-                            updated.delete(gameTitle);
-                            return updated;
-                          });
-                          setRevisingGames(prev => {
-                            const updated = { ...prev };
-                            delete updated[gameTitle];
-                            return updated;
-                          });
-                        }}
-                        style={[styles.reviseButton, styles.submitButton]}
-                        disabled={!revisedTitle.trim() || revisedTitle.trim() === gameTitle}
-                      >
-                        <Text style={[styles.reviseButtonText, (!revisedTitle.trim() || revisedTitle.trim() === gameTitle) && styles.reviseButtonTextDisabled]}>
-                          Search Again
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => {
-                          setIsRevising(prev => {
-                            const updated = new Set(prev);
-                            updated.delete(gameTitle);
-                            return updated;
-                          });
-                          setRevisingGames(prev => {
-                            const updated = { ...prev };
-                            delete updated[gameTitle];
-                            return updated;
-                          });
-                        }}
-                        style={[styles.reviseButton, styles.cancelButton]}
-                      >
-                        <Text style={styles.reviseButtonText}>Cancel</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.stuckButtonRow}>
-                    {onReviseTitle && (
-                      <Pressable
-                        onPress={() => {
-                          setIsRevising(prev => new Set(prev).add(gameTitle));
-                          setRevisingGames(prev => ({ ...prev, [gameTitle]: gameTitle }));
-                        }}
-                        style={[styles.stuckButton, styles.reviseTitleButton]}
-                      >
-                        <Text style={styles.stuckButtonText}>Change Text</Text>
-                      </Pressable>
+          // Show spinner in carousel area when still searching, or options when search is exhausted
+          <>
+            {isLoading ? (
+              // Show spinner in carousel area when still trying alternate searches
+              <View style={styles.carouselSpinnerContainer}>
+                <ActivityIndicator size="small" color={theme.colors.meepleRed} />
+                <Text style={styles.carouselSpinnerText}>Searching...</Text>
+              </View>
+            ) : (
+              // Show options for games that have no results and search has given up
+              <View style={styles.processingContainer}>
+                {hasNoResults && (
+                  <View style={styles.stuckContainer}>
+                    {hasExceededRetries && (
+                      <Text style={styles.gameNotFoundText}>Game Title Not Found</Text>
+                    )}
+                    {isRevisingThis ? (
+                      <View style={styles.reviseContainer}>
+                        <TextInput
+                          style={styles.reviseInput}
+                          value={revisedTitle}
+                          onChangeText={(text) => {
+                            setRevisingGames(prev => ({ ...prev, [gameTitle]: text }));
+                          }}
+                          placeholder="Enter revised game title"
+                          autoFocus
+                          returnKeyType="done"
+                          onSubmitEditing={() => {
+                            if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
+                              onReviseTitle(gameTitle, revisedTitle.trim());
+                              setIsRevising(prev => {
+                                const updated = new Set(prev);
+                                updated.delete(gameTitle);
+                                return updated;
+                              });
+                              setRevisingGames(prev => {
+                                const updated = { ...prev };
+                                delete updated[gameTitle];
+                                return updated;
+                              });
+                            }
+                          }}
+                        />
+                        <View style={styles.reviseButtonRow}>
+                          <Pressable
+                            onPress={() => {
+                              if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
+                                onReviseTitle(gameTitle, revisedTitle.trim());
+                              }
+                              setIsRevising(prev => {
+                                const updated = new Set(prev);
+                                updated.delete(gameTitle);
+                                return updated;
+                              });
+                              setRevisingGames(prev => {
+                                const updated = { ...prev };
+                                delete updated[gameTitle];
+                                return updated;
+                              });
+                            }}
+                            style={[styles.reviseButton, styles.submitButton]}
+                            disabled={!revisedTitle.trim() || revisedTitle.trim() === gameTitle}
+                          >
+                            <Text style={[styles.reviseButtonText, (!revisedTitle.trim() || revisedTitle.trim() === gameTitle) && styles.reviseButtonTextDisabled]}>
+                              Search Again
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => {
+                              setIsRevising(prev => {
+                                const updated = new Set(prev);
+                                updated.delete(gameTitle);
+                                return updated;
+                              });
+                              setRevisingGames(prev => {
+                                const updated = { ...prev };
+                                delete updated[gameTitle];
+                                return updated;
+                              });
+                            }}
+                            style={[styles.reviseButton, styles.cancelButton]}
+                          >
+                            <Text style={styles.reviseButtonText}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.stuckButtonRow}>
+                        {onReviseTitle && (
+                          <Pressable
+                            onPress={() => {
+                              setIsRevising(prev => new Set(prev).add(gameTitle));
+                              setRevisingGames(prev => ({ ...prev, [gameTitle]: gameTitle }));
+                            }}
+                            style={[styles.stuckButton, styles.reviseTitleButton]}
+                          >
+                            <Text style={styles.stuckButtonText}>Modify Title</Text>
+                          </Pressable>
+                        )}
+                      </View>
                     )}
                   </View>
                 )}
               </View>
             )}
-          </View>
+          </>
         ) : null}
       </View>
     );
@@ -386,9 +389,6 @@ const ShowGames = ({
   }, [visible, formattedGames.length, title]);
 
   if (!visible || formattedGames.length === 0) {
-    if (__DEV__) {
-      console.log('[ShowGames] Not rendering - visible:', visible, 'formattedGames.length:', formattedGames.length);
-    }
     return null;
   }
 
@@ -651,6 +651,25 @@ const styles = StyleSheet.create({
   },
   resultsScroll: {
     marginTop: theme.spacing.xs,
+  },
+  carouselSpinnerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.lg,
+    minHeight: 150,
+  },
+  carouselSpinnerText: {
+    marginLeft: theme.spacing.sm,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.textSecondary,
+  },
+  gameNotFoundText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.textPrimary,
+    fontWeight: theme.typography.fontWeight.semibold,
+    marginBottom: theme.spacing.md,
+    textAlign: 'center',
   },
   resultCard: {
     width: 120,

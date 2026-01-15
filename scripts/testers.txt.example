@@ -1,0 +1,8 @@
+# Beta Tester Email List
+# One email per line, or CSV format: email,firstName,lastName
+# Lines starting with # are ignored
+
+test1@example.com
+test2@example.com,John,Doe
+test3@example.com,Jane,Smith
+

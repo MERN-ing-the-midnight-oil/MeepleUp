@@ -398,6 +398,9 @@ export async function getGamesFromGeek(gameId) {
     return null;
   }
 
+  const startTime = Date.now();
+  const BGG_API_TIMEOUT_MS = 10000; // 10 second timeout for BGG API calls
+  
   try {
     // Rate limit API calls (shorter delay for user-driven single game fetches)
     await rateLimitAPI(false);
@@ -425,26 +428,38 @@ export async function getGamesFromGeek(gameId) {
       });
     };
     
-    let response = await fetchWithRetry();
-    
-    logger.debug('[BGG API] Initial response status:', response.status);
-    
-    // Handle 429 rate limit errors with exponential backoff
-    response = await handle429WithRetry(response, fetchWithRetry);
-    
-    // If header auth fails with 401, try token as query parameter
-    if (response.status === 401 && token) {
-      logger.debug('[BGG API] Header auth failed (401), trying token as query parameter');
-      const urlWithToken = `${BGG_API_BASE}/thing?id=${gameId}&stats=1&token=${token}`;
-      const fetchWithTokenRetry = async () => await fetch(urlWithToken);
-      response = await fetch(urlWithToken);
-      response = await handle429WithRetry(response, fetchWithTokenRetry);
+    // Wrap the entire fetch/parse flow in a timeout
+    const fetchAndParse = async () => {
+      let response = await fetchWithRetry();
       
-      logger.debug('[BGG API] Query param response status:', response.status);
+      logger.debug('[BGG API] Initial response status:', response.status);
       
-      // If still fails, try without authentication
-      if (response.status === 401 || response.status === 403) {
-        logger.debug('[BGG API] Token query param also failed, trying without auth');
+      // Handle 429 rate limit errors with exponential backoff
+      response = await handle429WithRetry(response, fetchWithRetry);
+      
+      // If header auth fails with 401, try token as query parameter
+      if (response.status === 401 && token) {
+        logger.debug('[BGG API] Header auth failed (401), trying token as query parameter');
+        const urlWithToken = `${BGG_API_BASE}/thing?id=${gameId}&stats=1&token=${token}`;
+        const fetchWithTokenRetry = async () => await fetch(urlWithToken);
+        response = await fetch(urlWithToken);
+        response = await handle429WithRetry(response, fetchWithTokenRetry);
+        
+        logger.debug('[BGG API] Query param response status:', response.status);
+        
+        // If still fails, try without authentication
+        if (response.status === 401 || response.status === 403) {
+          logger.debug('[BGG API] Token query param also failed, trying without auth');
+          const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
+          const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
+          response = await fetch(urlNoAuth);
+          response = await handle429WithRetry(response, fetchNoAuthRetry);
+          
+          logger.debug('[BGG API] No auth response status:', response.status);
+        }
+      } else if (response.status === 401 && !token) {
+        // No token configured, try without auth
+        logger.debug('[BGG API] No token configured, trying without auth');
         const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
         const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
         response = await fetch(urlNoAuth);
@@ -452,46 +467,54 @@ export async function getGamesFromGeek(gameId) {
         
         logger.debug('[BGG API] No auth response status:', response.status);
       }
-    } else if (response.status === 401 && !token) {
-      // No token configured, try without auth
-      logger.debug('[BGG API] No token configured, trying without auth');
-      const urlNoAuth = `${BGG_API_BASE}/thing?id=${gameId}&stats=1`;
-      const fetchNoAuthRetry = async () => await fetch(urlNoAuth);
-      response = await fetch(urlNoAuth);
-      response = await handle429WithRetry(response, fetchNoAuthRetry);
       
-      logger.debug('[BGG API] No auth response status:', response.status);
-    }
-    
-    if (!response.ok) {
-      // If we still have errors after all fallbacks and retries, log and return null
-      logger.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
-      // For 429 errors specifically, log a more helpful message
-      if (response.status === 429) {
-        logger.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
+      if (!response.ok) {
+        // If we still have errors after all fallbacks and retries, log and return null
+        logger.warn(`[BGG API] All authentication methods failed after retries. Final status: ${response.status}`);
+        // For 429 errors specifically, log a more helpful message
+        if (response.status === 429) {
+          logger.warn(`[BGG API] Rate limited (429) - BGG API is throttling requests. Please wait before trying again.`);
+        }
+        // Don't throw - return null so the app can continue
+        return null;
       }
-      // Don't throw - return null so the app can continue
-      return null;
-    }
 
-    const xmlText = await response.text();
+      const xmlText = await response.text();
+      
+      logger.debug('[BGG API] XML response length:', xmlText.length);
+      // Log a snippet to verify we got XML
+      if (xmlText.length > 0) {
+        logger.debug('[BGG API] XML starts with:', xmlText.substring(0, 200));
+      }
+      
+      const gameData = parseBGGXML(xmlText);
+      
+      logger.debug('[BGG API] Parsed game data:', gameData ? {
+        id: gameData.id,
+        name: gameData.name,
+        hasThumbnail: !!gameData.thumbnail,
+        thumbnail: gameData.thumbnail ? gameData.thumbnail.substring(0, 50) + '...' : null
+      } : 'null');
+      
+      return gameData;
+    };
     
-    logger.debug('[BGG API] XML response length:', xmlText.length);
-    // Log a snippet to verify we got XML
-    if (xmlText.length > 0) {
-      logger.debug('[BGG API] XML starts with:', xmlText.substring(0, 200));
-    }
-    
-    const gameData = parseBGGXML(xmlText);
-    
-    logger.debug('[BGG API] Parsed game data:', gameData ? {
-      id: gameData.id,
-      name: gameData.name,
-      hasThumbnail: !!gameData.thumbnail,
-      thumbnail: gameData.thumbnail ? gameData.thumbnail.substring(0, 50) + '...' : null
-    } : 'null');
-    
-    return gameData;
+    // Wrap in timeout
+    return await Promise.race([
+      fetchAndParse(),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+          logger.error(`[BGG API] getGamesFromGeek timeout for gameId ${gameId}`, {
+            gameId,
+            timeoutSeconds: BGG_API_TIMEOUT_MS / 1000,
+            durationSeconds: duration,
+            source: 'getGamesFromGeek',
+          });
+          reject(new Error(`BGG API timeout after ${BGG_API_TIMEOUT_MS/1000} seconds for gameId ${gameId}`));
+        }, BGG_API_TIMEOUT_MS);
+      })
+    ]);
   } catch (error) {
     logger.error('[BGG API] Error fetching game details:', error);
     // Try one more time without authentication as a last resort

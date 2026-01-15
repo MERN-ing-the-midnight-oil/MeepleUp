@@ -351,6 +351,14 @@ export const AuthProvider = ({ children }) => {
     let isMounted = true;
     let authStateResolved = false;
 
+    // Check if there's a current user immediately (for debugging)
+    const initialUser = auth.currentUser;
+    if (initialUser) {
+      console.log('[AuthContext] Initial auth.currentUser found:', initialUser.email);
+    } else {
+      console.log('[AuthContext] No initial auth.currentUser - waiting for onAuthStateChanged');
+    }
+
     // Set up auth state listener
     // This will fire when auth state changes AND on initial load with persisted user
     // onAuthStateChanged fires immediately with the current user if one exists
@@ -362,16 +370,16 @@ export const AuthProvider = ({ children }) => {
 
         try {
           if (!firebaseUser) {
-            console.log('Auth state: No user');
+            console.log('[AuthContext] Auth state: No user (user logged out or no persisted session)');
             setUser(null);
             setLoading(false);
             return;
           }
 
-          console.log('Auth state changed: User found', firebaseUser.email);
+          console.log('[AuthContext] Auth state changed: User found', firebaseUser.email, firebaseUser.uid);
           await loadUserProfile(firebaseUser);
         } catch (error) {
-          console.error('Auth state change error:', error);
+          console.error('[AuthContext] Auth state change error:', error);
           setUser(mapUser(firebaseUser));
         } finally {
           if (isMounted) {
@@ -380,7 +388,7 @@ export const AuthProvider = ({ children }) => {
         }
       },
       (error) => {
-        console.error('Failed to initialize auth listener:', error);
+        console.error('[AuthContext] Failed to initialize auth listener:', error);
         authStateResolved = true;
         if (isMounted) {
           setLoading(false);
@@ -392,18 +400,18 @@ export const AuthProvider = ({ children }) => {
     // This handles edge cases where the listener might not fire immediately
     const timeoutId = setTimeout(async () => {
       if (!authStateResolved && isMounted) {
-        console.log('Auth state listener timeout, checking currentUser directly...');
+        console.log('[AuthContext] Auth state listener timeout, checking currentUser directly...');
         try {
           const currentUser = auth.currentUser;
           if (currentUser) {
-            console.log('Found currentUser after timeout:', currentUser.email);
+            console.log('[AuthContext] Found currentUser after timeout:', currentUser.email);
             await loadUserProfile(currentUser);
           } else {
-            console.log('No currentUser found after timeout');
+            console.log('[AuthContext] No currentUser found after timeout');
             setUser(null);
           }
         } catch (error) {
-          console.error('Error checking currentUser after timeout:', error);
+          console.error('[AuthContext] Error checking currentUser after timeout:', error);
         } finally {
           if (isMounted) {
             setLoading(false);

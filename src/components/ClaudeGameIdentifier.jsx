@@ -368,6 +368,14 @@ const ClaudeGameIdentifier = ({
     }
   }, [showCameraModal]);
 
+  // Reset photo capture state when camera modal opens
+  useEffect(() => {
+    if (showCameraModal) {
+      setPhotoCaptured(false); // Reset so capture button is enabled
+      setCameraReady(false); // Reset camera ready state
+    }
+  }, [showCameraModal]);
+
   const clearPendingFetchTimers = useCallback(() => {
     if (__DEV__) {
       console.log('[ClaudeGameIdentifier] clearPendingFetchTimers called, clearing', pendingFetchTimersRef.current.length, 'timers');
@@ -2499,51 +2507,46 @@ const ClaudeGameIdentifier = ({
               </View>
             ) : candidate.bggStatus === 'no_match' || candidate.bggStatus === 'error' ? (
               <View style={styles.gameStatusContainer}>
-                <View style={styles.processingRow}>
-                  <ActivityIndicator size="small" color={theme.colors.meepleRed} />
-                  <Text style={styles.gameStatusMessage}>Please be patient, we're still trying...</Text>
-                </View>
-                {candidate.bggStatus === 'no_match' && (
-                  <View style={styles.inlineCorrectionContainer}>
-                    <Text style={styles.inlineCorrectionLabel}>Not the right title? Enter it here:</Text>
-                    <View style={styles.inlineCorrectionInputRow}>
-                      <TextInput
-                        style={styles.inlineCorrectionInput}
-                        value={inlineCorrectionInputs[candidate.id] || ''}
-                        onChangeText={(text) => {
-                          setInlineCorrectionInputs((prev) => ({
-                            ...prev,
-                            [candidate.id]: text,
-                          }));
-                        }}
-                        placeholder="Type correct game name"
-                        placeholderTextColor="#999"
-                        autoCapitalize="words"
-                        returnKeyType="search"
-                        onSubmitEditing={() => handleInlineCorrectionSearch(candidate.id)}
-                      />
-                      <Pressable
-                        style={[
-                          styles.inlineCorrectionSearchButton,
-                          (!inlineCorrectionInputs[candidate.id]?.trim() || inlineCorrectionSearching[candidate.id]) && styles.inlineCorrectionSearchButtonDisabled,
-                        ]}
-                        onPress={() => handleInlineCorrectionSearch(candidate.id)}
-                        disabled={!inlineCorrectionInputs[candidate.id]?.trim() || inlineCorrectionSearching[candidate.id]}
-                        accessibilityRole="button"
-                        accessibilityLabel="Search for game"
-                      >
-                        {inlineCorrectionSearching[candidate.id] ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.inlineCorrectionSearchButtonText}>Search</Text>
-                        )}
-                      </Pressable>
-                    </View>
-                    <Text style={styles.inlineCorrectionHint}>
-                      Or click green check to create game without BGG info
-                    </Text>
+                <Text style={styles.gameStatusMessage}>Sorry, we couldn't find this title.</Text>
+                <View style={styles.inlineCorrectionContainer}>
+                  <Text style={styles.inlineCorrectionLabel}>Enter the correct title to search:</Text>
+                  <View style={styles.inlineCorrectionInputRow}>
+                    <TextInput
+                      style={styles.inlineCorrectionInput}
+                      value={inlineCorrectionInputs[candidate.id] || ''}
+                      onChangeText={(text) => {
+                        setInlineCorrectionInputs((prev) => ({
+                          ...prev,
+                          [candidate.id]: text,
+                        }));
+                      }}
+                      placeholder="Type correct game name"
+                      placeholderTextColor="#999"
+                      autoCapitalize="words"
+                      returnKeyType="search"
+                      onSubmitEditing={() => handleInlineCorrectionSearch(candidate.id)}
+                    />
+                    <Pressable
+                      style={[
+                        styles.inlineCorrectionSearchButton,
+                        (!inlineCorrectionInputs[candidate.id]?.trim() || inlineCorrectionSearching[candidate.id]) && styles.inlineCorrectionSearchButtonDisabled,
+                      ]}
+                      onPress={() => handleInlineCorrectionSearch(candidate.id)}
+                      disabled={!inlineCorrectionInputs[candidate.id]?.trim() || inlineCorrectionSearching[candidate.id]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Search for game"
+                    >
+                      {inlineCorrectionSearching[candidate.id] ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.inlineCorrectionSearchButtonText}>Search</Text>
+                      )}
+                    </Pressable>
                   </View>
-                )}
+                  <Text style={styles.inlineCorrectionHint}>
+                    Or click green check to create game without BGG info
+                  </Text>
+                </View>
               </View>
             ) : null}
           </View>
@@ -3103,6 +3106,16 @@ const ClaudeGameIdentifier = ({
       return;
     }
 
+    // Filter out games without valid bggId before processing
+    const validGames = Object.entries(selectedGames).filter(([gameTitle, bggId]) => {
+      return bggId && bggId.toString().trim() !== '';
+    });
+
+    if (validGames.length === 0) {
+      Alert.alert('No Valid Games', 'The selected games do not have valid game data. Please wait for the search to complete or select different games.');
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
@@ -3110,8 +3123,7 @@ const ClaudeGameIdentifier = ({
     let failCount = 0;
 
     try {
-      for (const [gameTitle, bggId] of Object.entries(selectedGames)) {
-        if (!bggId) continue;
+      for (const [gameTitle, bggId] of validGames) {
 
         try {
           const gameDetails = await getGames(bggId);

@@ -147,16 +147,27 @@ export async function searchGamesByName(query, limit = 10) {
     
     // Add timeout wrapper to prevent hanging
     // Increased to 7s to give Firestore more time for legitimate slow queries
-    // Reduced timeout for faster fallback to BGG API during bulk imports
-    // 3 seconds is enough for most queries, and faster fallback improves bulk import speed
-    const QUERY_TIMEOUT_MS = 3000; // Reduced from 7000ms to 3000ms for faster bulk imports
+    // Range queries on large collections can take 3-5 seconds, so we need adequate timeout
+    // 7 seconds balances allowing legitimate queries to complete vs fast fallback to BGG API
+    const QUERY_TIMEOUT_MS = 7000; // Increased from 3000ms to 7000ms to prevent false timeouts
+    
+    // Track active queries to identify concurrency issues
+    const activeQueries = new Set();
     const queryWithTimeout = (queryPromise, queryName, searchTermForLog = null) => {
       const searchInfo = searchTermForLog ? ` (search term: "${searchTermForLog}")` : '';
+      const queryId = `${queryName}:${searchTermForLog || 'unknown'}`;
+      
+      // Track this query
+      activeQueries.add(queryId);
+      const activeCount = activeQueries.size;
+      
       if (__DEV__) {
-        console.log(`[Game Database] Starting ${queryName} with ${QUERY_TIMEOUT_MS/1000}s timeout${searchInfo}`);
+        console.log(`[Game Database] Starting ${queryName} with ${QUERY_TIMEOUT_MS/1000}s timeout${searchInfo} (${activeCount} active queries)`);
       }
+      
       return Promise.race([
         queryPromise.then((result) => {
+          activeQueries.delete(queryId);
           if (__DEV__) {
             console.log(`[Game Database] ${queryName} completed successfully${searchInfo}`);
           }
@@ -164,6 +175,8 @@ export async function searchGamesByName(query, limit = 10) {
         }),
         new Promise((_, reject) => {
           setTimeout(async () => {
+            activeQueries.delete(queryId);
+            
             // Try to log timeout via logger if available
             try {
               const logger = (await import('../utils/inAppLogger')).default;
@@ -171,6 +184,8 @@ export async function searchGamesByName(query, limit = 10) {
                 timeoutSeconds: QUERY_TIMEOUT_MS / 1000,
                 queryName,
                 searchTerm: searchTermForLog,
+                activeQueriesCount: activeQueries.size,
+                source: 'searchGamesByName_firebase',
               });
             } catch (loggerError) {
               // Logger not available, continue
@@ -178,7 +193,7 @@ export async function searchGamesByName(query, limit = 10) {
             
             if (__DEV__) {
               // Use warn instead of error - timeouts are expected for games that don't exist
-              console.warn(`[Game Database] ${queryName} timed out after ${QUERY_TIMEOUT_MS/1000} seconds${searchInfo}`);
+              console.warn(`[Game Database] ${queryName} timed out after ${QUERY_TIMEOUT_MS/1000} seconds${searchInfo} (${activeQueries.size} still active)`);
             }
             reject(new Error(`Firestore query timeout after ${QUERY_TIMEOUT_MS/1000} seconds: ${queryName}${searchInfo}`));
           }, QUERY_TIMEOUT_MS);
@@ -319,13 +334,15 @@ export async function searchGamesByName(query, limit = 10) {
           }
           
           // Try again with just the first word
+          // Use a smaller limit for first-word fallback to improve performance
+          // First-word queries can be very broad (e.g., "mermaid" matches many games)
           const fallbackPrefix = firstWord;
           const fallbackUpperBound = firstWord + '\uf8ff';
           const fallbackQueryRef = gamesRef
             .where('nameLower', '>=', fallbackPrefix)
             .where('nameLower', '<=', fallbackUpperBound)
             .orderBy('nameLower')
-            .limit(200);
+            .limit(100); // Reduced from 200 to 100 for better performance on broad queries
           
           try {
             const fallbackSnapshot = await queryWithTimeout(fallbackQueryRef.get(), 'fallback first-word query', searchTerm);
@@ -378,7 +395,7 @@ export async function searchGamesByName(query, limit = 10) {
             .where('nameLower', '>=', fallbackPrefix)
             .where('nameLower', '<=', fallbackUpperBound)
             .orderBy('nameLower')
-            .limit(200);
+            .limit(100); // Reduced from 200 to 100 for better performance on broad queries
           
           try {
             const fallbackSnapshot = await queryWithTimeout(fallbackQueryRef.get(), 'fallback first-word query', searchTerm);

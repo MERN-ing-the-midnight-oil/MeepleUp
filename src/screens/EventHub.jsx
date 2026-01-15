@@ -664,10 +664,10 @@ const EventHub = () => {
     return { futureEvents: future, pastEvents: past };
   }, [event?.eventDates, event?.scheduledFor, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
 
-  // Convert all events (future + past) to calendar format for CalendarDatePicker
+  // Convert future events to calendar format for CalendarDatePicker
+  // Only include future events so green dates match "Upcoming events" list
   const calendarDates = useMemo(() => {
-    const allEvents = [...futureEvents, ...pastEvents];
-    return allEvents.map((ed) => {
+    return futureEvents.map((ed) => {
       const date = safeParseDate(ed.date);
       const startTime = safeParseDate(ed.startTime);
       const endTime = safeParseDate(ed.endTime);
@@ -688,7 +688,7 @@ const EventHub = () => {
         note: ed.note || '',
       };
     }).filter(Boolean);
-  }, [futureEvents, pastEvents, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
+  }, [futureEvents, event?.location, event?.generalLocation, event?.address, event?.exactLocation]);
 
   // Optimistic state for calendar dates - updates immediately on long press
   // This ensures the UI reflects changes instantly before Firestore syncs
@@ -2489,6 +2489,32 @@ const EventHub = () => {
               const date = safeParseDate(removedDate.date);
               const dateStr = formatDate(date.toISOString());
               messageContent = `${userName} removed the event date: ${dateStr}`;
+              
+              // Clean up RSVP data for the removed date
+              const removedDateKey = getDateKey(date);
+              if (removedDateKey && db && event?.id) {
+                try {
+                  const membersRef = db.collection('gamingGroups').doc(event.id).collection('members');
+                  const membersSnapshot = await membersRef.get();
+                  
+                  // Delete the dateKey from each member's rsvpStatuses
+                  const batch = db.batch();
+                  membersSnapshot.forEach((memberDoc) => {
+                    const memberData = memberDoc.data();
+                    if (memberData.rsvpStatuses && typeof memberData.rsvpStatuses === 'object' && memberData.rsvpStatuses[removedDateKey]) {
+                      const memberRef = membersRef.doc(memberDoc.id);
+                      batch.update(memberRef, {
+                        [`rsvpStatuses.${removedDateKey}`]: firebase.firestore.FieldValue.delete()
+                      });
+                    }
+                  });
+                  
+                  await batch.commit();
+                } catch (rsvpCleanupError) {
+                  console.error('Error cleaning up RSVP data for removed date:', rsvpCleanupError);
+                  // Don't fail the whole operation if RSVP cleanup fails
+                }
+              }
             } else {
               messageContent = `${userName} removed an event date.`;
             }
