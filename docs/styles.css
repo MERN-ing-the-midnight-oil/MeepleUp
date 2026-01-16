@@ -34,14 +34,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 1rem;
 }
 
 .content-wrapper {
   display: grid;
-  grid-template-columns: 1fr 1.8fr;
-  gap: 5rem;
-  max-width: 1400px;
+  grid-template-columns: 0.7fr 2fr;
+  gap: 3rem;
+  max-width: 100%;
   width: 100%;
   align-items: start;
 }
@@ -53,9 +53,9 @@ body {
   align-items: center;
   justify-content: flex-start;
   gap: 3rem;
-  padding: 2rem;
+  padding: 1rem;
   position: sticky;
-  top: 2rem;
+  top: 1rem;
 }
 
 .app-icon-container {
@@ -91,17 +91,47 @@ body {
   object-fit: contain;
 }
 
+/* Sidebar Legal Links */
+.sidebar-legal-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.sidebar-legal-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.sidebar-legal-links a:hover {
+  color: var(--primary-color);
+}
+
+.legal-separator {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
 /* Content Section */
 .content-section {
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  padding: 2rem 2rem 2rem 0;
-  max-width: 700px;
+  padding: 1rem 1rem 1rem 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 .brand-name {
-  font-size: 4.5rem;
+  font-size: 3rem;
   font-weight: 800;
   color: var(--primary-color);
   letter-spacing: -0.02em;
@@ -110,7 +140,7 @@ body {
 }
 
 .tagline {
-  font-size: 1.75rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -136,14 +166,61 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+/* Signup Forms Container */
+.signup-forms-container {
+  display: flex;
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+
 /* Beta Signup Section */
 .beta-signup-section {
-  margin: 1.5rem 0;
-  padding: 2rem;
+  flex: 1;
+  padding: 1.5rem;
   background: linear-gradient(135deg, rgba(212, 93, 93, 0.05) 0%, rgba(255, 255, 255, 0.05) 100%);
   border: 2px solid var(--primary-color);
   border-radius: 16px;
   box-shadow: var(--shadow-md);
+}
+
+.beta-signup-section.ios-signup {
+  border-color: #007AFF;
+}
+
+.beta-signup-section.android-signup {
+  border-color: #3DDC84;
+}
+
+.ios-button {
+  background-color: #007AFF !important;
+}
+
+.ios-button:hover {
+  background-color: #0056b3 !important;
+}
+
+.android-button {
+  background-color: #3DDC84 !important;
+  color: #1a1a1a !important;
+}
+
+.android-button:hover {
+  background-color: #2bc472 !important;
+}
+
+.platform-badge {
+  width: 120px;
+  height: auto;
+  margin-top: 0.75rem;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  opacity: 0.9;
+  transition: opacity 0.2s ease;
+}
+
+.platform-badge:hover {
+  opacity: 1;
 }
 
 .beta-heading {
@@ -160,6 +237,14 @@ body {
   text-align: center;
   margin: 0 0 1.5rem 0;
   line-height: 1.6;
+}
+
+.platform-note {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  text-align: center;
+  margin: 0 0 1rem 0;
+  line-height: 1.5;
 }
 
 .beta-buttons-container {
@@ -300,8 +385,41 @@ body {
 .success-message p {
   font-size: 1rem;
   color: var(--text-secondary);
-  margin: 0;
+  margin: 0 0 0.75rem 0;
   line-height: 1.6;
+}
+
+.success-list {
+  text-align: left;
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+  display: inline-block;
+}
+
+.success-list li {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.success-list li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.success-note {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-top: 1rem !important;
 }
 
 /* Error Message */
@@ -320,22 +438,47 @@ body {
   margin: 0;
 }
 
-/* Mini Player Aid Card */
-.mini-player-aid {
+/* Sidebar Header */
+.sidebar-header {
+  text-align: center;
+}
+
+.sidebar-header .brand-name {
+  font-size: 3rem;
+  margin-bottom: 0.25rem;
+}
+
+.sidebar-header .tagline {
+  font-size: 1.25rem;
+}
+
+/* Player Aid Button (in sidebar) */
+.logo-section .player-aid-card {
   display: block;
   background: linear-gradient(to bottom, #fef8e8 0%, #fef3d6 100%);
   border: 3px solid #c63d2f;
   border-radius: 12px;
-  padding: 1rem 1.25rem;
+  padding: 1.25rem 1.75rem;
   text-decoration: none;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   position: relative;
   overflow: hidden;
-  margin: 0.5rem 0 1rem 0;
+  animation: player-aid-pulse 1.2s ease-in-out infinite;
 }
 
-.mini-player-aid::before {
+@keyframes player-aid-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 6px 20px rgba(198, 61, 47, 0.25);
+  }
+}
+
+.player-aid-card::before {
   content: '';
   position: absolute;
   top: 0;
@@ -348,54 +491,19 @@ body {
   pointer-events: none;
 }
 
-.mini-player-aid:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 20px rgba(198, 61, 47, 0.25);
+.logo-section .player-aid-card:hover {
+  animation: none;
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(198, 61, 47, 0.3);
 }
 
-.mini-card-header {
+.logo-section .player-aid-header {
   font-family: 'Georgia', serif;
-  font-size: 1rem;
+  font-size: 1.125rem;
   font-weight: 700;
   color: #c63d2f;
   text-align: center;
-  margin-bottom: 0.5rem;
   letter-spacing: 0.5px;
-}
-
-.mini-card-steps {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.5rem;
-}
-
-.mini-step {
-  font-family: 'Georgia', serif;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #5a4d42;
-  background: rgba(244, 197, 66, 0.25);
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  border: 1px solid rgba(244, 197, 66, 0.4);
-  font-variant: small-caps;
-  letter-spacing: 0.5px;
-}
-
-.mini-arrow {
-  color: #f4c542;
-  font-size: 0.875rem;
-  font-weight: bold;
-}
-
-.mini-card-cta {
-  font-size: 0.75rem;
-  color: #a8321b;
-  text-align: center;
-  font-style: italic;
 }
 
 .description {
@@ -403,6 +511,66 @@ body {
   color: var(--text-secondary);
   line-height: 1.8;
   margin: 0;
+}
+
+/* Welcome Section Styles */
+.welcome-intro {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  min-height: 240px; /* Match app icon height */
+}
+
+.rhys-photo {
+  width: auto;
+  height: 240px; /* Match app icon height */
+  min-height: 240px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  flex-shrink: 0;
+}
+
+.welcome-text {
+  flex: 1;
+}
+
+.welcome-header {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  margin: 0 0 1rem 0;
+  line-height: 1.2;
+}
+
+.welcome-subheader {
+  font-size: 1.375rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  font-style: italic;
+}
+
+.welcome-content {
+  font-size: 1.375rem;
+  color: var(--text-primary);
+  line-height: 1.8;
+  margin: 0 0 1.5rem 0;
+}
+
+.welcome-signoff {
+  font-size: 1.0625rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 0.5rem 0;
+}
+
+.signature-image {
+  max-width: 200px;
+  height: auto;
+  margin-top: 0.5rem;
+  opacity: 0.9;
 }
 
 /* Features Section */
@@ -551,22 +719,10 @@ body {
   box-shadow: var(--shadow-md);
 }
 
-/* Legal Links Footer */
-.legal-links-footer {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 1px solid var(--border-color);
-}
-
-.legal-links-nav {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.legal-links-nav a {
+/* Back Link */
+.back-link {
+  display: inline-block;
+  margin-bottom: 1.5rem;
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 0.9375rem;
@@ -574,14 +730,10 @@ body {
   transition: color 0.2s ease;
 }
 
-.legal-links-nav a:hover {
+.back-link:hover {
   color: var(--primary-color);
 }
 
-.legal-links-separator {
-  color: var(--text-secondary);
-  font-size: 0.9375rem;
-}
 
 /* Responsive Design */
 @media (max-width: 968px) {
@@ -638,13 +790,16 @@ body {
     order: 2;
   }
 
-  .brand-name {
-    font-size: 3.5rem;
-    text-align: center;
+  .sidebar-header .brand-name {
+    font-size: 2.5rem;
   }
 
-  .tagline {
-    text-align: center;
+  .sidebar-header .tagline {
+    font-size: 1.125rem;
+  }
+
+  .player-aid-card {
+    max-width: 100%;
   }
 
   .description {
@@ -664,6 +819,21 @@ body {
   }
 
   .value-prop {
+    text-align: center;
+  }
+
+  .welcome-intro {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .rhys-photo {
+    width: 180px;
+    height: 180px;
+  }
+
+  .welcome-header {
     text-align: center;
   }
 
@@ -692,9 +862,9 @@ body {
     width: 100%;
   }
 
-  .legal-links-footer {
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
+  .sidebar-legal-links {
+    font-size: 0.8125rem;
+    gap: 0.5rem;
   }
 }
 
@@ -717,12 +887,12 @@ body {
     padding: 0.5rem;
   }
 
-  .brand-name {
-    font-size: 2.75rem;
+  .sidebar-header .brand-name {
+    font-size: 2rem;
   }
 
-  .tagline {
-    font-size: 1.5rem;
+  .sidebar-header .tagline {
+    font-size: 1rem;
   }
 
   .description {
@@ -740,6 +910,19 @@ body {
   .value-prop {
     font-size: 1rem;
     padding: 1rem;
+  }
+
+  .welcome-intro {
+    gap: 1.5rem;
+  }
+
+  .rhys-photo {
+    width: 150px;
+    height: 150px;
+  }
+
+  .welcome-header {
+    font-size: 1.75rem;
   }
 
   .app-badge {

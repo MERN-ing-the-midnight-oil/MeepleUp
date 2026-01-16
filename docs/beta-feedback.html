@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MeepleUp Beta Feedback - Help us improve">
+  <title>Beta Feedback - MeepleUp</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="legal-pages.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    .feedback-container {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    
+    .feedback-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    
+    .feedback-header h1 {
+      color: var(--primary-color);
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .feedback-header p {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+    }
+    
+    .feedback-form {
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: var(--shadow-lg);
+    }
+    
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+    
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--text-primary);
+    }
+    
+    .form-group .hint {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.5rem;
+    }
+    
+    .form-input,
+    .form-textarea,
+    .form-select {
+      width: 100%;
+      padding: 0.875rem 1rem;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 1rem;
+      font-family: var(--font-family);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    
+    .form-input:focus,
+    .form-textarea:focus,
+    .form-select:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(212, 93, 93, 0.1);
+    }
+    
+    .form-textarea {
+      min-height: 150px;
+      resize: vertical;
+    }
+    
+    .rating-group {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    
+    .rating-option {
+      flex: 1;
+      min-width: 60px;
+    }
+    
+    .rating-option input {
+      display: none;
+    }
+    
+    .rating-option label {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0.75rem;
+      border: 2px solid var(--border-color);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: 500;
+    }
+    
+    .rating-option label:hover {
+      border-color: var(--primary-color);
+      background: rgba(212, 93, 93, 0.05);
+    }
+    
+    .rating-option input:checked + label {
+      border-color: var(--primary-color);
+      background: var(--primary-color);
+      color: white;
+    }
+    
+    .rating-emoji {
+      font-size: 1.5rem;
+      margin-bottom: 0.25rem;
+    }
+    
+    .category-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    
+    .category-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border: 2px solid var(--border-color);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.9rem;
+    }
+    
+    .category-option:hover {
+      border-color: var(--primary-color);
+    }
+    
+    .category-option input {
+      display: none;
+    }
+    
+    .category-option input:checked + span {
+      color: var(--primary-color);
+      font-weight: 600;
+    }
+    
+    .category-option:has(input:checked) {
+      border-color: var(--primary-color);
+      background: rgba(212, 93, 93, 0.1);
+    }
+    
+    .submit-button {
+      width: 100%;
+      padding: 1rem 2rem;
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+    
+    .submit-button:hover {
+      background: #c04d4d;
+    }
+    
+    .submit-button:active {
+      transform: scale(0.98);
+    }
+    
+    .submit-button:disabled {
+      background: var(--text-secondary);
+      cursor: not-allowed;
+    }
+    
+    .success-message,
+    .error-message {
+      text-align: center;
+      padding: 2rem;
+      border-radius: 12px;
+    }
+    
+    .success-message {
+      background: #d4edda;
+      color: #155724;
+    }
+    
+    .success-message h3 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .error-message {
+      background: #f8d7da;
+      color: #721c24;
+      margin-top: 1rem;
+    }
+    
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-secondary);
+      text-decoration: none;
+      margin-bottom: 1rem;
+      font-weight: 500;
+    }
+    
+    .back-link:hover {
+      color: var(--primary-color);
+    }
+    
+    .app-logo {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 1rem;
+    }
+    
+    @media (max-width: 600px) {
+      .feedback-container {
+        padding: 1rem;
+      }
+      
+      .feedback-form {
+        padding: 1.5rem;
+      }
+      
+      .rating-option {
+        min-width: 50px;
+      }
+      
+      .rating-option label {
+        padding: 0.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="feedback-container">
+    <a href="index.html" class="back-link">← Back to MeepleUp</a>
+    
+    <header class="feedback-header">
+      <img src="images/app-icon.png" alt="MeepleUp" class="app-logo">
+      <h1>Beta Feedback</h1>
+      <p>Help us make MeepleUp better! Your feedback shapes the future of the app.</p>
+    </header>
+    
+    <form id="feedbackForm" class="feedback-form">
+      <!-- Email (optional) -->
+      <div class="form-group">
+        <label for="email">Email (optional)</label>
+        <p class="hint">So we can follow up if needed</p>
+        <input type="email" id="email" name="email" class="form-input" placeholder="your@email.com">
+      </div>
+      
+      <!-- Feedback Category -->
+      <div class="form-group">
+        <label>What's this about?</label>
+        <div class="category-options">
+          <label class="category-option">
+            <input type="radio" name="category" value="bug" required>
+            <span>🐛 Bug Report</span>
+          </label>
+          <label class="category-option">
+            <input type="radio" name="category" value="feature">
+            <span>💡 Feature Request</span>
+          </label>
+          <label class="category-option">
+            <input type="radio" name="category" value="usability">
+            <span>🎯 Usability Issue</span>
+          </label>
+          <label class="category-option">
+            <input type="radio" name="category" value="praise">
+            <span>🌟 Something I Love</span>
+          </label>
+          <label class="category-option">
+            <input type="radio" name="category" value="other">
+            <span>💬 Other</span>
+          </label>
+        </div>
+      </div>
+      
+      <!-- Overall Experience Rating -->
+      <div class="form-group">
+        <label>How's your experience so far?</label>
+        <div class="rating-group">
+          <div class="rating-option">
+            <input type="radio" name="rating" id="rating1" value="1">
+            <label for="rating1">
+              <span class="rating-emoji">😫</span>
+              <span>1</span>
+            </label>
+          </div>
+          <div class="rating-option">
+            <input type="radio" name="rating" id="rating2" value="2">
+            <label for="rating2">
+              <span class="rating-emoji">😕</span>
+              <span>2</span>
+            </label>
+          </div>
+          <div class="rating-option">
+            <input type="radio" name="rating" id="rating3" value="3">
+            <label for="rating3">
+              <span class="rating-emoji">😐</span>
+              <span>3</span>
+            </label>
+          </div>
+          <div class="rating-option">
+            <input type="radio" name="rating" id="rating4" value="4">
+            <label for="rating4">
+              <span class="rating-emoji">🙂</span>
+              <span>4</span>
+            </label>
+          </div>
+          <div class="rating-option">
+            <input type="radio" name="rating" id="rating5" value="5">
+            <label for="rating5">
+              <span class="rating-emoji">🤩</span>
+              <span>5</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Platform -->
+      <div class="form-group">
+        <label for="platform">Which platform?</label>
+        <select id="platform" name="platform" class="form-select">
+          <option value="">Select platform...</option>
+          <option value="ios">iOS (iPhone/iPad)</option>
+          <option value="android">Android</option>
+          <option value="web">Web Browser</option>
+        </select>
+      </div>
+      
+      <!-- Feedback Details -->
+      <div class="form-group">
+        <label for="feedback">Tell us more</label>
+        <p class="hint">The more detail, the better we can help!</p>
+        <textarea 
+          id="feedback" 
+          name="feedback" 
+          class="form-textarea" 
+          placeholder="Describe what happened, what you expected, or what you'd like to see..."
+          required
+        ></textarea>
+      </div>
+      
+      <!-- Device Info (optional) -->
+      <div class="form-group">
+        <label for="device">Device info (optional)</label>
+        <p class="hint">e.g., "iPhone 14 Pro, iOS 17.2" or "Pixel 7, Android 14"</p>
+        <input type="text" id="device" name="device" class="form-input" placeholder="Your device and OS version">
+      </div>
+      
+      <button type="submit" class="submit-button" id="submitButton">
+        Submit Feedback
+      </button>
+      
+      <div id="errorMessage" class="error-message" style="display: none;">
+        <p>Something went wrong. Please try again or email us at <a href="mailto:contact@meepleup.com">contact@meepleup.com</a></p>
+      </div>
+    </form>
+    
+    <!-- Success Message (hidden by default) -->
+    <div id="successMessage" class="success-message" style="display: none;">
+      <h3>🎉 Thank you!</h3>
+      <p>Your feedback has been received. We really appreciate you taking the time to help improve MeepleUp!</p>
+      <p style="margin-top: 1rem;"><a href="index.html">← Return to MeepleUp</a></p>
+    </div>
+  </div>
+  
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  
+  <script>
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyAjVgWb8wApwT1n0hSe_63nI5S3NgROAbI",
+      authDomain: "meepleup-951a1.firebaseapp.com",
+      projectId: "meepleup-951a1",
+      storageBucket: "meepleup-951a1.firebasestorage.app",
+      messagingSenderId: "177622732549",
+      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    // Form submission handler
+    document.getElementById('feedbackForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const submitButton = document.getElementById('submitButton');
+      const form = document.getElementById('feedbackForm');
+      const successMessage = document.getElementById('successMessage');
+      const errorMessage = document.getElementById('errorMessage');
+      
+      // Get form data
+      const email = document.getElementById('email').value.trim();
+      const category = document.querySelector('input[name="category"]:checked')?.value || '';
+      const rating = document.querySelector('input[name="rating"]:checked')?.value || '';
+      const platform = document.getElementById('platform').value;
+      const feedback = document.getElementById('feedback').value.trim();
+      const device = document.getElementById('device').value.trim();
+      
+      // Validate required fields
+      if (!feedback) {
+        alert('Please enter your feedback');
+        return;
+      }
+      
+      if (!category) {
+        alert('Please select a feedback category');
+        return;
+      }
+      
+      // Disable button and show loading state
+      submitButton.disabled = true;
+      submitButton.textContent = 'Submitting...';
+      errorMessage.style.display = 'none';
+      
+      try {
+        // Save to Firestore
+        await db.collection('betaFeedback').add({
+          email: email || null,
+          category: category,
+          rating: rating ? parseInt(rating) : null,
+          platform: platform || null,
+          feedback: feedback,
+          device: device || null,
+          submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          status: 'new', // new, reviewed, resolved
+          source: 'feedback_page',
+          userAgent: navigator.userAgent
+        });
+        
+        // Show success message
+        form.style.display = 'none';
+        successMessage.style.display = 'block';
+        
+      } catch (error) {
+        console.error('Error submitting feedback:', error);
+        errorMessage.style.display = 'block';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Submit Feedback';
+      }
+    });
+  </script>
+</body>
+</html>
+

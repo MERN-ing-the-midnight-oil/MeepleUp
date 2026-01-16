@@ -18,11 +18,14 @@
             box-shadow: 
                 0 20px 60px rgba(0, 0, 0, 0.4),
                 inset 0 1px 0 rgba(255, 255, 255, 0.3);
-            width: 100%;
+            width: 600px;
+            height: 1200px; /* 2:1 height to width ratio */
             padding: 45px;
             border: 6px solid #c63d2f;
             position: relative;
             overflow: hidden;
+            margin: 0 auto; /* Center the card */
+            box-sizing: border-box;
         }
 
         /* Linen texture overlay */
@@ -267,6 +270,10 @@
 
         @media (max-width: 640px) {
             .player-aid-card {
+                width: 90%;
+                max-width: 400px;
+                height: calc(90vw * 2); /* Maintain 2:1 ratio */
+                max-height: 800px;
                 padding: 35px 25px;
             }
 
@@ -415,11 +422,6 @@
                         </div>
                     </li>
                 </ol>
-
-                <div class="card-footer">
-                    <p class="cta-text">Ready to streamline your game nights?</p>
-                    <a href="/app/" class="cta-button">Get Started</a>
-                </div>
             </div>
         </div>
       </section>

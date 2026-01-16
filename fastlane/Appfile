@@ -1,0 +1,16 @@
+# Appfile for MeepleUp
+#
+# This file contains configuration for your app identifier
+# You can optionally set your Apple ID here, but API key is recommended
+
+# Your app's bundle identifier
+app_identifier("com.rhyssmoker.meepleup")
+
+# Optional: Apple ID (not needed if using API key)
+# apple_id("your-email@example.com")
+
+# Optional: Team ID (will be detected automatically if using API key)
+# team_id("YOUR_TEAM_ID")
+
+# Optional: Itunes Connect Team ID (for apps with multiple teams)
+# itc_team_id("YOUR_ITC_TEAM_ID")

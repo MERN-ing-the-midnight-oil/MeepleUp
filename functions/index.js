@@ -13,6 +13,7 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const jwt = require("jsonwebtoken");
 const jwksClient = require("jwks-rsa");
+const nodemailer = require("nodemailer");
 
 // Initialize Firebase Admin if not already initialized
 // In Cloud Functions, this uses the default service account
@@ -1035,5 +1036,158 @@ exports.sendMentionSMS = functions.https.onRequest(async (req, res) => {
     );
   }
 });
+
+/**
+ * Firestore Trigger: Send Welcome Email to iOS Beta Signups
+ * Automatically sends an email when a user signs up for iOS beta testing
+ */
+exports.sendIOSBetaWelcomeEmail = functions.firestore
+    .document("betaSignups/{signupId}")
+    .onCreate(async (snap, context) => {
+      const signupData = snap.data();
+      const signupId = context.params.signupId;
+
+      // Only process iOS signups
+      const platforms = signupData.platforms || [];
+      if (!platforms.includes("ios")) {
+        console.log(`Skipping email for signup ${signupId} - not iOS platform`);
+        return null;
+      }
+
+      const email = signupData.email;
+      if (!email) {
+        console.error(`No email found for signup ${signupId}`);
+        return null;
+      }
+
+      try {
+        // Configure email transporter
+        // You can use Gmail, SendGrid, Mailgun, or any SMTP provider
+        // For now, we'll use environment variables for SMTP config
+        const smtpConfig = {
+          host: functions.config().smtp?.host || process.env.SMTP_HOST,
+          port: parseInt(functions.config().smtp?.port || process.env.SMTP_PORT || "587"),
+          secure: (functions.config().smtp?.secure || process.env.SMTP_SECURE) === "true",
+          auth: {
+            user: functions.config().smtp?.user || process.env.SMTP_USER,
+            pass: functions.config().smtp?.pass || process.env.SMTP_PASS,
+          },
+        };
+
+        // If SMTP is not configured, log and return (won't fail)
+        if (!smtpConfig.auth.user || !smtpConfig.auth.pass) {
+          console.log(`SMTP not configured. Email would be sent to: ${email}`);
+          console.log("Configure SMTP by setting functions.config() or environment variables:");
+          console.log("  firebase functions:config:set smtp.host='smtp.gmail.com'");
+          console.log("  firebase functions:config:set smtp.port='587'");
+          console.log("  firebase functions:config:set smtp.user='your-email@gmail.com'");
+          console.log("  firebase functions:config:set smtp.pass='your-app-password'");
+          return null;
+        }
+
+        const transporter = nodemailer.createTransport(smtpConfig);
+
+        // Email content
+        const emailSubject = "Welcome to MeepleUp iOS Beta Testing! 🎉";
+        const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #d45d5d 0%, #c04d4d 100%); color: white; padding: 30px; text-align: center; border-radius: 12px 12px 0 0; }
+    .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 12px 12px; }
+    .button { display: inline-block; background: #d45d5d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin: 20px 0; }
+    .info-box { background: white; border-left: 4px solid #d45d5d; padding: 15px; margin: 20px 0; border-radius: 4px; }
+    .footer { text-align: center; color: #6c757d; font-size: 0.875rem; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="margin: 0;">🎉 Welcome to MeepleUp Beta!</h1>
+    </div>
+    <div class="content">
+      <p>Hi there,</p>
+      
+      <p>Thank you for signing up to beta test MeepleUp on iOS! We're excited to have you join our community of board game enthusiasts.</p>
+      
+      <div class="info-box">
+        <h3 style="margin-top: 0; color: #d45d5d;">Here's what to expect:</h3>
+        <ul>
+          <li><strong>Within a few days:</strong> We'll add you to TestFlight and Apple will send you an email invite</li>
+          <li><strong>You'll need:</strong> The TestFlight app installed on your iPhone (download from the App Store)</li>
+          <li><strong>Once you accept:</strong> You can download and test MeepleUp!</li>
+        </ul>
+      </div>
+      
+      <p><strong>Please check your email</strong> (and spam folder) for the TestFlight invite from Apple in the coming days.</p>
+      
+      <p>We can't wait to hear your feedback as we build the perfect tool for managing board game events!</p>
+      
+      <p>Happy gaming,<br>
+      <strong>Rhys Smoker</strong><br>
+      MeepleUp Creator</p>
+      
+      <div class="footer">
+        <p>This email was sent to ${email} because you signed up for MeepleUp iOS beta testing.</p>
+        <p>If you have questions, reply to this email or contact us at contact@meepleup.com</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+        `;
+
+        // Send email
+        const mailOptions = {
+          from: `"MeepleUp" <${smtpConfig.auth.user}>`,
+          to: email,
+          subject: emailSubject,
+          html: emailHtml,
+          // Plain text version for email clients that don't support HTML
+          text: `
+Welcome to MeepleUp iOS Beta Testing!
+
+Thank you for signing up to beta test MeepleUp on iOS! We're excited to have you join our community of board game enthusiasts.
+
+Here's what to expect:
+- Within a few days: We'll add you to TestFlight and Apple will send you an email invite
+- You'll need: The TestFlight app installed on your iPhone (download from the App Store)
+- Once you accept: You can download and test MeepleUp!
+
+Please check your email (and spam folder) for the TestFlight invite from Apple in the coming days.
+
+We can't wait to hear your feedback as we build the perfect tool for managing board game events!
+
+Happy gaming,
+Rhys Smoker
+MeepleUp Creator
+
+---
+This email was sent to ${email} because you signed up for MeepleUp iOS beta testing.
+If you have questions, reply to this email or contact us at contact@meepleup.com
+          `.trim(),
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log(`✅ Welcome email sent to ${email} for signup ${signupId}`);
+
+        // Optionally update the signup document to mark email as sent
+        await snap.ref.update({
+          welcomeEmailSent: true,
+          welcomeEmailSentAt: admin.firestore.Timestamp.now(),
+        });
+
+        return null;
+      } catch (error) {
+        console.error(`❌ Error sending welcome email to ${email}:`, error);
+        // Don't throw - we don't want to retry on email failures
+        // You might want to log this to a separate error collection
+        return null;
+      }
+    });
 
 

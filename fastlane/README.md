@@ -15,29 +15,21 @@ For _fastlane_ installation instructions, see [Installing _fastlane_](https://do
 
 ## iOS
 
-### ios screenshots
+### ios add_ios_beta_tester
 
 ```sh
-[bundle exec] fastlane ios screenshots
+[bundle exec] fastlane ios add_ios_beta_tester
 ```
 
-Take screenshots with Snapshot
+Add a single iOS beta tester to TestFlight
 
-### ios test
+### ios add_ios_beta_testers
 
 ```sh
-[bundle exec] fastlane ios test
+[bundle exec] fastlane ios add_ios_beta_testers
 ```
 
-Run UI tests
-
-### ios screenshots_and_test
-
-```sh
-[bundle exec] fastlane ios screenshots_and_test
-```
-
-Take screenshots and run tests
+Add multiple iOS beta testers from a file
 
 ----
 

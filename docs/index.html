@@ -19,99 +19,71 @@
         <figure class="app-icon-container" id="appIconContainer">
           <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
         </figure>
-        <figure class="bgg-badge" id="bggBadge">
-          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
-        </figure>
-      </aside>
-
-      <!-- Right Side: Content Section -->
-      <section class="content-section">
-        <header>
+        
+        <header class="sidebar-header">
           <h1 class="brand-name">MeepleUp</h1>
           <p class="tagline">Plan Apart, Play Together.</p>
         </header>
 
-        <div class="beta-badge">
-          <span class="beta-label">BETA TESTING NOW</span>
-        </div>
-
-        <!-- Mini Player Aid Card - How It Works -->
-        <a href="how-it-works.html" class="mini-player-aid">
-          <div class="mini-card-header">Player Aid</div>
-          <div class="mini-card-steps">
-            <span class="mini-step">Confirm</span>
-            <span class="mini-arrow">→</span>
-            <span class="mini-step">Propose</span>
-            <span class="mini-arrow">→</span>
-            <span class="mini-step">Weigh In</span>
-            <span class="mini-arrow">→</span>
-            <span class="mini-step">Bring</span>
-          </div>
-          <div class="mini-card-cta">How It Works →</div>
+        <!-- Player Aid Button -->
+        <a href="how-it-works.html" class="player-aid-card">
+          <div class="player-aid-header">Player Aid</div>
         </a>
 
-        <p class="description">
-          We're looking for beta testers to help shape MeepleUp! Join our community of board game enthusiasts and get early access to event management built specifically for tabletop gamers.
+        <figure class="bgg-badge" id="bggBadge">
+          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
+        </figure>
+
+        <!-- Legal Links -->
+        <nav class="sidebar-legal-links">
+          <a href="privacy-policy.html">Privacy Policy</a>
+          <span class="legal-separator">•</span>
+          <a href="terms-of-service.html">Terms of Service</a>
+        </nav>
+      </aside>
+
+      <!-- Right Side: Content Section -->
+      <section class="content-section">
+        <div class="welcome-intro">
+          <img src="images/rhys-cascase-con.png" alt="Rhys at Cascade Con playing board games" class="rhys-photo">
+          <div class="welcome-text">
+            <h2 class="welcome-header">Hello Cascade Con 2026 Gamers!!!</h2>
+            
+            <p class="welcome-subheader">
+              My name is Rhys and I've attended every year of Cascade Con so far. Three years ago I completed a coding bootcamp through the University of Washington, and I've been leveling up my app-building skills ever since.
+            </p>
+          </div>
+        </div>
+
+        <p class="welcome-content">
+          Please consider supporting my journey by beta testing my magnum opus: MeepleUp. MeepleUp is a mobile app that combines the best of event management tools like Eventbrite or Meetup.com and communication tools like Discord, and adds in some special game collection browsing and sharing and also some game ranking magic that can't be found elsewhere. Basically, you can easily browse the combined game collections of your game night friends and discuss asynchronously what to play next.
         </p>
 
-        <section class="features-section">
-          <h2 class="features-heading">What You'll Test:</h2>
-          <ul class="features-list">
-            <li class="feature-item">Calendar and RSVP management</li>
-            <li class="feature-item">AI-powered board game cataloging (just snap a photo of your physical collection!)</li>
-            <li class="feature-item">Browse your group's collections to plan the perfect game night</li>
-            <li class="feature-item">Built-in discussion boards (no separate chat app required)</li>
-          </ul>
-        </section>
-
-        <p class="value-prop">
-          Thanks so much for testing this app. Your account will persist after MeepleUp goes to market. It is our intent to give testers who offer useful feedback or helpful reviews free "host level" access forever. MeepleUp "attendee level" accounts will always be free to anyone.
+        <p class="welcome-signoff">
+          I can't wait to hear from you!<br>
+          Sincerely,<br>
+          <strong>Rhys Smoker</strong>
         </p>
+        <img src="images/RhysSignature.png" alt="Rhys Smoker signature" class="signature-image">
 
-        <!-- Beta Signup Section -->
-        <section class="beta-signup-section">
-          <h2 class="beta-heading">Join the Beta</h2>
-          <p class="beta-description">Sign up to get early access on iOS or Android</p>
-          
-          <!-- Signup Form -->
-          <form id="betaSignupForm" class="beta-signup-form">
-            <div class="form-row">
-              <input 
-                type="email" 
-                id="emailInput" 
-                name="email" 
-                placeholder="Enter your email address" 
-                required 
-                class="beta-input"
-              >
-            </div>
-            <div class="form-row platform-row">
-              <label class="platform-label">
-                <input type="checkbox" name="platform" value="ios" class="platform-checkbox"> 
-                <span class="platform-icon">📱</span> iOS (TestFlight)
-              </label>
-              <label class="platform-label">
-                <input type="checkbox" name="platform" value="android" class="platform-checkbox"> 
-                <span class="platform-icon">🤖</span> Android
-              </label>
-            </div>
-            <button type="submit" class="web-app-button signup-button" id="submitButton">
-              Sign Up for Beta Access
-            </button>
-          </form>
-          
-          <!-- Success Message (hidden by default) -->
-          <div id="successMessage" class="success-message" style="display: none;">
-            <span class="success-icon">🎉</span>
-            <h3>You're on the list!</h3>
-            <p>We'll send you an invite to join the beta soon. Check your email!</p>
-          </div>
-          
-          <!-- Error Message (hidden by default) -->
-          <div id="errorMessage" class="error-message" style="display: none;">
-            <p>Something went wrong. Please try again or email us directly.</p>
-          </div>
-        </section>
+        <!-- Beta Signup Forms -->
+        <div class="signup-forms-container">
+          <!-- iOS Signup QR Code -->
+          <section class="beta-signup-section ios-signup">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://meepleup.com/docs/ios-signup.html" alt="Scan to join iOS Beta Testing" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border: 2px solid #007AFF; border-radius: 12px; padding: 10px; background: white;">
+            <p style="text-align: center; margin-top: 10px; color: var(--text-secondary); font-size: 0.9rem;">Scan with your phone to join iOS Beta Testing</p>
+          </section>
+
+          <!-- Android Signup Link -->
+          <section class="beta-signup-section android-signup">
+            <h2 class="beta-heading">🤖 Android (Play Store)</h2>
+            <p class="platform-note"><strong>Use your Google account email</strong> — the one linked to Google Play on your phone.</p>
+            <a href="android-signup.html" class="web-app-button signup-button android-button" style="display: block; text-align: center; text-decoration: none;">
+              Join Android Beta Testing
+            </a>
+            <img src="images/google-play-badge.png" alt="Google Play badge" class="platform-badge android-badge">
+          </section>
+        </div>
 
         <!-- Contact Email -->
         <address>
@@ -121,15 +93,6 @@
         </address>
       </section>
     </div>
-    
-    <!-- Legal Links Footer -->
-    <footer class="legal-links-footer">
-      <nav class="legal-links-nav">
-        <a href="privacy-policy.html">Privacy Policy</a>
-        <span class="legal-links-separator">•</span>
-        <a href="terms-of-service.html">Terms of Service</a>
-      </nav>
-    </footer>
   </main>
   
   <!-- Firebase SDK -->
@@ -153,59 +116,26 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
     
-    // Form submission handler
-    document.getElementById('betaSignupForm').addEventListener('submit', async function(e) {
-      e.preventDefault();
+
+    // Dynamically set Rhys photo height to match header + subheader height, minimum 240px to match app icon
+    function setPhotoHeight() {
+      const header = document.querySelector('.welcome-header');
+      const subheader = document.querySelector('.welcome-subheader');
+      const photo = document.querySelector('.rhys-photo');
       
-      const email = document.getElementById('emailInput').value.trim();
-      const submitButton = document.getElementById('submitButton');
-      const form = document.getElementById('betaSignupForm');
-      const successMessage = document.getElementById('successMessage');
-      const errorMessage = document.getElementById('errorMessage');
-      
-      // Get selected platforms
-      const platformCheckboxes = document.querySelectorAll('input[name="platform"]:checked');
-      const platforms = Array.from(platformCheckboxes).map(cb => cb.value);
-      
-      // Validate email
-      if (!email || !email.includes('@')) {
-        alert('Please enter a valid email address');
-        return;
+      if (header && subheader && photo) {
+        const headerHeight = header.offsetHeight;
+        const subheaderHeight = subheader.offsetHeight;
+        const totalHeight = Math.max(headerHeight + subheaderHeight, 240); // At least 240px to match app icon
+        photo.style.height = totalHeight + 'px';
       }
-      
-      // Disable button and show loading state
-      submitButton.disabled = true;
-      submitButton.textContent = 'Signing up...';
-      errorMessage.style.display = 'none';
-      
-      try {
-        // Save to Firestore
-        await db.collection('betaSignups').add({
-          email: email,
-          platforms: platforms.length > 0 ? platforms : ['ios', 'android'], // Default to both if none selected
-          signupDate: firebase.firestore.FieldValue.serverTimestamp(),
-          status: 'pending', // pending, invited, added
-          source: 'landing_page'
-        });
-        
-        // Show success message
-        form.style.display = 'none';
-        successMessage.style.display = 'block';
-        
-        // Hide success message after 3 seconds and show form again
-        setTimeout(() => {
-          successMessage.style.display = 'none';
-          form.style.display = 'flex';
-          document.getElementById('emailInput').value = '';
-        }, 3000);
-        
-      } catch (error) {
-        console.error('Error saving signup:', error);
-        errorMessage.style.display = 'block';
-        submitButton.disabled = false;
-        submitButton.textContent = 'Sign Up for Beta Access';
-      }
-    });
+    }
+
+    // Set height on load and resize
+    window.addEventListener('load', setPhotoHeight);
+    window.addEventListener('resize', setPhotoHeight);
+    // Also set after a short delay to ensure fonts are loaded
+    setTimeout(setPhotoHeight, 100);
   </script>
   
   <script src="script.js"></script>

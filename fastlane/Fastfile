@@ -1,0 +1,167 @@
+# Fastfile for MeepleUp
+# 
+# Usage:
+#   fastlane add_ios_beta_tester email:test@example.com
+#   fastlane add_ios_beta_testers file:testers.txt
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Add a single iOS beta tester to TestFlight"
+  lane :add_ios_beta_tester do |options|
+    tester_email = options[:email]
+    first_name = options[:first_name] || ""
+    last_name = options[:last_name] || ""
+    group_name = options[:group_name] || "Good Meeples Beta Testers"
+    
+    if tester_email.nil? || tester_email.empty?
+      UI.user_error!("Email is required. Usage: fastlane add_ios_beta_tester email:test@example.com")
+    end
+    
+    # Use App Store Connect API key
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_filepath: ENV["APP_STORE_CONNECT_PRIVATE_KEY_PATH"] || "/Users/rhyssmoker/bootcamp/MeepleUp/fastlane/AuthKey.p8",
+      in_house: false
+    )
+    
+    UI.message("📱 Adding #{tester_email} to iOS TestFlight beta group: #{group_name}")
+    
+    # Connect to App Store Connect
+    key_path = ENV["APP_STORE_CONNECT_PRIVATE_KEY_PATH"] || "/Users/rhyssmoker/bootcamp/MeepleUp/fastlane/AuthKey.p8"
+    token = Spaceship::ConnectAPI::Token.create(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      filepath: key_path
+    )
+    Spaceship::ConnectAPI.token = token
+    
+    # Find the app
+    app = Spaceship::ConnectAPI::App.find("com.rhyssmoker.meepleup")
+    UI.user_error!("App not found!") unless app
+    
+    # Find the beta group
+    beta_groups = app.get_beta_groups.select { |g| g.name == group_name }
+    UI.user_error!("Beta group '#{group_name}' not found!") if beta_groups.empty?
+    beta_group = beta_groups.first
+    
+    UI.message("Found beta group: #{beta_group.name} (ID: #{beta_group.id})")
+    
+    # Use Spaceship's Tunes client to make the API call
+    begin
+      require 'net/http'
+      require 'json'
+      
+      uri = URI("https://api.appstoreconnect.apple.com/v1/betaTesters")
+      
+      body = {
+        data: {
+          type: "betaTesters",
+          attributes: {
+            email: tester_email
+          },
+          relationships: {
+            betaGroups: {
+              data: [
+                { type: "betaGroups", id: beta_group.id }
+              ]
+            }
+          }
+        }
+      }
+      
+      body[:data][:attributes][:firstName] = first_name unless first_name.empty?
+      body[:data][:attributes][:lastName] = last_name unless last_name.empty?
+      
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      
+      request = Net::HTTP::Post.new(uri)
+      request["Authorization"] = "Bearer #{token.text}"
+      request["Content-Type"] = "application/json"
+      request.body = body.to_json
+      
+      response = http.request(request)
+      
+      if response.code.to_i >= 200 && response.code.to_i < 300
+        UI.success("✅ Successfully added #{tester_email} to TestFlight group '#{group_name}'!")
+      elsif response.code.to_i == 409
+        UI.message("ℹ️  Tester #{tester_email} already exists, adding to group...")
+        # Find existing tester
+        testers = Spaceship::ConnectAPI::BetaTester.all(filter: { email: tester_email })
+        if testers.any?
+          tester = testers.first
+          # Add to group via API
+          group_uri = URI("https://api.appstoreconnect.apple.com/v1/betaGroups/#{beta_group.id}/relationships/betaTesters")
+          group_body = { data: [{ type: "betaTesters", id: tester.id }] }
+          
+          group_request = Net::HTTP::Post.new(group_uri)
+          group_request["Authorization"] = "Bearer #{token.text}"
+          group_request["Content-Type"] = "application/json"
+          group_request.body = group_body.to_json
+          
+          group_response = http.request(group_request)
+          if group_response.code.to_i >= 200 && group_response.code.to_i < 300
+            UI.success("✅ Added existing tester #{tester_email} to group '#{group_name}'!")
+          else
+            UI.error("Failed to add tester to group: #{group_response.body}")
+          end
+        else
+          UI.error("Could not find existing tester: #{tester_email}")
+        end
+      else
+        UI.error("API Error (#{response.code}): #{response.body}")
+        UI.user_error!("Failed to add tester")
+      end
+    rescue => e
+      UI.error("Error: #{e.message}")
+      raise e
+    end
+  end
+  
+  desc "Add multiple iOS beta testers from a file"
+  lane :add_ios_beta_testers do |options|
+    file_path = options[:file]
+    group_name = options[:group_name] || "Good Meeples Beta Testers"
+    
+    if file_path.nil? || file_path.empty?
+      UI.user_error!("File path is required. Usage: fastlane add_ios_beta_testers file:testers.txt")
+    end
+    
+    # Read emails from file
+    testers_list = []
+    File.readlines(file_path).each do |line|
+      line = line.strip
+      next if line.empty? || line.start_with?("#")
+      
+      parts = line.split(",")
+      email = parts[0].strip
+      first_name = parts[1]&.strip || ""
+      last_name = parts[2]&.strip || ""
+      
+      if email.match?(/\A[\w+\-.]+@[a-z\d\-]+(\.[a-z\d\-]+)*\.[a-z]+\z/i)
+        testers_list << { email: email, first_name: first_name, last_name: last_name }
+      end
+    end
+    
+    if testers_list.empty?
+      UI.user_error!("No valid email addresses found in #{file_path}")
+    end
+    
+    UI.message("📱 Adding #{testers_list.count} testers to iOS TestFlight beta group: #{group_name}")
+    
+    testers_list.each_with_index do |tester, index|
+      UI.message("Adding tester #{index + 1}/#{testers_list.count}: #{tester[:email]}")
+      add_ios_beta_tester(
+        email: tester[:email],
+        first_name: tester[:first_name],
+        last_name: tester[:last_name],
+        group_name: group_name
+      )
+      sleep(1) if testers_list.count > 1
+    end
+    
+    UI.success("✅ Successfully processed #{testers_list.count} testers!")
+  end
+end
