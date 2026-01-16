@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeepleUp - Beta Tester Cover</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary-color: #d45d5d;
+      --text-primary: #212529;
+      --text-secondary: #6c757d;
+      --border-color: #dee2e6;
+      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background: white;
+      color: var(--text-primary);
+      padding: 0;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .cover-container {
+      width: 100%;
+      max-width: 8.5in;
+      height: 11in;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3rem 2rem;
+      position: relative;
+      background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    }
+
+    .top-message {
+      text-align: center;
+      width: 100%;
+      padding-top: 1rem;
+    }
+
+    .top-message h1 {
+      font-size: 3.5rem;
+      font-weight: 800;
+      color: var(--primary-color);
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
+    .center-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 2rem;
+      width: 100%;
+    }
+
+    .app-icon-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .app-icon {
+      width: 500px;
+      height: 500px;
+      object-fit: contain;
+      filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.15));
+    }
+
+    .developer-info {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .developer-label {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: 0.02em;
+    }
+
+    .powered-by-bgg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .powered-by-label {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .bgg-logo {
+      height: 50px;
+      object-fit: contain;
+    }
+
+    .bottom-message {
+      text-align: center;
+      width: 100%;
+      padding-bottom: 1rem;
+    }
+
+    .bottom-message p {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--primary-color);
+      margin: 0;
+      letter-spacing: 0.05em;
+    }
+
+    .print-button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 1rem 2rem;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: white;
+      background-color: var(--primary-color);
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      z-index: 1000;
+      transition: all 0.2s ease;
+    }
+
+    .print-button:hover {
+      background-color: #c04d4d;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Print styles */
+    @media print {
+      body {
+        padding: 0;
+        margin: 0;
+      }
+
+      .print-button {
+        display: none;
+      }
+
+      .cover-container {
+        height: 11in;
+        width: 8.5in;
+        padding: 2.5rem 2rem;
+        page-break-after: always;
+      }
+
+      .top-message h1 {
+        font-size: 3rem !important;
+      }
+
+      .app-icon {
+        width: 450px !important;
+        height: 450px !important;
+      }
+
+      .bottom-message p {
+        font-size: 1.75rem !important;
+      }
+
+      .developer-label {
+        font-size: 1.125rem !important;
+      }
+
+      .powered-by-label {
+        font-size: 0.8125rem !important;
+      }
+
+      .bgg-logo {
+        height: 45px !important;
+      }
+
+      @page {
+        size: letter;
+        margin: 0;
+      }
+
+      * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+    }
+
+    /* Screen-only adjustments */
+    @media screen {
+      .cover-container {
+        border: 2px dashed var(--border-color);
+        border-radius: 12px;
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <button class="print-button" onclick="window.print()">🖨️ Print Cover</button>
+  
+  <div class="cover-container">
+    <div class="top-message">
+      <h1>Beta Testers are Good Meeple!</h1>
+    </div>
+
+    <div class="center-content">
+      <div class="app-icon-container">
+        <img src="images/app-icon.png" alt="MeepleUp" class="app-icon">
+      </div>
+
+      <div class="developer-info">
+        <div class="developer-label">Developed by Rhys Smoker</div>
+        <div class="powered-by-bgg">
+          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo">
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-message">
+      <p>Look inside!</p>
+    </div>
+  </div>
+</body>
+</html>
+

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MeepleUp - Android Beta Feedback">
+  <title>Android Beta Feedback - MeepleUp</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 2rem;
+      background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    }
+    .feedback-container {
+      max-width: 600px;
+      width: 100%;
+      background: white;
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 1.5rem;
+      color: var(--primary-color, #d45d5d);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .back-link:hover {
+      text-decoration: underline;
+    }
+    h1 {
+      color: var(--primary-color, #d45d5d);
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+    }
+    .feedback-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    label {
+      font-weight: 600;
+      color: #333;
+      font-size: 0.9rem;
+    }
+    .required {
+      color: #d45d5d;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      font-size: 1rem;
+      font-family: 'Inter', sans-serif;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      background: #fff;
+      color: #333;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      box-sizing: border-box;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary-color, #d45d5d);
+      box-shadow: 0 0 0 3px rgba(212, 93, 93, 0.1);
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    .submit-button {
+      background-color: #d45d5d;
+      color: white;
+      border: none;
+      padding: 1rem 2rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      margin-top: 0.5rem;
+    }
+    .submit-button:hover {
+      background-color: #c04d4d;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+    }
+    .submit-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .success-message {
+      text-align: center;
+      padding: 2rem;
+      background: linear-gradient(135deg, rgba(212, 93, 93, 0.1) 0%, rgba(255, 255, 255, 0.1) 100%);
+      border: 2px solid var(--primary-color, #d45d5d);
+      border-radius: 12px;
+      margin-top: 2rem;
+    }
+    .success-icon {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 640px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+      .feedback-container {
+        padding: 1.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="feedback-container">
+    <a href="index.html" class="back-link">← Back to Home</a>
+    <h1>Android Beta Feedback</h1>
+    <p class="subtitle">Found a bug or have a suggestion? We'd love to hear from you!</p>
+    
+    <form id="feedbackForm" class="feedback-form">
+      <div class="form-group">
+        <label for="feedbackType">Type <span class="required">*</span></label>
+        <select id="feedbackType" name="feedbackType" required>
+          <option value="">Select...</option>
+          <option value="bug">🐛 Bug Report</option>
+          <option value="suggestion">💡 Feature Suggestion</option>
+          <option value="other">📝 Other Feedback</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="phoneModel">Phone Model <span class="required">*</span></label>
+          <input type="text" id="phoneModel" name="phoneModel" placeholder="e.g., Samsung Galaxy S23" required>
+        </div>
+        <div class="form-group">
+          <label for="androidVersion">Android Version <span class="required">*</span></label>
+          <input type="text" id="androidVersion" name="androidVersion" placeholder="e.g., Android 14" required>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="appVersion">App Version</label>
+        <input type="text" id="appVersion" name="appVersion" placeholder="e.g., 1.0.2 (optional)">
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description <span class="required">*</span></label>
+        <textarea id="description" name="description" placeholder="Describe the bug or your suggestion in detail..." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="stepsToReproduce">Steps to Reproduce (for bugs)</label>
+        <textarea id="stepsToReproduce" name="stepsToReproduce" placeholder="1. Open the app&#10;2. Navigate to...&#10;3. Tap on...&#10;4. Bug occurs"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="email">Your Email (optional)</label>
+        <input type="email" id="email" name="email" placeholder="your.email@example.com">
+        <small style="color: #666; font-size: 0.85rem;">We'll only use this to follow up if needed</small>
+      </div>
+
+      <button type="submit" class="submit-button">Submit Feedback</button>
+    </form>
+    
+    <div id="successMessage" class="success-message" style="display: none;">
+      <span class="success-icon">✅</span>
+      <h3>Thank you for your feedback!</h3>
+      <p>We've received your submission and will review it soon.</p>
+    </div>
+  </div>
+  
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  
+  <script>
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyAjVgWb8wApwT1n0hSe_63nI5S3NgROAbI",
+      authDomain: "meepleup-951a1.firebaseapp.com",
+      projectId: "meepleup-951a1",
+      storageBucket: "meepleup-951a1.firebasestorage.app",
+      messagingSenderId: "177622732549",
+      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    // Form submission
+    document.getElementById('feedbackForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const form = this;
+      const successMessage = document.getElementById('successMessage');
+      const button = form.querySelector('.submit-button');
+      
+      button.disabled = true;
+      button.textContent = 'Submitting...';
+      
+      try {
+        const feedbackData = {
+          platform: 'android',
+          type: document.getElementById('feedbackType').value,
+          phoneModel: document.getElementById('phoneModel').value,
+          androidVersion: document.getElementById('androidVersion').value,
+          appVersion: document.getElementById('appVersion').value || 'unknown',
+          description: document.getElementById('description').value,
+          stepsToReproduce: document.getElementById('stepsToReproduce').value || '',
+          email: document.getElementById('email').value || '',
+          submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          status: 'new'
+        };
+        
+        await db.collection('betaFeedback').add(feedbackData);
+        
+        form.style.display = 'none';
+        successMessage.style.display = 'block';
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Something went wrong. Please try again.');
+        button.disabled = false;
+        button.textContent = 'Submit Feedback';
+      }
+    });
+  </script>
+</body>
+</html>
+
