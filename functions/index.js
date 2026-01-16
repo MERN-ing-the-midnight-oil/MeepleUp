@@ -1154,13 +1154,13 @@ Welcome to MeepleUp iOS Beta Testing!
 Thank you for signing up to beta test MeepleUp on iOS! We're excited to have you join our community of board game enthusiasts.
 
 Here's what to expect:
-- Within a few days: We'll add you to TestFlight and Apple will send you an email invite
+- Within a few days: I'll add you to TestFlight and Apple will send you an email invite
 - You'll need: The TestFlight app installed on your iPhone (download from the App Store)
 - Once you accept: You can download and test MeepleUp!
 
 Please check your email (and spam folder) for the TestFlight invite from Apple in the coming days.
 
-We can't wait to hear your feedback as we build the perfect tool for managing board game events!
+I'm looking forward to your feedback!
 
 Happy gaming,
 Rhys Smoker

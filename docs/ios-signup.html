@@ -10,83 +10,110 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 2rem;
+      background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    }
+    .signup-container {
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+    .testflight-image {
+      max-width: 100%;
+      height: auto;
+      margin-bottom: 2rem;
+      display: block;
+    }
+    .signup-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .signup-input {
+      width: 100%;
+      padding: 1rem 1.25rem;
+      font-size: 1rem;
+      font-family: var(--font-family);
+      border: 2px solid var(--border-color);
+      border-radius: 12px;
+      background: var(--bg-color);
+      color: var(--text-primary);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      box-sizing: border-box;
+    }
+    .signup-input:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(212, 93, 93, 0.1);
+    }
+    .signup-button {
+      padding: 1rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: white;
+      background-color: var(--primary-color);
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: var(--shadow-md);
+    }
+    .signup-button:hover {
+      background-color: #c04d4d;
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+    .signup-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .success-message {
+      text-align: center;
+      padding: 1.5rem;
+      margin-top: 1rem;
+      background: linear-gradient(135deg, rgba(212, 93, 93, 0.1) 0%, rgba(255, 255, 255, 0.1) 100%);
+      border: 2px solid var(--primary-color);
+      border-radius: 12px;
+    }
+    .success-icon {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+  </style>
 </head>
 <body>
-  <main class="main-container">
-    <div class="content-wrapper">
-      <!-- Left Side: Logo Section -->
-      <aside class="logo-section" id="logoSection">
-        <figure class="app-icon-container" id="appIconContainer">
-          <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
-        </figure>
-        
-        <header class="sidebar-header">
-          <h1 class="brand-name">MeepleUp</h1>
-          <p class="tagline">Plan Apart, Play Together.</p>
-        </header>
-
-        <!-- Player Aid Button -->
-        <a href="how-it-works.html" class="player-aid-card">
-          <div class="player-aid-header">Player Aid</div>
-        </a>
-
-        <figure class="bgg-badge" id="bggBadge">
-          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
-        </figure>
-
-        <!-- Legal Links -->
-        <nav class="sidebar-legal-links">
-          <a href="privacy-policy.html">Privacy Policy</a>
-          <span class="legal-separator">•</span>
-          <a href="terms-of-service.html">Terms of Service</a>
-        </nav>
-      </aside>
-
-      <!-- Right Side: Content Section -->
-      <section class="content-section">
-        <a href="index.html" class="back-link">← Back to Home</a>
-
-        <!-- iOS Signup -->
-        <section class="beta-signup-section ios-signup">
-          <h2 class="beta-heading">📱 iOS (TestFlight)</h2>
-          <p class="platform-note">Any email works — Apple will send you a TestFlight invite.</p>
-          <form id="iosSignupForm" class="beta-signup-form">
-            <input 
-              type="email" 
-              id="iosEmailInput" 
-              name="email" 
-              placeholder="Enter your email" 
-              required 
-              class="beta-input"
-            >
-            <button type="submit" class="web-app-button signup-button ios-button">
-              Beta Test on iOS App Store
-            </button>
-            <img src="images/testflight-badge.svg" alt="TestFlight badge" class="platform-badge ios-badge">
-          </form>
-          <div id="iosSuccessMessage" class="success-message" style="display: none;">
-            <span class="success-icon">🎉</span>
-            <h3>Thank you for signing up!</h3>
-            <p>You're on the iOS beta testing list. Here's what to expect:</p>
-            <ul class="success-list">
-              <li>We'll add you to TestFlight within the next few days</li>
-              <li>Apple will send you an email invite to join the beta</li>
-              <li>You'll need the TestFlight app installed on your iPhone</li>
-              <li>Once you accept, you can download and test MeepleUp!</li>
-            </ul>
-            <p class="success-note">Check your email (and spam folder) for the TestFlight invite from Apple.</p>
-          </div>
-        </section>
-
-        <!-- Contact Email -->
-        <address>
-          <a href="mailto:contact@meepleup.com" class="contact-button">
-            contact@meepleup.com
-          </a>
-        </address>
-      </section>
+  <div class="signup-container">
+    <img src="images/TestFlight.png" alt="TestFlight" class="testflight-image">
+    
+    <form id="iosSignupForm" class="signup-form">
+      <input 
+        type="email" 
+        id="iosEmailInput" 
+        name="email" 
+        placeholder="Enter your email" 
+        required 
+        class="signup-input"
+      >
+      <button type="submit" class="signup-button">
+        Submit
+      </button>
+    </form>
+    
+    <div id="iosSuccessMessage" class="success-message" style="display: none;">
+      <span class="success-icon">🎉</span>
+      <h3>Thank you for signing up!</h3>
+      <p>You're on the iOS beta testing list. We'll add you to TestFlight within the next few days.</p>
     </div>
-  </main>
+  </div>
   
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -121,7 +148,7 @@
       }
       
       button.disabled = true;
-      button.textContent = 'Signing up...';
+      button.textContent = 'Submitting...';
       
       try {
         await db.collection('betaSignups').add({
@@ -134,24 +161,13 @@
         
         form.style.display = 'none';
         successMessage.style.display = 'block';
-        
-        setTimeout(() => {
-          successMessage.style.display = 'none';
-          form.style.display = 'flex';
-          document.getElementById('iosEmailInput').value = '';
-          button.disabled = false;
-          button.textContent = 'Beta Test on iOS App Store';
-        }, 3000);
       } catch (error) {
         console.error('Error:', error);
         alert('Something went wrong. Please try again.');
         button.disabled = false;
-        button.textContent = 'Beta Test on iOS App Store';
+        button.textContent = 'Submit';
       }
     });
   </script>
-  
-  <script src="script.js"></script>
 </body>
 </html>
-
