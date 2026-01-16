@@ -39,8 +39,13 @@ Thumbs.db
 # Firebase
 firebase-service-account.json
 firebase-debug.log
+android/app/google-services.json
 
 # Build artifacts
 /dist
 /docs/app
+
+# Fastlane sensitive files
+fastlane/AuthKey*.p8
+fastlane/report.xml
 
