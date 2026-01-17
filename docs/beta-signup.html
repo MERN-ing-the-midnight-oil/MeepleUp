@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join MeepleUp Beta - Device Detection</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+    }
+    .container {
+      text-align: center;
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      max-width: 400px;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    p {
+      margin: 0.5rem 0;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <p>Detecting your device...</p>
+    <p style="font-size: 0.9rem; color: #999;">Redirecting you to the right signup page...</p>
+  </div>
+
+  <script>
+    // Device detection and redirect
+    (function() {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      
+      // Check for iOS
+      const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+      
+      // Check for Android
+      const isAndroid = /android/i.test(userAgent);
+      
+      // Redirect based on device type
+      if (isIOS) {
+        // Redirect to iOS signup page
+        window.location.href = 'ios-signup.html';
+      } else if (isAndroid) {
+        // Redirect to Android Google Group
+        window.location.href = 'https://groups.google.com/g/android-meeples-testers/';
+      } else {
+        // Desktop or unknown device - show choice page or redirect to main page
+        // For now, redirect to main landing page with a message
+        // Or we could show buttons to choose iOS or Android
+        setTimeout(function() {
+          window.location.href = 'index.html';
+        }, 2000);
+      }
+    })();
+  </script>
+</body>
+</html>
+
