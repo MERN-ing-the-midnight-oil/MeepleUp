@@ -5,13 +5,163 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="MeepleUp - Android Beta Signup">
   <title>Android Beta Signup - MeepleUp</title>
-  <script>
-    // Redirect directly to Google Play Internal Testing opt-in URL
-    window.location.href = "https://play.google.com/apps/internaltest/4701636314391153737";
-  </script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 2rem;
+      background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    }
+    .signup-container {
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+    .signup-form {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .signup-input {
+      width: 100%;
+      padding: 1rem 1.25rem;
+      font-size: 1rem;
+      font-family: var(--font-family, inherit);
+      border: 2px solid var(--border-color, #dee2e6);
+      border-radius: 12px;
+      background: var(--bg-color, #fff);
+      color: var(--text-primary, #333);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      box-sizing: border-box;
+    }
+    .signup-input:focus {
+      outline: none;
+      border-color: var(--primary-color, #d45d5d);
+      box-shadow: 0 0 0 3px rgba(212, 93, 93, 0.1);
+    }
+    .signup-button {
+      padding: 1rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: white;
+      background-color: var(--primary-color, #d45d5d);
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .signup-button:hover {
+      background-color: #c04d4d;
+      transform: translateY(-2px);
+    }
+    .signup-button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .success-message {
+      text-align: center;
+      padding: 1.5rem;
+      margin-top: 1rem;
+      background: linear-gradient(135deg, rgba(212, 93, 93, 0.1) 0%, rgba(255, 255, 255, 0.1) 100%);
+      border: 2px solid var(--primary-color, #d45d5d);
+      border-radius: 12px;
+    }
+    .success-message a { color: var(--primary-color, #d45d5d); font-weight: 600; }
+  </style>
 </head>
 <body>
-  <p>Redirecting to Google Play Internal Testing...</p>
-  <p>If you are not redirected, <a href="https://play.google.com/apps/internaltest/4701636314391153737">click here</a>.</p>
+  <div class="signup-container">
+    <h1 style="margin-bottom: 1.5rem;">Android Beta Signup</h1>
+
+    <form id="androidSignupForm" class="signup-form">
+      <input 
+        type="text" 
+        id="androidNameInput" 
+        name="name" 
+        placeholder="Name (optional)" 
+        class="signup-input"
+      >
+      <input 
+        type="email" 
+        id="androidEmailInput" 
+        name="email" 
+        placeholder="Enter your email" 
+        required 
+        class="signup-input"
+      >
+      <button type="submit" class="signup-button">
+        Submit
+      </button>
+    </form>
+
+    <div id="androidSuccessMessage" class="success-message" style="display: none;">
+      <span style="font-size: 2rem; display: block; margin-bottom: 1rem;">🎉</span>
+      <h3>Thank you for signing up!</h3>
+      <p>Redirecting you to Google Play Internal Testing...</p>
+      <p>If you are not redirected, <a href="https://play.google.com/apps/internaltest/4701636314391153737">click here</a>.</p>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAjVgWb8wApwT1n0hSe_63nI5S3NgROAbI",
+      authDomain: "meepleup-951a1.firebaseapp.com",
+      projectId: "meepleup-951a1",
+      storageBucket: "meepleup-951a1.firebasestorage.app",
+      messagingSenderId: "177622732549",
+      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const PLAY_STORE_URL = "https://play.google.com/apps/internaltest/4701636314391153737";
+
+    document.getElementById('androidSignupForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const name = document.getElementById('androidNameInput').value.trim();
+      const email = document.getElementById('androidEmailInput').value.trim();
+      const form = this;
+      const successMessage = document.getElementById('androidSuccessMessage');
+      const button = form.querySelector('button');
+
+      if (!email || !email.includes('@')) {
+        alert('Please enter a valid email address');
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = 'Submitting...';
+
+      try {
+        await db.collection('betaSignups').add({
+          email: email,
+          name: name || null,
+          platforms: ['android'],
+          signupDate: firebase.firestore.FieldValue.serverTimestamp(),
+          status: 'pending',
+          source: 'android_signup'
+        });
+
+        form.style.display = 'none';
+        successMessage.style.display = 'block';
+        setTimeout(function() { window.location.href = PLAY_STORE_URL; }, 1500);
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Something went wrong. Please try again.');
+        button.disabled = false;
+        button.textContent = 'Submit';
+      }
+    });
+  </script>
 </body>
 </html>

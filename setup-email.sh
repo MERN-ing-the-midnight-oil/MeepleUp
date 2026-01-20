@@ -34,3 +34,4 @@ echo "  cd functions"
 echo "  firebase deploy --only functions:sendIOSBetaWelcomeEmail"
 echo ""
 
+

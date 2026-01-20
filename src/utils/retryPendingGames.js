@@ -45,7 +45,10 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
       const searchQuery = cleanedTitle !== gameTitle ? cleanedTitle : gameTitle;
       
       // Search for the game
-      const searchResults = await searchGamesByName(searchQuery, true);
+      const searchResponse = await searchGamesByName(searchQuery, true);
+      const searchResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
+        ? searchResponse.results 
+        : (searchResponse || []);
       
       if (!searchResults || searchResults.length === 0) {
         console.log('[RetryPendingGames] No results found for:', gameTitle);

@@ -245,5 +245,12 @@ service cloud.firestore {
       allow create: if true;  // Public signup form
       allow read, update, delete: if false;  // Admin only via Firebase Admin SDK
     }
+    
+    // Beta feedback - allow anyone to create (public feedback form)
+    // Only admins (via Firebase Admin SDK) can read/update/delete
+    match /betaFeedback/{feedbackId} {
+      allow create: if true;  // Public feedback form
+      allow read, update, delete: if false;  // Admin only via Firebase Admin SDK
+    }
   }
 }

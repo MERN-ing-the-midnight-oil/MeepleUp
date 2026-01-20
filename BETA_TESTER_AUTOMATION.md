@@ -1,14 +1,18 @@
 # Beta Tester Automation Guide
 
-This guide explains how to automate adding beta testers to both iOS TestFlight and Google Play Beta testing programs.
+This guide explains how to automate adding beta testers to iOS TestFlight.
+
+**Note:** Android beta testing uses Google Play Internal Testing opt-in links - no automation needed. Users join directly via: https://play.google.com/apps/internaltest/4701636314391153737
 
 ## Overview
 
 The `scripts/add-beta-testers.js` script provides a foundation for automating beta tester management. Currently, it includes placeholders that need to be implemented with the actual API integrations.
 
-## Option 1: Use Fastlane (Recommended - Easiest)
+## Option 1: Use Fastlane (Recommended - Easiest for iOS)
 
-[Fastlane](https://fastlane.tools/) is the most popular tool for automating iOS and Android beta testing. It handles authentication and API calls for you.
+[Fastlane](https://fastlane.tools/) is the most popular tool for automating iOS beta testing. It handles authentication and API calls for you.
+
+**Note:** Android uses opt-in links - no Fastlane needed.
 
 ### Installation
 
@@ -57,35 +61,14 @@ end
 fastlane add_ios_beta_tester email:test@example.com
 ```
 
-### Android Google Play Beta (Fastlane)
+### Android Beta Testing
 
-1. **Set up Google Play Service Account**:
-   - Go to https://console.cloud.google.com/
-   - Create a new project or select existing
-   - Enable "Google Play Android Developer API"
-   - Create a service account
-   - Download the JSON key file
-   - In Google Play Console, go to Settings → API access → Grant access to the service account
+Android beta testing uses **Google Play Internal Testing opt-in links** - no automation needed!
 
-2. **Add to Fastfile**:
+Users can join directly via the opt-in URL:
+- **Opt-in URL**: https://play.google.com/apps/internaltest/4701636314391153737
 
-```ruby
-lane :add_android_beta_tester do |options|
-  email = options[:email]
-  
-  supply(
-    package_name: "com.meepleup.app",
-    track: "beta", # or "internal", "alpha"
-    testers: [email],
-    json_key: "./google-play-service-account.json"
-  )
-end
-```
-
-3. **Usage**:
-```bash
-fastlane add_android_beta_tester email:test@example.com
-```
+Simply share this link with testers (via QR code, email, or website). They click the link and join instantly - no email collection or manual addition required.
 
 ## Option 2: Use the Node.js Script (Requires Implementation)
 
@@ -114,50 +97,29 @@ export APP_STORE_CONNECT_PRIVATE_KEY_PATH="./AuthKey.p8"
    - Uncomment and customize the `addIOSBetaTester` function
    - You'll need your Beta Group ID(s) from App Store Connect
 
-### Android Setup
-
-1. **Install dependencies**:
-```bash
-npm install googleapis
-```
-
-2. **Set up Google Play Service Account**:
-   - Follow steps 1-2 from "Android Google Play Beta (Fastlane)" above
-   - Set environment variable:
-
-```bash
-export GOOGLE_PLAY_SERVICE_ACCOUNT_PATH="./google-play-service-account.json"
-```
-
-3. **Implement the Android function** in `scripts/add-beta-testers.js`:
-   - Uncomment and customize the `addAndroidBetaTester` function
-
 ### Usage
 
 ```bash
 # Single email, iOS
 node scripts/add-beta-testers.js --platform ios --email test@example.com
 
-# Single email, Android
-node scripts/add-beta-testers.js --platform android --email test@example.com
-
-# Both platforms
-node scripts/add-beta-testers.js --platform both --email test@example.com
-
 # From file (one email per line, optional CSV format: email,firstName,lastName)
-node scripts/add-beta-testers.js --platform both --file testers.txt
+node scripts/add-beta-testers.js --platform ios --file testers.txt
 ```
 
-## Option 3: Google Play Internal Testing Links (Easiest for Android)
+**Note:** Android beta testing uses opt-in links - no script needed. Users join directly via: https://play.google.com/apps/internaltest/4701636314391153737
 
-For Android, the easiest option is to use Google Play's internal testing links:
+## Android Beta Testing (Using Opt-In Links)
+
+**Android beta testing uses Google Play Internal Testing opt-in links** - this is the recommended approach:
 
 1. Go to Google Play Console → Your App → Testing → Internal testing
-2. Create a testing track or use existing
-3. Copy the "Opt-in URL" 
-4. Share this URL with testers - they can join themselves
+2. Copy the "Opt-in URL" 
+3. Share this URL with testers (via QR code, email, or website) - they can join themselves
 
-This doesn't require API access or automation!
+**Current opt-in URL**: https://play.google.com/apps/internaltest/4701636314391153737
+
+This doesn't require API access, automation, or email collection!
 
 ## Option 4: TestFlight Public Links (Easiest for iOS)
 
@@ -179,11 +141,14 @@ However, this requires your app to be approved for external testing (can take 24
 5. Invite
 
 ### Android Google Play
+**No manual addition needed!** Users join directly via the opt-in link:
+- https://play.google.com/apps/internaltest/4701636314391153737
+
+If you need to manage testers manually:
 1. Go to https://play.google.com/console/
 2. Select your app
-3. Navigate to Testing → Internal testing (or Beta/Alpha)
-4. Click "Testers" tab → Add email addresses
-5. Save
+3. Navigate to Testing → Internal testing
+4. Click "Testers" tab → View/manage testers
 
 ## Recommended Approach
 
@@ -205,12 +170,11 @@ To test if your setup works:
 # Test iOS
 fastlane add_ios_beta_tester email:your-test-email@example.com
 
-# Test Android (if using Fastlane)
-fastlane add_android_beta_tester email:your-test-email@example.com
-
 # Or test the Node.js script
 node scripts/add-beta-testers.js --platform ios --email your-test-email@example.com
 ```
+
+**Android:** No testing needed - users join directly via the opt-in link!
 
 ## Troubleshooting
 
@@ -222,9 +186,10 @@ node scripts/add-beta-testers.js --platform ios --email your-test-email@example.
 
 ### Android Issues
 
-- **"Permission denied"**: Service account needs API access in Google Play Console
-- **"Package not found"**: Verify your package name matches exactly
-- **"Invalid JSON"**: Check that your service account JSON file is valid
+**No automation issues!** Android uses opt-in links. If users can't join:
+- Verify the opt-in URL is correct: https://play.google.com/apps/internaltest/4701636314391153737
+- Check that Internal Testing is set up in Google Play Console
+- Ensure the app has a release in the Internal Testing track
 
 ## Additional Resources
 

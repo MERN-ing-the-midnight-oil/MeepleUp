@@ -327,11 +327,17 @@ const TextListGameIdentifier = ({
       const searchQuery = cleanedTitle !== newTitle ? cleanedTitle : newTitle;
       
       // Search for the game
-      let searchResults = await searchGamesByName(searchQuery, true);
+      let searchResponse = await searchGamesByName(searchQuery, true);
+      let searchResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
+        ? searchResponse.results 
+        : (searchResponse || []);
       
       // If no results with cleaned title, try original
       if ((!searchResults || searchResults.length === 0) && searchQuery !== newTitle) {
-        searchResults = await searchGamesByName(newTitle, true);
+        searchResponse = await searchGamesByName(newTitle, true);
+        searchResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
+          ? searchResponse.results 
+          : (searchResponse || []);
       }
       
       if (searchResults && searchResults.length > 0) {

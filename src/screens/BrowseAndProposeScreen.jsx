@@ -122,6 +122,25 @@ const BrowseAndProposeScreen = () => {
   const scrollViewRef = useRef(null);
   const scrollPositionRef = useRef(0);
   
+  // Track cleanup attempts to prevent infinite loops
+  const cleanupAttemptedRef = useRef(new Set()); // Track gameIds we've tried to clean up
+  const aggregatedGamesHashRef = useRef(''); // Track hash of aggregatedGames to detect actual changes
+  const proposedGamesForCleanupRef = useRef(proposedGames); // Track current proposedGames to avoid stale closures
+  const isMountedRef = useRef(true); // Track if component is mounted
+  
+  // Track component mount status
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+  
+  // Update ref when proposedGames changes (but don't trigger cleanup on this change)
+  useEffect(() => {
+    proposedGamesForCleanupRef.current = proposedGames;
+  }, [proposedGames]);
+  
   // Track scroll position
   const handleScroll = useCallback((event) => {
     const offsetY = event.nativeEvent.contentOffset?.y ?? 0;
@@ -441,29 +460,63 @@ const BrowseAndProposeScreen = () => {
   }, [proposedGames, aggregatedGames, confirmedAttendees, selectedDate]);
 
   // Cleanup orphaned proposals when aggregatedGames changes (e.g., when owners change RSVP)
+  // IMPORTANT: Only depend on aggregatedGames, not proposedGames, to avoid loops
   useEffect(() => {
-    if (!event?.id || !db || !selectedDate || proposedGames.length === 0) return;
+    if (!event?.id || !db || !selectedDate) {
+      // Reset tracking when dependencies become invalid
+      cleanupAttemptedRef.current.clear();
+      aggregatedGamesHashRef.current = '';
+      return;
+    }
     
     const dateKey = getDateKey(selectedDate.date);
+    
+    // Create a hash of aggregatedGames to detect actual changes
+    // Include dateKey in hash so we reset when date changes
     const availableGameIds = new Set(
       aggregatedGames.map(g => String(g.bggId || g.id))
     );
+    const aggregatedGamesHash = `${dateKey}:${Array.from(availableGameIds).sort().join(',')}`;
+    
+    // Only proceed if aggregatedGames or date actually changed
+    if (aggregatedGamesHashRef.current === aggregatedGamesHash) {
+      return;
+    }
+    
+    // Update the hash
+    aggregatedGamesHashRef.current = aggregatedGamesHash;
+    
+    // Clear cleanup tracking when aggregatedGames or date changes
+    cleanupAttemptedRef.current.clear();
     
     // Find proposals for games that are no longer in aggregatedGames
-    const orphanedProposals = proposedGames.filter(proposal => {
+    // Use ref to get current proposedGames without depending on it (prevents loop)
+    const currentProposedGames = proposedGamesForCleanupRef.current;
+    const orphanedProposals = currentProposedGames.filter(proposal => {
       const gameId = String(proposal.gameId || '');
       return !availableGameIds.has(gameId);
     });
     
     if (orphanedProposals.length === 0) return;
     
+    // Filter out proposals we've already tried to clean up (to avoid retrying failed ones)
+    const newOrphanedProposals = orphanedProposals.filter(proposal => {
+      const gameId = String(proposal.gameId || '');
+      return !cleanupAttemptedRef.current.has(gameId);
+    });
+    
+    if (newOrphanedProposals.length === 0) return;
+    
     // Clean up orphaned proposals
     const cleanup = async () => {
-      console.log(`[BrowseAndProposeScreen] Cleaning up ${orphanedProposals.length} orphaned proposals for date ${dateKey}`);
+      console.log(`[BrowseAndProposeScreen] Cleaning up ${newOrphanedProposals.length} orphaned proposals for date ${dateKey}`);
       
-      for (const proposal of orphanedProposals) {
+      for (const proposal of newOrphanedProposals) {
         const gameId = String(proposal.gameId || '');
         const proposalDocId = `${dateKey}_${gameId}`;
+        
+        // Mark as attempted immediately to prevent retries
+        cleanupAttemptedRef.current.add(gameId);
         
         try {
           // Delete the proposal document
@@ -491,14 +544,18 @@ const BrowseAndProposeScreen = () => {
           if (ratingsSnapshot.size > 0) {
             await batch.commit();
           }
+          
+          console.log(`[BrowseAndProposeScreen] Successfully cleaned up proposal for ${gameId}`);
         } catch (error) {
           console.error(`[BrowseAndProposeScreen] Error cleaning up proposal for ${gameId}:`, error);
+          // Don't remove from cleanupAttemptedRef - we'll skip retrying this one
+          // to prevent infinite loops when permissions are insufficient
         }
       }
     };
     
     cleanup();
-  }, [proposedGames, aggregatedGames, event?.id, selectedDate, db]);
+  }, [aggregatedGames, event?.id, selectedDate, db]); // Removed proposedGames from dependencies
   // Enrich games with category data (games should already have category rank fields)
   const enrichedGames = useMemo(() => {
     const memoStartTime = performance.now();
@@ -1083,6 +1140,9 @@ const BrowseAndProposeScreen = () => {
           avatarsCount: Object.keys(avatars).length
         });
         
+        // Only update state if component is still mounted
+        if (!isMountedRef.current) return;
+        
         setMembers(membersList);
         setMemberRSVPs(rsvps);
         
@@ -1116,14 +1176,17 @@ const BrowseAndProposeScreen = () => {
           }
         }
         
-        setMemberNames(names);
-        setMemberAvatars(avatars);
-        
-        // Get user's proposal limit from members
-        if (userId) {
-          const userMember = membersList.find(m => m.userId === userId);
-          const proposalLimit = userMember?.proposalLimit !== undefined ? userMember.proposalLimit : 5;
-          setUserProposalLimit(proposalLimit);
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setMemberNames(names);
+          setMemberAvatars(avatars);
+          
+          // Get user's proposal limit from members
+          if (userId) {
+            const userMember = membersList.find(m => m.userId === userId);
+            const proposalLimit = userMember?.proposalLimit !== undefined ? userMember.proposalLimit : 5;
+            setUserProposalLimit(proposalLimit);
+          }
         }
           }, (error) => {
             console.error('[BrowseAndProposeScreen] Error loading members:', {
@@ -1135,11 +1198,13 @@ const BrowseAndProposeScreen = () => {
               hasDb: !!db,
               userId
             });
-            // Set empty arrays on error to prevent crashes
-            setMembers([]);
-            setMemberRSVPs({});
-            setMemberNames({});
-            setMemberAvatars({});
+            // Set empty arrays on error to prevent crashes (only if mounted)
+            if (isMountedRef.current) {
+              setMembers([]);
+              setMemberRSVPs({});
+              setMemberNames({});
+              setMemberAvatars({});
+            }
           });
       })
       .catch((error) => {
@@ -1244,12 +1309,18 @@ const BrowseAndProposeScreen = () => {
           }
         });
         
-        setProposedGames(Array.from(proposalsMap.values()));
-        setUserProposals(userProposalsSet);
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setProposedGames(Array.from(proposalsMap.values()));
+          setUserProposals(userProposalsSet);
+        }
       }, (error) => {
         console.error('[BrowseAndProposeScreen] Error loading proposals:', error);
-        setProposedGames([]);
-        setUserProposals(new Set());
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setProposedGames([]);
+          setUserProposals(new Set());
+        }
       });
     
     return unsubscribe;

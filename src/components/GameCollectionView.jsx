@@ -504,6 +504,10 @@ const GameCollectionView = ({
   const [filtersExpanded, setFiltersExpanded] = useState(false); // Default to collapsed
   const filtersAnimation = useRef(new Animated.Value(0)).current; // 0 = collapsed, 1 = expanded
   const scrollViewRef = useRef(null);
+  
+  // Lazy loading: Track which games should load images
+  const [loadedImageIds, setLoadedImageIds] = useState(new Set());
+  const INITIAL_LOAD_COUNT = 20; // Load first 20 images immediately
   const flatListRef = useRef(null);
   const resultsContainerRef = useRef(null);
   const resultsContainerY = useRef(0);
@@ -922,12 +926,37 @@ const GameCollectionView = ({
     }
   }, [browseAllMode, showResults]);
 
-  // Handle scroll to show/hide back to top button
+  // Handle scroll to show/hide back to top button and lazy load images
   const handleScroll = useCallback((event) => {
     const scrollY = event.nativeEvent.contentOffset.y;
+    const scrollViewHeight = event.nativeEvent.layoutMeasurement.height;
+    
     // Show button when scrolled down more than 300px
     setShowBackToTop(scrollY > 300);
-  }, []);
+    
+    // Lazy loading: Load images for items near viewport
+    if (paginatedGames.length > 0 && loadedImageIds.size < paginatedGames.length) {
+      const itemHeight = 200; // Approximate height of a game card
+      const buffer = itemHeight * 2; // Load 2 rows before and after viewport
+      
+      const startIndex = Math.max(0, Math.floor((scrollY - buffer) / itemHeight));
+      const endIndex = Math.min(paginatedGames.length - 1, Math.ceil((scrollY + scrollViewHeight + buffer) / itemHeight));
+      
+      // Load images for visible items
+      const newLoadedIds = new Set(loadedImageIds);
+      for (let i = startIndex; i <= endIndex && i < paginatedGames.length; i++) {
+        const game = paginatedGames[i];
+        const gameId = game.bggId || game.id;
+        if (gameId) {
+          newLoadedIds.add(gameId);
+        }
+      }
+      
+      if (newLoadedIds.size > loadedImageIds.size) {
+        setLoadedImageIds(newLoadedIds);
+      }
+    }
+  }, [paginatedGames, loadedImageIds]);
 
   // Scroll to top of games (results container) or absolute top if no results
   const scrollToTop = useCallback(() => {
@@ -988,6 +1017,9 @@ const GameCollectionView = ({
     const gameId = game.bggId || game.id;
     const matchScore = showMatchScores ? matchScores[gameId] : undefined;
     
+    // Lazy loading: Load first 20 images immediately, others when visible
+    const shouldLoadImage = index < INITIAL_LOAD_COUNT || loadedImageIds.has(gameId);
+    
     // Calculate card width for grid
     const numColumns = 3;
     const containerPadding = theme.spacing.md;
@@ -1012,6 +1044,7 @@ const GameCollectionView = ({
               preloadedBggData={preloadedBggData}
               inGrid={true}
               disableModal={!!onGamePress}
+              shouldLoadImage={shouldLoadImage}
             />
           </Pressable>
         </View>
@@ -1025,7 +1058,22 @@ const GameCollectionView = ({
         )}
       </View>
     );
-  }, [showMatchScores, matchScores, onGameDelete, onGamePress, width]);
+  }, [showMatchScores, matchScores, onGameDelete, onGamePress, width, loadedImageIds]);
+
+  // Initialize lazy loading for first batch of games
+  useEffect(() => {
+    if (paginatedGames.length > 0) {
+      const initialIds = new Set();
+      for (let i = 0; i < Math.min(INITIAL_LOAD_COUNT, paginatedGames.length); i++) {
+        const game = paginatedGames[i];
+        const gameId = game.bggId || game.id;
+        if (gameId) {
+          initialIds.add(gameId);
+        }
+      }
+      setLoadedImageIds(initialIds);
+    }
+  }, [paginatedGames.length]); // Only re-run when count changes, not on every game change
 
   // Memoize the games grid to prevent unnecessary re-renders
   const gamesGridElement = useMemo(() => {

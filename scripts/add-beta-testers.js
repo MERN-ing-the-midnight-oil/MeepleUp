@@ -5,16 +5,16 @@
  * 
  * This script helps automate adding beta testers to:
  * - iOS TestFlight (via App Store Connect API)
- * - Android Google Play Beta (via Google Play Developer API)
+ * 
+ * Note: Android beta testing uses Google Play Internal Testing opt-in links
+ * (no automation needed - users join directly via the opt-in URL)
  * 
  * Prerequisites:
  * - For iOS: App Store Connect API key (https://appstoreconnect.apple.com/access/api)
- * - For Android: Google Play service account JSON (https://console.cloud.google.com/)
  * 
  * Usage:
  *   node scripts/add-beta-testers.js --platform ios --email test@example.com
- *   node scripts/add-beta-testers.js --platform android --email test@example.com
- *   node scripts/add-beta-testers.js --platform both --file testers.txt
+ *   node scripts/add-beta-testers.js --platform ios --file testers.txt
  */
 
 const fs = require('fs');
@@ -32,12 +32,6 @@ const CONFIG = {
     privateKeyPath: process.env.APP_STORE_CONNECT_PRIVATE_KEY_PATH || './AuthKey.p8',
     // Your app's bundle ID
     bundleId: process.env.IOS_BUNDLE_ID || 'com.meepleup.app',
-  },
-  android: {
-    // Path to Google Play service account JSON
-    serviceAccountPath: process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_PATH || './google-play-service-account.json',
-    // Your app's package name
-    packageName: process.env.ANDROID_PACKAGE_NAME || 'com.meepleup.app',
   },
 };
 
@@ -100,75 +94,6 @@ async function addIOSBetaTester(email, firstName = '', lastName = '') {
   }
 }
 
-/**
- * Add tester to Android Google Play Beta
- * 
- * Note: Google Play Developer API requires service account authentication
- * You'll need to install googleapis
- * npm install googleapis
- */
-async function addAndroidBetaTester(email) {
-  console.log(`🤖 Adding ${email} to Android Google Play Beta...`);
-  
-  try {
-    // This is a placeholder - you'll need to implement using Google Play Developer API
-    // Example using googleapis:
-    /*
-    const { google } = require('googleapis');
-    const androidpublisher = google.androidpublisher('v3');
-    
-    // Load service account credentials
-    const serviceAccount = JSON.parse(
-      fs.readFileSync(CONFIG.android.serviceAccountPath, 'utf8')
-    );
-    
-    // Authenticate
-    const auth = new google.auth.JWT(
-      serviceAccount.client_email,
-      null,
-      serviceAccount.private_key,
-      ['https://www.googleapis.com/auth/androidpublisher']
-    );
-    
-    // Get the app
-    const app = await androidpublisher.edits.insert({
-      auth,
-      packageName: CONFIG.android.packageName,
-    });
-    
-    const editId = app.data.id;
-    
-    // Add tester to beta track
-    await androidpublisher.edits.testers.update({
-      auth,
-      packageName: CONFIG.android.packageName,
-      editId,
-      track: 'beta',
-      requestBody: {
-        testers: [email],
-      },
-    });
-    
-    // Commit the edit
-    await androidpublisher.edits.commit({
-      auth,
-      packageName: CONFIG.android.packageName,
-      editId,
-    });
-    
-    console.log(`✅ Successfully added ${email} to Android Google Play Beta`);
-    */
-    
-    console.log(`⚠️  Android Google Play Beta integration not yet implemented.`);
-    console.log(`   Please add ${email} manually via Google Play Console:`);
-    console.log(`   https://play.google.com/console -> Your App -> Testing -> Internal testing -> Testers`);
-    console.log(`   Or use Fastlane: fastlane add_android_beta_tester email:${email}`);
-    
-  } catch (error) {
-    console.error(`❌ Error adding Android beta tester:`, error.message);
-    throw error;
-  }
-}
 
 /**
  * Parse email from line (handles CSV format: email,firstName,lastName)
@@ -234,7 +159,7 @@ Usage:
   node scripts/add-beta-testers.js [options]
 
 Options:
-  --platform, -p <platform>   Platform: 'ios', 'android', or 'both'
+  --platform, -p <platform>   Platform: 'ios' (Android uses opt-in links, no automation needed)
   --email, -e <email>          Single email address to add
   --file, -f <file>            File containing emails (one per line, optional CSV: email,firstName,lastName)
   --help, -h                   Show this help message
@@ -243,21 +168,29 @@ Environment Variables:
   APP_STORE_CONNECT_KEY_ID              App Store Connect API Key ID
   APP_STORE_CONNECT_ISSUER_ID           App Store Connect API Issuer ID
   APP_STORE_CONNECT_PRIVATE_KEY_PATH    Path to .p8 private key file
-  GOOGLE_PLAY_SERVICE_ACCOUNT_PATH      Path to Google Play service account JSON
   IOS_BUNDLE_ID                         iOS app bundle ID (default: com.meepleup.app)
-  ANDROID_PACKAGE_NAME                  Android package name (default: com.meepleup.app)
 
 Examples:
   node scripts/add-beta-testers.js --platform ios --email test@example.com
-  node scripts/add-beta-testers.js --platform android --email test@example.com
-  node scripts/add-beta-testers.js --platform both --file testers.txt
+  node scripts/add-beta-testers.js --platform ios --file testers.txt
+
+Note: Android beta testing uses Google Play Internal Testing opt-in links.
+      Users join directly via: https://play.google.com/apps/internaltest/4701636314391153737
       `);
       process.exit(0);
     }
   }
   
   if (!platform) {
-    console.error('❌ Error: --platform is required (ios, android, or both)');
+    console.error('❌ Error: --platform is required (ios)');
+    console.error('   Note: Android uses opt-in links - no automation needed');
+    process.exit(1);
+  }
+  
+  if (platform !== 'ios') {
+    console.error('❌ Error: Only "ios" platform is supported');
+    console.error('   Android beta testing uses opt-in links - no automation needed');
+    console.error('   Users join directly via: https://play.google.com/apps/internaltest/4701636314391153737');
     process.exit(1);
   }
   
@@ -291,15 +224,7 @@ Examples:
   // Process each tester
   for (const tester of testers) {
     console.log(`\n👤 Processing: ${tester.email}`);
-    
-    if (platform === 'ios' || platform === 'both') {
-      await addIOSBetaTester(tester.email, tester.firstName, tester.lastName);
-    }
-    
-    if (platform === 'android' || platform === 'both') {
-      await addAndroidBetaTester(tester.email);
-    }
-    
+    await addIOSBetaTester(tester.email, tester.firstName, tester.lastName);
     console.log(''); // Empty line for readability
   }
   
@@ -314,4 +239,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { addIOSBetaTester, addAndroidBetaTester };
+module.exports = { addIOSBetaTester };

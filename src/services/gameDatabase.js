@@ -178,9 +178,11 @@ export async function searchGamesByName(query, limit = 10) {
             activeQueries.delete(queryId);
             
             // Try to log timeout via logger if available
+            // Use WARN instead of ERROR - timeouts are expected when Firebase is slow,
+            // and we have a BGG API fallback that usually succeeds
             try {
               const logger = (await import('../utils/inAppLogger')).default;
-              logger.error(`[Firebase] Query timeout for "${searchTermForLog || queryName}"`, {
+              logger.warn(`[Firebase] Query timeout for "${searchTermForLog || queryName}" (will fallback to BGG)`, {
                 timeoutSeconds: QUERY_TIMEOUT_MS / 1000,
                 queryName,
                 searchTerm: searchTermForLog,

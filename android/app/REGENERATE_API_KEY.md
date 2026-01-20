@@ -74,3 +74,4 @@ Look for the "SHA1" line in the output.
 - The key in `google-services.json` is a client-side key, so it will be visible in your app bundle, but restrictions prevent unauthorized use
 - Never commit `google-services.json` to git (already configured in `.gitignore`)
 
+

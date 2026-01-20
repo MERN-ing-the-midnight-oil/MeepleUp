@@ -96,6 +96,13 @@
     
     <form id="iosSignupForm" class="signup-form">
       <input 
+        type="text" 
+        id="iosNameInput" 
+        name="name" 
+        placeholder="Name (optional)" 
+        class="signup-input"
+      >
+      <input 
         type="email" 
         id="iosEmailInput" 
         name="email" 
@@ -137,6 +144,7 @@
     // iOS form submission
     document.getElementById('iosSignupForm').addEventListener('submit', async function(e) {
       e.preventDefault();
+      const name = document.getElementById('iosNameInput').value.trim();
       const email = document.getElementById('iosEmailInput').value.trim();
       const form = this;
       const successMessage = document.getElementById('iosSuccessMessage');
@@ -153,6 +161,7 @@
       try {
         await db.collection('betaSignups').add({
           email: email,
+          name: name || null,
           platforms: ['ios'],
           signupDate: firebase.firestore.FieldValue.serverTimestamp(),
           status: 'pending',

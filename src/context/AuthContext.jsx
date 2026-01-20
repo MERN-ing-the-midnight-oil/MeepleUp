@@ -5,13 +5,15 @@ import firebase, { auth, db, functions, firebaseInitError } from '../config/fire
 import logger from '../utils/logger';
 
 // Helper to get the verification URL
+// Points to a simple standalone page to avoid opening the app in browser
 const getVerificationUrl = () => {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    return window.location.origin;
+    return `${window.location.origin}/email-verified.html`;
   }
   // For React Native or when window is not available, use authDomain
   const authDomain = process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || process.env.REACT_APP_FIREBASE_AUTH_DOMAIN;
-  return authDomain ? `https://${authDomain}` : 'https://meepleup-951a1.firebaseapp.com';
+  const baseUrl = authDomain ? `https://${authDomain}` : 'https://meepleup-951a1.firebaseapp.com';
+  return `${baseUrl}/email-verified.html`;
 };
 
 const AuthContext = createContext();

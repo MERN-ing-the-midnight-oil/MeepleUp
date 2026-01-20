@@ -165,7 +165,10 @@ export const searchGameByBarcodeWithBGG = async (barcode, searchBGG = true) => {
 
     // Then search BGG with cleaned title
     try {
-      const bggResults = await searchGamesByName(barcodeResult.cleanedTitle);
+      const searchResponse = await searchGamesByName(barcodeResult.cleanedTitle);
+      const bggResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
+        ? searchResponse.results 
+        : (searchResponse || []);
       
       if (bggResults && bggResults.length > 0) {
         // Get detailed info for the first (most relevant) result
@@ -451,6 +454,10 @@ export const searchGameByBarcode = async (barcode) => {
  * @returns {Promise<Array>} Array of matching games
  */
 export const searchGamesByName = async (query, fallbackToBGG = false) => {
+  // Track try counts
+  let firebaseTries = 0;
+  let bggTries = 0;
+  
   try {
     if (__DEV__) {
       console.log('[Game Search] Searching for:', query);
@@ -460,6 +467,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     let firestoreFailed = false;
     let firestoreResults = null;
     try {
+      firebaseTries = 1; // Count Firebase attempt
       const { searchGamesByName: searchFirestore } = await import('../services/gameDatabase');
       
       // gameDatabase has its own 7s timeout, so we don't need a wrapper timeout here
@@ -480,7 +488,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
         if (__DEV__) {
           console.log('[Firestore] Returning formatted results:', formatted.length);
         }
-        return formatted;
+        // Return results with try counts
+        return { results: formatted, firebaseTries, bggTries };
       } else {
         // Firestore returned empty array or null - mark as failed to trigger BGG fallback
         firestoreFailed = true;
@@ -499,6 +508,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           query,
           error: firestoreError.message,
           willFallbackToBGG: fallbackToBGG,
+          firebaseTries: 1,
         });
       } catch (loggerError) {
         // Logger not available, continue
@@ -690,20 +700,22 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             // We should NEVER save incomplete records to Firebase
             // Full "Thing" data will be fetched and cached when user selects a game via getGames()
             
-            return bggResults;
+            bggTries = bggRetryCount + 1; // Count total BGG attempts (retries + 1)
+            return { results: bggResults, firebaseTries, bggTries };
           } else {
             // No results - BGG successfully returned empty array (no <item> tags in XML)
             // Note: This doesn't definitively mean the game doesn't exist - BGG API doesn't distinguish
             // between "game doesn't exist" and "search didn't find it". The caller will add to pending retries
             // so we can try again later, as BGG API often needs multiple attempts.
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+            bggTries = bggRetryCount + 1; // Count total BGG attempts
             if (__DEV__) {
               console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (will be added to pending retries)`, {
                 attemptDurationSeconds: attemptDuration,
                 totalDurationSeconds: totalDuration,
               });
             }
-            return [];
+            return { results: [], firebaseTries, bggTries };
           }
         } catch (bggError) {
           lastError = bggError;
@@ -771,6 +783,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       // If we exhausted retries and still have an error, throw it so caller can handle it
       if (lastError && lastError.message && lastError.message.includes('rate limited')) {
         const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
+        bggTries = bggRetryCount + 1; // Count total BGG attempts
         
         // Log final BGG failure (rate limited)
         try {
@@ -780,6 +793,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             totalDurationSeconds: totalDuration,
             retries: bggRetryCount,
             maxRetries: maxBggRetries,
+            firebaseTries,
+            bggTries,
           });
         } catch (loggerError) {
           // Logger not available, continue
@@ -791,6 +806,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
         // Throw a specific error so the caller knows this is rate-limited, not a definitive "no results"
         const rateLimitError = new Error(`BGG API rate limited for "${query}" after exhausting retries`);
         rateLimitError.isRateLimited = true;
+        rateLimitError.firebaseTries = firebaseTries;
+        rateLimitError.bggTries = bggTries;
         throw rateLimitError;
       }
     }
@@ -800,6 +817,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     try {
       const logger = (await import('./inAppLogger')).default;
       logger.warn(`[searchGamesByName] ⚠️ BGG API returned no results or failed`, {
+        firebaseTries,
+        bggTries,
         query,
         hadError: !!lastError,
         errorMessage: lastError?.message || null,
@@ -816,7 +835,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
     if (__DEV__) {
       console.log('[Game Search] No results found, returning empty array');
     }
-    return [];
+    return { results: [], firebaseTries, bggTries };
   } catch (error) {
     // Log final error
     try {

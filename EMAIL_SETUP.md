@@ -62,3 +62,4 @@ firebase functions:config:get
 - **Gmail blocking?** Make sure you're using an App Password, not your regular password
 - **Function not triggered?** Verify the document is being created in `betaSignups` collection with `platforms: ['ios']`
 
+

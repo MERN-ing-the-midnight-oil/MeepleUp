@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeepleUp Sticker Print Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            padding: 20px;
+        }
+
+        .print-button-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .print-button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 30px;
+            font-size: 18px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .print-button:hover {
+            background-color: #45a049;
+        }
+
+        .page-container {
+            width: 8.5in;
+            height: 11in;
+            margin: 0 auto;
+            background-color: white;
+            padding: 0 0.15in;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sticker-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: 0;
+            width: 100%;
+            height: 11in;
+            max-height: 11in;
+        }
+
+        .sticker {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            width: 100%;
+            height: 100%;
+        }
+
+        .sticker img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Print styles */
+        @media print {
+            body {
+                background-color: white;
+                padding: 0;
+            }
+
+            .print-button-container {
+                display: none;
+            }
+
+            .page-container {
+                width: 8.5in;
+                height: 11in;
+                max-height: 11in;
+                margin: 0;
+                padding: 0 0.15in;
+                page-break-after: always;
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+
+            .sticker-container {
+                gap: 0;
+                height: 100%;
+                max-height: 11in;
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+
+            .sticker {
+                page-break-after: auto;
+                break-after: auto;
+            }
+
+            @page {
+                size: 8.5in 11in portrait;
+                margin: 0;
+            }
+        }
+
+        /* Screen preview styles */
+        @media screen {
+            .page-container {
+                box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="print-button-container">
+        <button class="print-button" onclick="window.print()">Print Stickers</button>
+    </div>
+
+    <div class="page-container">
+        <div class="sticker-container">
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+            <div class="sticker">
+                <img src="docs/images/oclockyet.png" alt="MeepleUp Sticker">
+            </div>
+        </div>
+    </div>
+</body>
+</html>

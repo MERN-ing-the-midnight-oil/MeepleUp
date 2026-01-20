@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, Image, StyleSheet, Pressable, Dimensions, useWindowDimensions, Alert, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Dimensions, useWindowDimensions, Alert, Animated } from 'react-native';
+import { Image } from 'expo-image';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { getGameBadges } from '../utils/gameBadges';
 import GameDetailsModal from './GameDetailsModal';
@@ -18,8 +19,9 @@ import firebase from '../config/firebase';
  * @param {Object} props.game - The game object
  * @param {Function} props.onDelete - Delete handler
  * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
+ * @param {boolean} props.shouldLoadImage - Whether to load the image (for lazy loading)
  */
-const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false, onFavorite = null, onProposeGame = null, userProposals = new Set(), eventId = null }) => {
+const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false, onFavorite = null, onProposeGame = null, userProposals = new Set(), eventId = null, shouldLoadImage = true }) => {
   const { user } = useAuth();
   const { collections, updateGameInCollection, addGameToCollection } = useCollections();
   const userId = user?.uid || user?.id;
@@ -534,14 +536,35 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
         >
           {/* Thumbnail Image */}
           <View style={styles.thumbnailContainer}>
-            {thumbnail ? (
+            {thumbnail && shouldLoadImage && !imageError ? (
               <Image
                 source={{ uri: thumbnail }}
                 style={styles.thumbnail}
-                resizeMode="cover"
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={200}
+                placeholder={
+                  <View style={styles.thumbnailPlaceholder}>
+                    <Text style={styles.thumbnailPlaceholderText}>
+                      {title && typeof title === 'string' && title.length > 0
+                        ? title.charAt(0).toUpperCase()
+                        : '?'}
+                    </Text>
+                  </View>
+                }
                 onError={(error) => {
                   console.error('[GameCard] Image load error:', error);
+                  if (retryCount < 3) {
+                    // Retry with exponential backoff
+                    setTimeout(() => {
+                      setRetryCount(prev => prev + 1);
+                      setImageError(false);
+                    }, 1000 * (retryCount + 1));
+                  } else {
+                    setImageError(true);
+                  }
                 }}
+                recyclingKey={game.bggId || game.id || thumbnail}
               />
             ) : (
               <View style={styles.thumbnailPlaceholder}>
@@ -815,14 +838,17 @@ export default React.memo(
       prevProps.preloadedBggData?.id !== nextProps.preloadedBggData?.id;
 
     const deleteHandlerChanged = prevProps.onDelete !== nextProps.onDelete;
+    
+    const imageLoadChanged = prevProps.shouldLoadImage !== nextProps.shouldLoadImage;
 
-    const shouldUpdate = gameChanged || bggDataChanged || deleteHandlerChanged;
+    const shouldUpdate = gameChanged || bggDataChanged || deleteHandlerChanged || imageLoadChanged;
 
     if (shouldUpdate && __DEV__) {
       console.log('[GameCard] Memo: Props changed, allowing re-render', {
         gameChanged,
         bggDataChanged,
         deleteHandlerChanged,
+        imageLoadChanged,
       });
     }
 

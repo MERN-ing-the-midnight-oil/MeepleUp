@@ -21,6 +21,17 @@ export const CollectionsProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
 
   const [initialised, setInitialised] = useState(false);
+  
+  // Track if component is mounted to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  // Track component mount status
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Load collections from storage on mount
   useEffect(() => {
@@ -35,14 +46,18 @@ export const CollectionsProvider = ({ children }) => {
         if (__DEV__ && totalGames > 0 && Object.keys(collections).length === 0) {
           console.log(`[Collections] Loaded from storage: ${userIds.length} users, ${totalGames} total games`);
         }
-        setCollections(parsed);
+        if (isMountedRef.current) {
+          setCollections(parsed);
+        }
         } else {
           // Reduced logging - no need to log empty state
         }
       } catch (error) {
         console.error('Error loading collections:', error);
       } finally {
-        setInitialised(true);
+        if (isMountedRef.current) {
+          setInitialised(true);
+        }
       }
     };
     loadCollections();
@@ -184,30 +199,72 @@ export const CollectionsProvider = ({ children }) => {
     // Note: This sync happens in the background. If local storage has cached games,
     // they will be shown immediately while this sync updates them in the background.
     const sync = async () => {
+      // Check if still mounted before setting loading state
+      if (!isMountedRef.current) return;
       setLoading(true);
       try {
-        console.log('[Collections] Fetching games from Firestore', {
+        console.log('[Collections] Fetching games from Firestore with pagination', {
           userId,
           path: `userGames/${userId}/games`,
         });
         
-        const snapshot = await db.collection('userGames').doc(userId).collection('games').get();
+        // Load games with pagination to handle large collections (>1MB response limit)
+        const BATCH_SIZE = 500; // Firestore recommended batch size
+        let allDocs = [];
+        let lastDoc = null;
+        let batchNumber = 0;
+        let hasMore = true;
+
+        while (hasMore) {
+          batchNumber++;
+          
+          try {
+            let query = db
+              .collection('userGames')
+              .doc(userId)
+              .collection('games')
+              .limit(BATCH_SIZE);
+            
+            if (lastDoc) {
+              query = query.startAfter(lastDoc);
+            }
+            
+            const batch = await query.get();
+            allDocs = [...allDocs, ...batch.docs];
+            
+            hasMore = batch.docs.length === BATCH_SIZE;
+            
+            if (hasMore && batch.docs.length > 0) {
+              lastDoc = batch.docs[batch.docs.length - 1];
+              // Small delay to avoid overwhelming Firestore
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            console.log(`[Collections] Batch ${batchNumber}: ${batch.docs.length} games (total: ${allDocs.length})`);
+            
+          } catch (batchError) {
+            console.error(`[Collections] Error loading batch ${batchNumber}:`, batchError);
+            // Continue with what we have - partial data is better than no data
+            // But log the error for monitoring
+            hasMore = false;
+          }
+        }
         
         console.log('[Collections] Firestore query completed', {
           userId,
-          snapshotSize: snapshot.size,
-          empty: snapshot.empty,
-          docsCount: snapshot.docs.length,
+          totalGames: allDocs.length,
+          batches: batchNumber,
+          empty: allDocs.length === 0,
         });
         
-        if (!snapshot.empty) {
+        if (allDocs.length > 0) {
           console.log('[Collections] Parsing game documents', {
             userId,
-            docCount: snapshot.docs.length,
+            docCount: allDocs.length,
           });
           
           // Parse references from Firestore (may be new format references or old format full data)
-          const references = snapshot.docs.map(doc => {
+          const references = allDocs.map(doc => {
             const data = doc.data();
             const isRef = isReferenceOnly(data);
             
@@ -338,23 +395,27 @@ export const CollectionsProvider = ({ children }) => {
             })),
           });
           
-          setCollections(prev => ({
-            ...prev,
-            [userId]: deduplicatedGames,
-          }));
-          
-          console.log(`[Collections] ✅ Loaded ${deduplicatedGames.length} games for user ${userId} (${user.email})`);
+          // Only update state if component is still mounted
+          if (isMountedRef.current) {
+            setCollections(prev => ({
+              ...prev,
+              [userId]: deduplicatedGames,
+            }));
+            console.log(`[Collections] ✅ Loaded ${deduplicatedGames.length} games for user ${userId} (${user.email})`);
+          }
         } else {
           console.log('[Collections] ⚠️ No games found in Firestore', {
             userId,
             email: user.email,
             path: `userGames/${userId}/games`,
           });
-          // Set empty array so we know the sync completed
-          setCollections(prev => ({
-            ...prev,
-            [userId]: [],
-          }));
+          // Set empty array so we know the sync completed (only if mounted)
+          if (isMountedRef.current) {
+            setCollections(prev => ({
+              ...prev,
+              [userId]: [],
+            }));
+          }
         }
       } catch (error) {
         console.error(`[Collections] ❌ Error syncing user games for ${userId} (${user.email}):`, error);
@@ -372,7 +433,10 @@ export const CollectionsProvider = ({ children }) => {
           userId,
           email: user.email,
         });
-        setLoading(false);
+        // Only update loading state if component is still mounted
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     };
     
@@ -590,13 +654,13 @@ export const CollectionsProvider = ({ children }) => {
     }
 
     // Start background retry service
-    startBackgroundRetryService(addGameToCollection, userId);
+    startBackgroundRetryService(addGameToCollection, userId, getUserCollection);
 
     // Cleanup: stop service when component unmounts or user changes
     return () => {
       stopBackgroundRetryService();
     };
-  }, [user, initialised, addGameToCollection]);
+  }, [user, initialised, addGameToCollection, getUserCollection]);
 
   // Simple stable callbacks
   const addGameToCollection = useCallback(async (userId, gameData) => {

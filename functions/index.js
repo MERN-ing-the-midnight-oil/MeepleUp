@@ -1000,15 +1000,7 @@ exports.sendMentionSMS = functions.https.onRequest(async (req, res) => {
       groupId,
     });
 
-    // TODO: Implement actual SMS sending using your preferred service
-    // Example with Twilio:
-    // const twilio = require('twilio');
-    // const client = twilio(accountSid, authToken);
-    // await client.messages.create({
-    //   body: message,
-    //   to: to,
-    //   from: twilioPhoneNumber
-    // });
+    // TODO: Implement actual SMS sending (e.g. email-to-SMS gateway like number@txt.att.net, or an SMS API)
 
     res.status(200).json({success: true, message: "SMS sent successfully"});
   } catch (error) {
@@ -1186,6 +1178,226 @@ If you have questions, reply to this email or contact us at contact@meepleup.com
         console.error(`❌ Error sending welcome email to ${email}:`, error);
         // Don't throw - we don't want to retry on email failures
         // You might want to log this to a separate error collection
+        return null;
+      }
+    });
+
+/**
+ * Firestore Trigger: Send Admin Notification for Beta Signups
+ * Sends an email to the admin when anyone signs up for beta testing
+ */
+exports.notifyAdminBetaSignup = functions.firestore
+    .document("betaSignups/{signupId}")
+    .onCreate(async (snap, context) => {
+      const signupData = snap.data();
+      const signupId = context.params.signupId;
+
+      const email = signupData.email;
+      if (!email) {
+        console.error(`No email found for signup ${signupId}`);
+        return null;
+      }
+      const name = signupData.name && String(signupData.name).trim() ? String(signupData.name).trim() : null;
+
+      // Get admin email from config or use default
+      // Default to SMTP user email if available, otherwise use contact@meepleup.com
+      const smtpUser = functions.config().smtp?.user || process.env.SMTP_USER;
+      const adminEmail = functions.config().admin?.email || 
+                        process.env.ADMIN_EMAIL || 
+                        smtpUser ||
+                        "contact@meepleup.com";
+
+      try {
+        // Configure email transporter
+        const smtpConfig = {
+          host: functions.config().smtp?.host || process.env.SMTP_HOST,
+          port: parseInt(functions.config().smtp?.port || process.env.SMTP_PORT || "587"),
+          secure: (functions.config().smtp?.secure || process.env.SMTP_SECURE) === "true",
+          auth: {
+            user: functions.config().smtp?.user || process.env.SMTP_USER,
+            pass: functions.config().smtp?.pass || process.env.SMTP_PASS,
+          },
+        };
+
+        // If SMTP is not configured, log and return (won't fail)
+        if (!smtpConfig.auth.user || !smtpConfig.auth.pass) {
+          console.log(`SMTP not configured. Admin notification would be sent to: ${adminEmail}`);
+          console.log("Configure SMTP by setting functions.config() or environment variables:");
+          console.log("  firebase functions:config:set smtp.host='smtp.gmail.com'");
+          console.log("  firebase functions:config:set smtp.port='587'");
+          console.log("  firebase functions:config:set smtp.user='your-email@gmail.com'");
+          console.log("  firebase functions:config:set smtp.pass='your-app-password'");
+          return null;
+        }
+
+        const transporter = nodemailer.createTransport(smtpConfig);
+
+        // Determine platform(s)
+        const platforms = signupData.platforms || [];
+        const isIOS = platforms.includes("ios");
+        const isAndroid = platforms.includes("android");
+        const platformText = isIOS && isAndroid ? "iOS & Android" : 
+                            isIOS ? "iOS" : 
+                            isAndroid ? "Android/Google Play" : "Unknown";
+
+        // Determine action needed
+        let actionNeeded = "";
+        if (isIOS) {
+          actionNeeded = "⚠️ ACTION REQUIRED: Run `node scripts/process-beta-signups.js --add-ios` to add this tester to TestFlight";
+        } else if (isAndroid) {
+          actionNeeded = "✅ No action needed - Android testers can join via opt-in link: https://play.google.com/apps/internaltest/4701636314391153737";
+        } else {
+          actionNeeded = "⚠️ Unknown platform - please check manually";
+        }
+
+        // Format signup date in Pacific time
+        const signupDate = signupData.signupDate ?
+          signupData.signupDate.toDate().toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "medium", timeStyle: "short" }) + " (Pacific)" :
+          "Unknown";
+        const signupDateShort = signupData.signupDate ?
+          signupData.signupDate.toDate().toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT" :
+          "";
+
+        // Build signup info table (escape name for HTML if present)
+        const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        const nameRow = name ? `<tr><td><strong>Name:</strong></td><td>${escapeHtml(name)}</td></tr>` : "";
+        const signupInfo = `
+          <tr><td><strong>Email:</strong></td><td>${escapeHtml(email)}</td></tr>
+          ${nameRow}
+          <tr><td><strong>Platform:</strong></td><td>${platformText}</td></tr>
+          <tr><td><strong>Status:</strong></td><td>${signupData.status || "pending"}</td></tr>
+          <tr><td><strong>Signup Date:</strong></td><td>${signupDate}</td></tr>
+          <tr><td><strong>Source:</strong></td><td>${signupData.source || "unknown"}</td></tr>
+          <tr><td><strong>Signup ID:</strong></td><td>${signupId}</td></tr>
+        `;
+
+        // Email content
+        const emailSubject = `🎮 New Beta Tester Signup: ${email} (${platformText})`;
+        const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: linear-gradient(135deg, #d45d5d 0%, #c04d4d 100%); color: white; padding: 30px; text-align: center; border-radius: 12px 12px 0 0; }
+    .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 12px 12px; }
+    .info-box { background: white; border-left: 4px solid #d45d5d; padding: 15px; margin: 20px 0; border-radius: 4px; }
+    .action-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 4px; }
+    .no-action-box { background: #d1e7dd; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 4px; }
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    table td { padding: 8px; border-bottom: 1px solid #e0e0e0; }
+    table td:first-child { width: 150px; color: #666; }
+    .command { background: #2d2d2d; color: #f8f8f2; padding: 10px; border-radius: 6px; font-family: 'Courier New', monospace; margin: 10px 0; }
+    .footer { text-align: center; color: #6c757d; font-size: 0.875rem; margin-top: 30px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="margin: 0;">🎮 New Beta Tester Signup!</h1>
+    </div>
+    <div class="content">
+      <p>Hi Rhys,</p>
+      
+      <p>A new person has signed up for beta testing!</p>
+      
+      <div class="info-box">
+        <h3 style="margin-top: 0; color: #d45d5d;">Signup Information:</h3>
+        <table>
+          ${signupInfo}
+        </table>
+      </div>
+      
+      ${isIOS ? `
+      <div class="action-box">
+        <h3 style="margin-top: 0; color: #856404;">⚠️ Action Required:</h3>
+        <p>This is an <strong>iOS</strong> signup. You need to add them to TestFlight.</p>
+        <p><strong>Run this command:</strong></p>
+        <div class="command">node scripts/process-beta-signups.js --add-ios</div>
+        <p>This will add all pending iOS testers to TestFlight group "Good Meeples Beta Testers".</p>
+      </div>
+      ` : `
+      <div class="no-action-box">
+        <h3 style="margin-top: 0; color: #155724;">✅ No Action Needed:</h3>
+        <p>This is an <strong>Android/Google Play</strong> signup. They can join automatically via the opt-in link.</p>
+        <p><strong>Opt-in URL:</strong> <a href="https://play.google.com/apps/internaltest/4701636314391153737">https://play.google.com/apps/internaltest/4701636314391153737</a></p>
+      </div>
+      `}
+      
+      <div class="footer">
+        <p>This is an automated notification from MeepleUp beta signup system.</p>
+        <p>Signup ID: ${signupId}</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+        `;
+
+        // Send email
+        const mailOptions = {
+          from: `"MeepleUp Admin" <${smtpConfig.auth.user}>`,
+          to: adminEmail,
+          subject: emailSubject,
+          html: emailHtml,
+          // Plain text version
+          text: `
+New Beta Tester Signup!
+
+A new person has signed up for beta testing:
+
+Email: ${email}
+${name ? `Name: ${name}\n` : ""}Platform: ${platformText}
+Status: ${signupData.status || "pending"}
+Signup Date: ${signupDate}
+Source: ${signupData.source || "unknown"}
+Signup ID: ${signupId}
+
+${isIOS ? `
+⚠️ ACTION REQUIRED:
+This is an iOS signup. Run this command to add them to TestFlight:
+  node scripts/process-beta-signups.js --add-ios
+
+This will add all pending iOS testers to TestFlight group "Good Meeples Beta Testers".
+` : `
+✅ NO ACTION NEEDED:
+This is an Android/Google Play signup. They can join automatically via the opt-in link:
+  https://play.google.com/apps/internaltest/4701636314391153737
+`}
+
+---
+This is an automated notification from MeepleUp beta signup system.
+Signup ID: ${signupId}
+          `.trim(),
+        };
+
+        const result = await transporter.sendMail(mailOptions);
+        console.log(`✅ Admin notification sent to ${adminEmail} for signup ${signupId} (${email})`);
+        console.log(`   Message ID: ${result.messageId}`);
+        console.log(`   Response: ${result.response}`);
+
+        // Note: SMS notifications removed because AT&T shut down email-to-SMS gateway (txt.att.net) on June 17, 2025
+        // Email notifications will continue to work. To re-enable SMS, you would need to use a paid SMS service like Twilio.
+
+        // Optionally update the signup document to mark notification as sent
+        await snap.ref.update({
+          adminNotified: true,
+          adminNotifiedAt: admin.firestore.Timestamp.now(),
+        });
+
+        return null;
+      } catch (error) {
+        console.error(`❌ Error sending admin notification for signup ${signupId}:`, error);
+        console.error(`   Error details:`, {
+          message: error.message,
+          code: error.code,
+          command: error.command,
+          response: error.response,
+          responseCode: error.responseCode,
+        });
+        // Don't throw - we don't want to retry on email failures
         return null;
       }
     });
