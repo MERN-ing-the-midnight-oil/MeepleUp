@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="MeepleUp - Join the Beta">
-  <title>MeepleUp - Join the Beta</title>
+  <meta name="description" content="MeepleUp - Plan Apart, Play Together. The mobile app that makes game night planning effortless.">
+  <title>MeepleUp - Plan Apart, Play Together</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -49,58 +49,45 @@
       <!-- Right Side: Content Section -->
       <section class="content-section">
         <div class="welcome-intro">
-          <img src="images/rhys-cascase-con.png" alt="Rhys playing board games" class="rhys-photo">
           <div class="welcome-text">
-            <h2 class="welcome-header">Hello Fellow Board Gamers!</h2>
+            <h2 class="welcome-header">Game Night, Pre-Loaded.</h2>
             
             <p class="welcome-subheader">
-              My name is Rhys (pronounced "Reese"). I'm a local school bus driver here in Bellingham and a big fan of board games.
+              Browse your group's complete collection and vote on games before you arrive. MeepleUp suggests what to play based on votes and your preferences—so game night can start with dice hitting the table.
             </p>
           </div>
         </div>
 
         <p class="welcome-content">
-          Three years ago, I graduated from a UW coding bootcamp, and I've been spending my spare time building an app designed to solve a frequent game-night headache: choosing what game to play.
+          <strong>Smart Collection Management</strong><br>
+          Snap a photo of your shelf and MeepleUp automatically catalogs your games. Already on BoardGameGeek? Sync your collection instantly.
         </p>
 
         <p class="welcome-content">
-          I'm looking for beta testers for MeepleUp. It's a mobile app that handles your event planning and group chat, but with some extra "magic". <strong>You can actually snap a photo of your game shelf, and the app will automatically identify and catalog your games (If you already have your collection on BoardGameGeek, the app will automatically pull your collection from there).</strong>
+          <strong>Decide Before You Arrive</strong><br>
+          Browse everyone's games, propose favorites, and vote together. No more spending the first forty-five minutes deciding what to play.
         </p>
 
         <p class="welcome-content">
-          From there, your group can asynchronously browse each other's collections and vote on what to play before the game night even starts. No more spending the first forty-five minutes trying to decide what to play!
+          <strong>Everything in One Place</strong><br>
+          Event planning, group chat, RSVPs, and game selection—all in one app. Coordinate schedules and keep everyone in the loop.
         </p>
 
-        <p class="welcome-content">
-          I'd love for you to help me test it out and share your feedback. Your input will help shape the future of MeepleUp and make it better for all board game enthusiasts!
-        </p>
-
-        <p class="welcome-signoff">
-          Sincerely, Rhys Smoker
-        </p>
-        <img src="images/RhysSignature.png" alt="Rhys Smoker signature" class="signature-image">
-
-        <!-- Beta Signup - Single QR Code with Device Detection -->
+        <!-- App Download Section -->
         <div class="signup-forms-container">
           <section class="beta-signup-section" style="text-align: center;">
-            <a href="beta-signup.html" style="display: block; text-align: center; text-decoration: none;">
-              <div style="display: flex; justify-content: center; gap: 15px; align-items: center; margin-bottom: 15px; flex-wrap: wrap;">
-                <img src="images/appstore.svg" alt="App Store" style="max-width: 150px; height: auto;">
-                <img src="images/google-play-badge.png" alt="Get it on Google Play" style="max-width: 150px; height: auto;">
-              </div>
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://meepleup.com/docs/beta-signup.html" alt="Scan to join Beta Testing" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border: 2px solid #667eea; border-radius: 12px; padding: 10px; background: white; cursor: pointer; transition: transform 0.2s ease;">
-            </a>
-            <p style="text-align: center; margin-top: 10px; color: var(--text-secondary); font-size: 0.9rem;">
-              <strong>Join the Beta Testing Program</strong><br>
-              <span style="font-size: 0.85rem; margin-top: 5px; display: block;">Scan with your phone or click to join. We'll automatically detect your device and send you to the right signup page.</span>
-            </p>
-            <div style="margin-top: 20px; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-              <a href="ios-feedback.html" style="text-decoration: none;">
-                <button style="background-color: #d45d5d; color: white; border: none; padding: 1rem 2rem; font-size: 1.1rem; font-weight: 600; border-radius: 12px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s ease;">
-                  🐛 Report Bug or Suggest Feature
-                </button>
+            <h3 style="font-size: 1.5rem; margin-bottom: 1.5rem; color: var(--text-primary);">Download MeepleUp Today</h3>
+            <div style="display: flex; justify-content: center; gap: 20px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
+              <a href="https://apps.apple.com/app/meepleup" target="_blank" rel="noopener noreferrer" style="display: inline-block;">
+                <img src="images/appstore.svg" alt="Download on the App Store" style="max-width: 180px; height: auto; transition: transform 0.2s ease;">
+              </a>
+              <a href="https://play.google.com/store/apps/details?id=com.meepleup" target="_blank" rel="noopener noreferrer" style="display: inline-block;">
+                <img src="images/google-play-badge.png" alt="Get it on Google Play" style="max-width: 180px; height: auto; transition: transform 0.2s ease;">
               </a>
             </div>
+            <p style="text-align: center; margin-top: 15px; color: var(--text-secondary); font-size: 0.9rem;">
+              Available now on iOS and Android
+            </p>
           </section>
         </div>
 
@@ -136,25 +123,6 @@
     const db = firebase.firestore();
     
 
-    // Dynamically set Rhys photo height to match header + subheader height, minimum 240px to match app icon
-    function setPhotoHeight() {
-      const header = document.querySelector('.welcome-header');
-      const subheader = document.querySelector('.welcome-subheader');
-      const photo = document.querySelector('.rhys-photo');
-      
-      if (header && subheader && photo) {
-        const headerHeight = header.offsetHeight;
-        const subheaderHeight = subheader.offsetHeight;
-        const totalHeight = Math.max(headerHeight + subheaderHeight, 240); // At least 240px to match app icon
-        photo.style.height = totalHeight + 'px';
-      }
-    }
-
-    // Set height on load and resize
-    window.addEventListener('load', setPhotoHeight);
-    window.addEventListener('resize', setPhotoHeight);
-    // Also set after a short delay to ensure fonts are loaded
-    setTimeout(setPhotoHeight, 100);
   </script>
   
   <script src="script.js"></script>
