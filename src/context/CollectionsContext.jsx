@@ -452,7 +452,8 @@ export const CollectionsProvider = ({ children }) => {
           console.log('[Collections] Sync completed', {
             userId,
             email: user.email,
-        });
+          });
+        }
         setLoading(false);
       }
     };
