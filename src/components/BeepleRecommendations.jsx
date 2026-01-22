@@ -175,8 +175,20 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   const enrichedUserCollection = useMemo(() => {
     if (!userCollection || userCollection.length === 0) return [];
     
-    // Filter out display-only games - they cannot be used for recommendations
-    const validGames = userCollection.filter(game => !isDisplayOnlyGame(game));
+    // IMPORTANT: Don't filter out favorited games even if they're missing data
+    // They need to be included so they can be enriched and used for matching
+    const favoritedGames = userCollection.filter(game => game.isFavorite === true);
+    const nonFavoritedGames = userCollection.filter(game => game.isFavorite !== true);
+    
+    // For non-favorited games, filter out display-only games
+    const validNonFavorited = nonFavoritedGames.filter(game => !isDisplayOnlyGame(game));
+    
+    // For favorited games, keep them all (even if missing data) so they can be enriched
+    // Only filter out if they're explicitly marked as displayOnly
+    const validFavorited = favoritedGames.filter(game => game.displayOnly !== true);
+    
+    // Combine: favorited games first (they're more important for recommendations)
+    const validGames = [...validFavorited, ...validNonFavorited];
     
     // Check if any games are references (missing ALL publisher/mechanics/categories/complexity)
     // A game needs enrichment if it has a bggId but is missing ALL critical matching fields
@@ -336,16 +348,53 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         console.log('[BeepleRecommendations] Starting pre-calculation...', {
           timestamp: new Date().toISOString(),
         });
+        const favoritedGames = enrichedUserCollection.filter(g => g.isFavorite === true);
         console.log('[BeepleRecommendations] Initial collection state:', {
           totalGames: enrichedUserCollection.length,
-          favoritedGames: enrichedUserCollection.filter(g => g.isFavorite === true).length,
-          sampleFavoritedGame: enrichedUserCollection.find(g => g.isFavorite === true) ? {
-            title: enrichedUserCollection.find(g => g.isFavorite === true).title || enrichedUserCollection.find(g => g.isFavorite === true).name,
-            bggId: enrichedUserCollection.find(g => g.isFavorite === true).bggId,
-            hasMechanics: !!(enrichedUserCollection.find(g => g.isFavorite === true).mechanics || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.mechanics),
-            hasCategories: !!(enrichedUserCollection.find(g => g.isFavorite === true).categories || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.categories),
-            hasPublisher: !!(enrichedUserCollection.find(g => g.isFavorite === true).publisher || enrichedUserCollection.find(g => g.isFavorite === true).publishers || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.publisher || enrichedUserCollection.find(g => g.isFavorite === true)._bggData?.publishers),
-          } : null,
+          favoritedGames: favoritedGames.length,
+          favoritedGamesWithData: favoritedGames.filter(g => {
+            const bggData = g._bggData || g;
+            const hasPublisher = !!(bggData.publisher || 
+              (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+              (Array.isArray(g.publishers) && g.publishers.length > 0) ||
+              g.publisher);
+            const hasMechanics = !!(bggData.mechanics || g.mechanics) && 
+              (!Array.isArray(bggData.mechanics || g.mechanics) || (bggData.mechanics || g.mechanics).length > 0);
+            const hasCategories = !!(bggData.categories || g.categories) && 
+              (!Array.isArray(bggData.categories || g.categories) || (bggData.categories || g.categories).length > 0);
+            const hasComplexity = !!(bggData.averageWeight || bggData.complexity || g.averageWeight || g.complexity);
+            return hasPublisher || hasMechanics || hasCategories || hasComplexity;
+          }).length,
+          favoritedGamesWithoutData: favoritedGames.filter(g => {
+            const bggData = g._bggData || g;
+            const hasPublisher = !!(bggData.publisher || 
+              (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+              (Array.isArray(g.publishers) && g.publishers.length > 0) ||
+              g.publisher);
+            const hasMechanics = !!(bggData.mechanics || g.mechanics) && 
+              (!Array.isArray(bggData.mechanics || g.mechanics) || (bggData.mechanics || g.mechanics).length > 0);
+            const hasCategories = !!(bggData.categories || g.categories) && 
+              (!Array.isArray(bggData.categories || g.categories) || (bggData.categories || g.categories).length > 0);
+            const hasComplexity = !!(bggData.averageWeight || bggData.complexity || g.averageWeight || g.complexity);
+            return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
+          }).length,
+          sampleFavoritedGame: favoritedGames.length > 0 ? (() => {
+            const sample = favoritedGames[0];
+            const bggData = sample._bggData || sample;
+            return {
+              title: sample.title || sample.name,
+              bggId: sample.bggId,
+              hasMechanics: !!(bggData.mechanics || sample.mechanics) && 
+                (!Array.isArray(bggData.mechanics || sample.mechanics) || (bggData.mechanics || sample.mechanics).length > 0),
+              hasCategories: !!(bggData.categories || sample.categories) && 
+                (!Array.isArray(bggData.categories || sample.categories) || (bggData.categories || sample.categories).length > 0),
+              hasPublisher: !!(bggData.publisher || 
+                (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+                (Array.isArray(sample.publishers) && sample.publishers.length > 0) ||
+                sample.publisher),
+              hasComplexity: !!(bggData.averageWeight || bggData.complexity || sample.averageWeight || sample.complexity),
+            };
+          })() : null,
         });
         
         // Try to enrich collection if needed
@@ -465,12 +514,23 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                 const favoritedAfter = collectionToUse.filter(g => g.isFavorite === true).length;
                 
                 // Debug: Check what data the enriched games actually have
-                const sampleEnriched = collectionToUse
-                  .filter(g => g.isFavorite)
-                  .slice(0, 1);
+                const favoritedEnriched = collectionToUse.filter(g => g.isFavorite);
+                const favoritedWithData = favoritedEnriched.filter(g => {
+                  const bggData = g._bggData || g;
+                  const hasPublisher = !!(bggData.publisher || 
+                    (Array.isArray(bggData.publishers) && bggData.publishers.length > 0) ||
+                    (Array.isArray(g.publishers) && g.publishers.length > 0) ||
+                    g.publisher);
+                  const hasMechanics = !!(bggData.mechanics || g.mechanics) && 
+                    (!Array.isArray(bggData.mechanics || g.mechanics) || (bggData.mechanics || g.mechanics).length > 0);
+                  const hasCategories = !!(bggData.categories || g.categories) && 
+                    (!Array.isArray(bggData.categories || g.categories) || (bggData.categories || g.categories).length > 0);
+                  const hasComplexity = !!(bggData.averageWeight || bggData.complexity || g.averageWeight || g.complexity);
+                  return hasPublisher || hasMechanics || hasCategories || hasComplexity;
+                });
                 
-                if (sampleEnriched.length > 0) {
-                  const sample = sampleEnriched[0];
+                if (favoritedEnriched.length > 0) {
+                  const sample = favoritedEnriched[0];
                   console.log('[BeepleRecommendations] Sample enriched favorite game data:', {
                     title: sample.title || sample.name,
                     bggId: sample.bggId,
@@ -493,9 +553,18 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                   gamesFound: gameDataMap.size,
                   favoritedBefore,
                   favoritedAfter,
+                  favoritedWithData: favoritedWithData.length,
+                  favoritedWithoutData: favoritedEnriched.length - favoritedWithData.length,
                   mergeTimeMs: mergeDuration.toFixed(2),
                   totalEnrichmentTimeMs: (performance.now() - enrichmentFetchStartTime).toFixed(2),
                 });
+                
+                // Warn if favorited games are still missing data after enrichment
+                if (favoritedEnriched.length > 0 && favoritedWithData.length === 0) {
+                  console.warn('[BeepleRecommendations] ⚠️ All favorited games are missing matching data after enrichment! This will prevent recommendations.');
+                } else if (favoritedEnriched.length > favoritedWithData.length) {
+                  console.warn(`[BeepleRecommendations] ⚠️ ${favoritedEnriched.length - favoritedWithData.length} favorited games are missing matching data after enrichment`);
+                }
               }
             }
           } catch (enrichError) {
@@ -805,6 +874,9 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       gamesWithScore: scored.length,
       ownedGameIdsCount: ownedGameIds.size,
       favoritedGameIdsCount: favoritedGameIds.size,
+      weights: weightsToUse,
+      hasPreCalculatedMatches: !!preCalculatedMatches,
+      preCalculatedMatchesSize: preCalculatedMatches?.size || 0,
       topScores: scored.slice(0, 5).map(s => ({ 
         title: s.game.title || s.game.name, 
         score: Math.round(s.score * 100) / 100,
@@ -814,8 +886,34 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           category: s.matches.category.length,
           complexity: s.matches.complexity.length,
         },
+        favoritedMatches: {
+          publisher: s.matches.publisher.filter(m => m.isFavorite).length,
+          mechanics: s.matches.mechanics.filter(m => m.isFavorite).length,
+          category: s.matches.category.filter(m => m.isFavorite).length,
+          complexity: s.matches.complexity.filter(m => m.isFavorite).length,
+        },
       })),
     });
+    
+    // If no recommendations found, log detailed debug info
+    if (scored.length === 0 && favoritedGameIds.size > 0) {
+      console.warn('[BeepleRecommendations] ⚠️ No recommendations found despite having favorited games!');
+      console.log('[BeepleRecommendations] Debug info:', {
+        favoritedGameIdsCount: favoritedGameIds.size,
+        favoritedGameIds: Array.from(favoritedGameIds).slice(0, 5),
+        ownedGameIdsCount: ownedGameIds.size,
+        validGamesCount: validGames.length,
+        preCalculatedMatchesSize: preCalculatedMatches?.size || 0,
+        samplePreCalculatedKeys: preCalculatedMatches ? Array.from(preCalculatedMatches.keys()).slice(0, 5) : [],
+        weights: weightsToUse,
+        sampleValidGame: validGames.length > 0 ? {
+          gameId: String(validGames[0].bggId || validGames[0].id),
+          title: validGames[0].title || validGames[0].name,
+          hasMatches: preCalculatedMatches?.has(String(validGames[0].bggId || validGames[0].id)),
+          matches: preCalculatedMatches?.get(String(validGames[0].bggId || validGames[0].id)),
+        } : null,
+      });
+    }
 
     return scored;
   }, [preCalculatedMatches, games, deferredWeights, ownedGameIds, favoritedGameIds, isDisplayOnlyGame]);
