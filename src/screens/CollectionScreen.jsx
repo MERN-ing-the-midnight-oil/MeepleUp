@@ -587,7 +587,7 @@ const CollectionScreen = () => {
     } else if (sortBy !== 'category') {
       // For non-category views (rating/title), enrich first page for thumbnails
       const itemsPerPage = 18; // 3 cols × 6 rows
-      const initialEnrichCount = itemsPerPage * 2; // 2 pages
+      const initialEnrichCount = 10; // Only 10 games initially for faster load
       const gamesToEnrich = sortedGames.slice(0, initialEnrichCount);
       const gameIdsToEnrich = gamesToEnrich
         .map(g => g.bggId || g.id)
