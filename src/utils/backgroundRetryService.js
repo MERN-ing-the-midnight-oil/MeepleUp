@@ -16,15 +16,13 @@ let intervalId = null;
 let appStateListener = null;
 let addGameToCollectionFn = null;
 let currentUserId = null;
-let getUserCollectionFn = null;
 
 /**
  * Start the background retry service
  * @param {Function} addGameToCollection - Function to add games to collection (takes userId, gameData)
  * @param {string} userId - Current user ID
- * @param {Function} getUserCollection - Optional function to get user's collection (to check if game already exists)
  */
-export const startBackgroundRetryService = (addGameToCollection, userId, getUserCollection = null) => {
+export const startBackgroundRetryService = (addGameToCollection, userId) => {
   if (retryServiceActive) {
     if (__DEV__) {
       console.log('[BackgroundRetryService] Service already active');
@@ -41,7 +39,6 @@ export const startBackgroundRetryService = (addGameToCollection, userId, getUser
 
   addGameToCollectionFn = addGameToCollection;
   currentUserId = userId;
-  getUserCollectionFn = getUserCollection;
   retryServiceActive = true;
 
   if (__DEV__) {
@@ -92,7 +89,6 @@ export const stopBackgroundRetryService = () => {
 
   addGameToCollectionFn = null;
   currentUserId = null;
-  getUserCollectionFn = null;
 
   if (__DEV__) {
     console.log('[BackgroundRetryService] Service stopped');
@@ -220,18 +216,11 @@ const retryPendingGameSearchesFiltered = async (addGameToCollection, gameTitles 
 
   for (const gameTitle of titlesToRetry) {
     try {
-      // Check if game is already in collection (by checking if we can find it by searching)
-      // This helps avoid unnecessary retries for games that were already successfully imported
-      // Note: We can't check by title alone since titles might not match exactly, so we'll check after search
-      
       const cleanedTitle = cleanGameTitle(gameTitle);
       const searchQuery = cleanedTitle !== gameTitle ? cleanedTitle : gameTitle;
       
       // Search for the game
-      const searchResponse = await searchGamesByName(searchQuery, true);
-      const searchResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-        ? searchResponse.results 
-        : (searchResponse || []);
+      const searchResults = await searchGamesByName(searchQuery, true);
       
       if (!searchResults || searchResults.length === 0) {
         // No results - will retry again later (up to 5 retries total)
@@ -239,55 +228,36 @@ const retryPendingGameSearchesFiltered = async (addGameToCollection, gameTitles 
         failedCount++;
         continue;
       }
-      
-      // Check if the best match is already in collection (before trying to add it)
+
+      // Auto-select best match (same logic as retryPendingGames.js)
       const normalizedSearchTitle = gameTitle.toLowerCase().trim();
       const scoredResults = searchResults.map(result => {
         let score = 0;
         const normalizedResultName = (result.name || '').toLowerCase().trim();
         
-        if (normalizedResultName === normalizedSearchTitle) score += 1000;
-        else if (normalizedResultName.startsWith(normalizedSearchTitle)) score += 500;
-        else if (normalizedResultName.includes(normalizedSearchTitle)) score += 100;
+        if (normalizedResultName === normalizedSearchTitle) {
+          score += 1000;
+        } else if (normalizedResultName.startsWith(normalizedSearchTitle)) {
+          score += 500;
+        } else if (normalizedResultName.includes(normalizedSearchTitle)) {
+          score += 100;
+        }
         
-        if (result.type === 'boardgame') score += 50;
+        if (result.type === 'boardgame') {
+          score += 50;
+        }
         
         return { ...result, _matchScore: score };
       });
-      
+
       scoredResults.sort((a, b) => {
-        if (b._matchScore !== a._matchScore) return b._matchScore - a._matchScore;
+        if (b._matchScore !== a._matchScore) {
+          return b._matchScore - a._matchScore;
+        }
         return (a.name || '').localeCompare(b.name || '');
       });
-      
-      const bestMatch = scoredResults[0];
-      
-      // Check if this game is already in collection
-      if (getUserCollectionFn && bestMatch && bestMatch.id) {
-        try {
-          const userCollection = getUserCollectionFn(currentUserId);
-          const alreadyInCollection = userCollection && userCollection.some(
-            game => game.bggId && game.bggId.toString() === bestMatch.id.toString()
-          );
-          
-          if (alreadyInCollection) {
-            if (__DEV__) {
-              console.log('[BackgroundRetryService] Game already in collection, removing from pending retries:', gameTitle, 'BGG ID:', bestMatch.id);
-            }
-            // Remove from pending retries since it's already in collection
-            await removePendingRetries([gameTitle]);
-            successCount++; // Count as success since it's already imported
-            continue; // Skip adding it again
-          }
-        } catch (checkError) {
-          // If check fails, continue with normal flow
-          if (__DEV__) {
-            console.warn('[BackgroundRetryService] Error checking if game is in collection:', checkError);
-          }
-        }
-      }
 
-      // bestMatch already calculated above
+      const bestMatch = scoredResults[0];
 
       if (!bestMatch || !bestMatch.id) {
         failedGames.push(gameTitle);

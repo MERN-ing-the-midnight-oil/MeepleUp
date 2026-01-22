@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { optimizeGameSchedule, generateScheduleSummary } from '../utils/gameOptimizer';
+import { getGames } from '../utils/api';
 import { theme } from '../utils/theme';
 import BeepleAvatar from './BeepleAvatar';
 import { db } from '../config/firebase';
@@ -102,55 +103,21 @@ const BeepleGameOptimizer = ({
       setLoading(true);
       const details = {};
       
-      // Extract all game IDs to fetch
-      const gameIds = proposedGames
-        .map(proposal => String(proposal.gameId))
-        .filter(id => id && !details[id]);
-      
-      if (gameIds.length > 0) {
+      const loadPromises = proposedGames.map(async (proposal) => {
+        const gameId = String(proposal.gameId);
+        if (details[gameId]) return; // Already loaded
+        
         try {
-          // Batch fetch from Firebase only (games in collections should already have BGG data stored)
-          const { batchGetGamesById } = await import('../services/gameDatabase');
-          const gameDataMap = await batchGetGamesById(gameIds);
-          
-          // Format and store the results
-          gameDataMap.forEach((gameData, gameId) => {
-            const formattedData = {
-              id: gameData.id,
-              name: gameData.name,
-              yearPublished: gameData.yearPublished || '',
-              rank: gameData.rank || '',
-              bayesAverage: gameData.bayesAverage || '',
-              average: gameData.average || '',
-              usersRated: gameData.usersRated || '',
-              thumbnail: gameData.thumbnail || null,
-              image: gameData.image || null,
-              minPlayers: gameData.minPlayers || null,
-              maxPlayers: gameData.maxPlayers || null,
-              playingTime: gameData.playingTime || null,
-              minAge: gameData.minAge || null,
-              description: gameData.description || null,
-              strategyGamesRank: gameData.strategyGamesRank || '',
-              familyGamesRank: gameData.familyGamesRank || '',
-              partyGamesRank: gameData.partyGamesRank || '',
-              abstractsRank: gameData.abstractsRank || '',
-              thematicRank: gameData.thematicRank || '',
-              wargamesRank: gameData.wargamesRank || '',
-              childrensGamesRank: gameData.childrensGamesRank || '',
-              cgsRank: gameData.cgsRank || '',
-              mechanics: gameData.mechanics || null,
-              categories: gameData.categories || null,
-              publishers: gameData.publishers || null,
-              publisher: gameData.publisher || null,
-              averageWeight: gameData.averageWeight || gameData.complexity || null,
-            };
-            details[gameId] = formattedData;
-          });
+          const gameData = await getGames(gameId);
+          if (gameData) {
+            details[gameId] = gameData;
+          }
         } catch (error) {
-          console.warn(`[BeepleGameOptimizer] Error loading game details from Firebase:`, error);
+          console.warn(`[BeepleGameOptimizer] Error loading game details for ${gameId}:`, error);
         }
-      }
+      });
 
+      await Promise.all(loadPromises);
       setGameDetails(prev => ({ ...prev, ...details }));
       setLoading(false);
     };

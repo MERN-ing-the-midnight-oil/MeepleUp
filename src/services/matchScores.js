@@ -6,6 +6,7 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
+import { getGames } from '../utils/api';
 
 /**
  * Calculate and store match scores for a game for all members of a meepleup
@@ -26,45 +27,14 @@ export const calculateMatchScoresForGame = async (eventId, gameId, game = null, 
   const gameIdStr = String(gameId);
 
   try {
-    // Get game data if not provided - use Firebase only (games in collections should already have BGG data stored)
+    // Get game data if not provided
     let gameData = game;
     if (!gameData) {
-      const { getGamesFromFirebase } = await import('../services/gameDatabase');
-      gameData = await getGamesFromFirebase(gameIdStr);
+      gameData = await getGames(gameIdStr);
       if (!gameData) {
-        console.warn(`[MatchScores] Could not fetch game data from Firebase for ${gameIdStr}`);
+        console.warn(`[MatchScores] Could not fetch game data for ${gameIdStr}`);
         return;
       }
-      // Format to match expected structure
-      gameData = {
-        id: gameData.id,
-        name: gameData.name,
-        yearPublished: gameData.yearPublished || '',
-        rank: gameData.rank || '',
-        bayesAverage: gameData.bayesAverage || '',
-        average: gameData.average || '',
-        usersRated: gameData.usersRated || '',
-        thumbnail: gameData.thumbnail || null,
-        image: gameData.image || null,
-        minPlayers: gameData.minPlayers || null,
-        maxPlayers: gameData.maxPlayers || null,
-        playingTime: gameData.playingTime || null,
-        minAge: gameData.minAge || null,
-        description: gameData.description || null,
-        strategyGamesRank: gameData.strategyGamesRank || '',
-        familyGamesRank: gameData.familyGamesRank || '',
-        partyGamesRank: gameData.partyGamesRank || '',
-        abstractsRank: gameData.abstractsRank || '',
-        thematicRank: gameData.thematicRank || '',
-        wargamesRank: gameData.wargamesRank || '',
-        childrensGamesRank: gameData.childrensGamesRank || '',
-        cgsRank: gameData.cgsRank || '',
-        mechanics: gameData.mechanics || null,
-        categories: gameData.categories || null,
-        publishers: gameData.publishers || null,
-        publisher: gameData.publisher || null,
-        averageWeight: gameData.averageWeight || gameData.complexity || null,
-      };
     }
 
     // Get all members of the meepleup

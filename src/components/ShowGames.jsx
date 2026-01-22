@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -9,7 +10,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import Button from './common/Button';
 import { theme, commonStyles } from '../utils/theme';
 import { getRetryMetadata, hasExceededMaxRetries } from '../utils/pendingGameRetries';
@@ -119,10 +119,7 @@ const ShowGames = ({
       const searchQuery = selectedResult?.name || gameTitle;
       
       // Search for similar games, excluding the current one
-      const searchResponse = await searchGamesByName(searchQuery, true);
-      const similarGames = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-        ? searchResponse.results 
-        : searchResponse || [];
+      const similarGames = await searchGamesByName(searchQuery, true);
       
       // Filter out the current game and games already in collection
       const filteredSimilar = similarGames.filter(game => 
@@ -157,10 +154,7 @@ const ShowGames = ({
     const hasResults = results && Array.isArray(results) && results.length > 0;
     // Show buttons if: no results (empty array, null, or undefined)
     const hasNoResults = !hasResults; // This covers undefined, null, and empty array
-    // If revising, use the revised title (or empty string if just started), otherwise use original title
-    const revisedTitle = isRevising.has(gameTitle) 
-      ? (revisingGames[gameTitle] !== undefined ? revisingGames[gameTitle] : '')
-      : gameTitle;
+    const revisedTitle = revisingGames[gameTitle] || gameTitle;
     const isRevisingThis = isRevising.has(gameTitle);
     const isDuplicate = selectedBggId ? isGameInCollection(selectedBggId) : false;
     const similarTitlesForGame = similarTitles[gameTitle] || [];
@@ -183,71 +177,6 @@ const ShowGames = ({
         
         {hasResults ? (
           <>
-            {/* Show warning if results found but not auto-selected (poor match quality) */}
-            {!selectedBggId && results.length > 0 && results[0]?._isPoorMatch && (
-              <View style={styles.poorMatchWarning}>
-                <Text style={styles.poorMatchWarningText}>
-                  ⚠️ No good match found. Please select a game from the list below, or try revising the title.
-                </Text>
-                {onReviseTitle && (
-                  <View style={styles.reviseContainer}>
-                    <TextInput
-                      style={styles.reviseInput}
-                      value={revisedTitle}
-                      onChangeText={(text) => {
-                        setRevisingGames(prev => ({ ...prev, [gameTitle]: text }));
-                        // Auto-enable revising mode when user types
-                        if (text.trim() && !isRevisingThis) {
-                          setIsRevising(prev => new Set(prev).add(gameTitle));
-                        }
-                      }}
-                      placeholder="Revise title"
-                      returnKeyType="done"
-                      onSubmitEditing={() => {
-                        if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
-                          onReviseTitle(gameTitle, revisedTitle.trim());
-                          setIsRevising(prev => {
-                            const updated = new Set(prev);
-                            updated.delete(gameTitle);
-                            return updated;
-                          });
-                          setRevisingGames(prev => {
-                            const updated = { ...prev };
-                            delete updated[gameTitle];
-                            return updated;
-                          });
-                        }
-                      }}
-                    />
-                    {revisedTitle && revisedTitle.trim() !== '' && revisedTitle.trim() !== gameTitle && (
-                      <View style={styles.reviseButtonRow}>
-                        <Pressable
-                          onPress={() => {
-                            if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
-                              onReviseTitle(gameTitle, revisedTitle.trim());
-                            }
-                            setIsRevising(prev => {
-                              const updated = new Set(prev);
-                              updated.delete(gameTitle);
-                              return updated;
-                            });
-                            setRevisingGames(prev => {
-                              const updated = { ...prev };
-                              delete updated[gameTitle];
-                              return updated;
-                            });
-                          }}
-                          style={[styles.reviseButton, styles.submitButton]}
-                        >
-                          <Text style={styles.reviseButtonText}>Search Again</Text>
-                        </Pressable>
-                      </View>
-                    )}
-                  </View>
-                )}
-              </View>
-            )}
-            
             {/* Main results carousel */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll}>
               {results.map((result) => {
@@ -264,13 +193,7 @@ const ShowGames = ({
                     onPress={() => onSelectGame(gameTitle, result.id)}
                   >
                     {result.thumbnail ? (
-                      <Image 
-                        source={{ uri: result.thumbnail }} 
-                        style={styles.resultThumbnail}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                        transition={200}
-                      />
+                      <Image source={{ uri: result.thumbnail }} style={styles.resultThumbnail} />
                     ) : (
                       <View style={styles.resultThumbnailPlaceholder}>
                         <Text style={styles.resultPlaceholderText}>BGG</Text>
@@ -317,13 +240,7 @@ const ShowGames = ({
                         onPress={() => onSelectGame(gameTitle, similarGame.id)}
                       >
                         {similarGame.thumbnail ? (
-                          <Image 
-                            source={{ uri: similarGame.thumbnail }} 
-                            style={styles.resultThumbnail}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                            transition={200}
-                          />
+                          <Image source={{ uri: similarGame.thumbnail }} style={styles.resultThumbnail} />
                         ) : (
                           <View style={styles.resultThumbnailPlaceholder}>
                             <Text style={styles.resultPlaceholderText}>BGG</Text>
@@ -361,31 +278,19 @@ const ShowGames = ({
               <View style={styles.processingContainer}>
                 {hasNoResults && (
                   <View style={styles.stuckContainer}>
-                    {hasExceededRetries ? (
-                      <>
-                        <Text style={styles.gameNotFoundText}>Game Title Not Found</Text>
-                        <Text style={styles.gameNotFoundHint}>
-                          The game "{gameTitle}" wasn't found. Try revising the title below.
-                        </Text>
-                      </>
-                    ) : (
-                      <Text style={styles.gameNotFoundHint}>
-                        No results found for "{gameTitle}". Try revising the title below.
-                      </Text>
+                    {hasExceededRetries && (
+                      <Text style={styles.gameNotFoundText}>Game Title Not Found</Text>
                     )}
-                    {onReviseTitle && (
+                    {isRevisingThis ? (
                       <View style={styles.reviseContainer}>
                         <TextInput
                           style={styles.reviseInput}
                           value={revisedTitle}
                           onChangeText={(text) => {
                             setRevisingGames(prev => ({ ...prev, [gameTitle]: text }));
-                            // Auto-enable revising mode when user types
-                            if (text.trim() && !isRevisingThis) {
-                              setIsRevising(prev => new Set(prev).add(gameTitle));
-                            }
                           }}
-                          placeholder="Revise title"
+                          placeholder="Enter revised game title"
+                          autoFocus
                           returnKeyType="done"
                           onSubmitEditing={() => {
                             if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
@@ -403,29 +308,61 @@ const ShowGames = ({
                             }
                           }}
                         />
-                        {revisedTitle && revisedTitle.trim() !== '' && revisedTitle.trim() !== gameTitle && (
-                          <View style={styles.reviseButtonRow}>
-                            <Pressable
-                              onPress={() => {
-                                if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
-                                  onReviseTitle(gameTitle, revisedTitle.trim());
-                                }
-                                setIsRevising(prev => {
-                                  const updated = new Set(prev);
-                                  updated.delete(gameTitle);
-                                  return updated;
-                                });
-                                setRevisingGames(prev => {
-                                  const updated = { ...prev };
-                                  delete updated[gameTitle];
-                                  return updated;
-                                });
-                              }}
-                              style={[styles.reviseButton, styles.submitButton]}
-                            >
-                              <Text style={styles.reviseButtonText}>Search Again</Text>
-                            </Pressable>
-                          </View>
+                        <View style={styles.reviseButtonRow}>
+                          <Pressable
+                            onPress={() => {
+                              if (revisedTitle.trim() && revisedTitle.trim() !== gameTitle && onReviseTitle) {
+                                onReviseTitle(gameTitle, revisedTitle.trim());
+                              }
+                              setIsRevising(prev => {
+                                const updated = new Set(prev);
+                                updated.delete(gameTitle);
+                                return updated;
+                              });
+                              setRevisingGames(prev => {
+                                const updated = { ...prev };
+                                delete updated[gameTitle];
+                                return updated;
+                              });
+                            }}
+                            style={[styles.reviseButton, styles.submitButton]}
+                            disabled={!revisedTitle.trim() || revisedTitle.trim() === gameTitle}
+                          >
+                            <Text style={[styles.reviseButtonText, (!revisedTitle.trim() || revisedTitle.trim() === gameTitle) && styles.reviseButtonTextDisabled]}>
+                              Search Again
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => {
+                              setIsRevising(prev => {
+                                const updated = new Set(prev);
+                                updated.delete(gameTitle);
+                                return updated;
+                              });
+                              setRevisingGames(prev => {
+                                const updated = { ...prev };
+                                delete updated[gameTitle];
+                                return updated;
+                              });
+                            }}
+                            style={[styles.reviseButton, styles.cancelButton]}
+                          >
+                            <Text style={styles.reviseButtonText}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.stuckButtonRow}>
+                        {onReviseTitle && (
+                          <Pressable
+                            onPress={() => {
+                              setIsRevising(prev => new Set(prev).add(gameTitle));
+                              setRevisingGames(prev => ({ ...prev, [gameTitle]: gameTitle }));
+                            }}
+                            style={[styles.stuckButton, styles.reviseTitleButton]}
+                          >
+                            <Text style={styles.stuckButtonText}>Modify Title</Text>
+                          </Pressable>
                         )}
                       </View>
                     )}
@@ -729,14 +666,8 @@ const styles = StyleSheet.create({
   },
   gameNotFoundText: {
     fontSize: theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.xs,
-    textAlign: 'center',
-  },
-  gameNotFoundHint: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.fontWeight.semibold,
     marginBottom: theme.spacing.md,
     textAlign: 'center',
   },
@@ -816,20 +747,6 @@ const styles = StyleSheet.create({
     marginLeft: theme.spacing.sm,
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.textSecondary,
-  },
-  poorMatchWarning: {
-    backgroundColor: '#FFF3CD',
-    borderColor: '#FFC107',
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    marginTop: 8,
-  },
-  poorMatchWarningText: {
-    color: '#856404',
-    fontSize: 14,
-    fontWeight: '500',
   },
   duplicateIndicator: {
     position: 'absolute',

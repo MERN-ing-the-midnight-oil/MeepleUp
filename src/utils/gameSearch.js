@@ -33,48 +33,74 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
   
   /**
    * Generate alternative search strategies for games that returned zero results
-   * Only handles word-level modifications (adding/dropping entire words)
-   * Does NOT do character-level modifications or prefix/suffix additions
+   * Examples: "quadukt" -> ["aquadukt", "quaduct", etc.]
+   * 
+   * Uses a fixed, small list of common prefixes/suffixes - NOT all possible combinations
+   * Limited to ~10-15 strategies per game to keep API calls reasonable
    */
   const generateAlternativeStrategies = (title) => {
     const strategies = [];
     const normalized = title.toLowerCase().trim();
-    const words = normalized.split(/\s+/).filter(w => w.length > 0);
     
-    // Only proceed if we have multiple words to work with
-    if (words.length <= 1) {
-      return []; // No word-level modifications possible for single-word titles
+    // Strategy 1: Add common prefixes (FIXED LIST - only 8 common prefixes)
+    // These are the most common prefixes in game names, not all possible combinations
+    const commonPrefixes = ['a', 'the', 'le', 'la', 'el', 'der', 'die', 'das'];
+    for (const prefix of commonPrefixes) {
+      strategies.push(`${prefix}${normalized}`); // No space (e.g., "aquadukt")
+      strategies.push(`${prefix} ${normalized}`); // With space (e.g., "a quadukt")
+    }
+    // This generates max 16 strategies (8 prefixes × 2 variations)
+    
+    // Strategy 2: Character substitutions (common typos)
+    // q -> aq (quadukt -> aquadukt) - specific case for your example
+    if (normalized.startsWith('q') && normalized.length > 1) {
+      strategies.push(`a${normalized}`);
     }
     
-    // Strategy 1: Try removing common article words (the, a, an, le, la, el, der, die, das)
-    // These might have been incorrectly identified as part of the title
-    const articles = ['the', 'a', 'an', 'le', 'la', 'el', 'der', 'die', 'das'];
-    for (let i = 0; i < words.length; i++) {
-      if (articles.includes(words[i])) {
-        const withoutArticle = [...words.slice(0, i), ...words.slice(i + 1)].join(' ');
-        if (withoutArticle.length >= 3) {
-          strategies.push(withoutArticle);
-        }
+    // Strategy 3: Remove first character if it's a single letter
+    // Handles cases where a prefix was incorrectly included
+    if (normalized.length > 1 && normalized.match(/^[a-z]\w+$/)) {
+      strategies.push(normalized.substring(1));
+    }
+    
+    // Strategy 4: Remove duplicate characters (e.g., "book" -> "bok" if someone typed "boook")
+    // Only check first few positions to limit variations
+    for (let i = 0; i < Math.min(normalized.length - 1, 5); i++) {
+      if (normalized[i] === normalized[i + 1]) {
+        strategies.push(normalized.slice(0, i) + normalized.slice(i + 1));
+        break; // Only remove first duplicate to limit variations
       }
     }
     
-    // Strategy 2: Try removing common suffix words (expansion, edition, promo, etc.)
-    // These might have been incorrectly identified as part of the title
-    const suffixWords = ['expansion', 'edition', 'promo', 'promotional', 'card', 'cards', 'game', 'board'];
-    for (let i = 0; i < words.length; i++) {
-      if (suffixWords.includes(words[i])) {
-        const withoutSuffix = [...words.slice(0, i), ...words.slice(i + 1)].join(' ');
-        if (withoutSuffix.length >= 3) {
-          strategies.push(withoutSuffix);
-        }
-      }
+    // Strategy 5: Common character swaps (e.g., "ie" -> "ei", "ck" -> "k")
+    // Only apply if the pattern exists in the string
+    if (normalized.includes('ie')) strategies.push(normalized.replace(/ie/g, 'ei'));
+    if (normalized.includes('ei')) strategies.push(normalized.replace(/ei/g, 'ie'));
+    if (normalized.includes('ck')) strategies.push(normalized.replace(/ck/g, 'k'));
+    if (normalized.includes('ph')) strategies.push(normalized.replace(/ph/g, 'f'));
+    
+    // Strategy 6: Remove spaces and try as one word
+    if (normalized.includes(' ')) {
+      strategies.push(normalized.replace(/\s+/g, ''));
     }
     
-    // Strategy 3: Try longest word only (if multi-word, the longest word is likely the game name)
+    // Strategy 7: Split on spaces and try longest word (if multi-word)
+    const words = normalized.split(/\s+/);
     if (words.length > 1) {
+      // Try longest word (likely the game name)
       const longestWord = words.reduce((a, b) => a.length > b.length ? a : b);
       if (longestWord.length >= 4) {
         strategies.push(longestWord);
+      }
+    }
+    
+    // Strategy 8: Add missing vowels - LIMITED to first position only for efficiency
+    // Only try if word starts with consonant cluster (like "quadukt" -> "aquadukt")
+    if (normalized.length <= 10 && normalized.match(/^[bcdfghjklmnpqrstvwxyz]{2,}/)) {
+      const vowels = ['a', 'e', 'i', 'o', 'u'];
+      // Only add vowel at the start (most common case)
+      for (const vowel of vowels) {
+        strategies.push(`${vowel}${normalized}`);
       }
     }
     
@@ -83,13 +109,12 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
       .filter(s => s.length >= 3 && s.length <= 50) // Reasonable length
       .filter(s => s !== normalized); // Don't include the original
     
-    return uniqueStrategies;
+    // Limit to 12 strategies max to keep API calls reasonable
+    // This ensures we don't make too many expensive BGG API calls
+    return uniqueStrategies.slice(0, 12);
   };
 
   const logPrefix = source === 'image_recognition' ? '[ClaudeGameIdentifier → BGG]' : '[TextListGameIdentifier → BGG]';
-  
-  // Track try counts per game
-  const gameTryCounts = {}; // { gameTitle: { firebaseTries: 0, bggTries: 0, totalTries: 0 } }
 
   logger.info(`🚀 Starting search for ${games.length} games`, {
     estimatedTimeMinutes: Math.ceil(games.length * 0.5),
@@ -221,23 +246,8 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           cleanedTitle,
           attempt: retryCount + 1,
         });
-        const searchResponse = await searchGamesByName(searchQuery, true);
+        searchResults = await searchGamesByName(searchQuery, true);
         const searchAttemptDuration = ((Date.now() - searchAttemptStartTime) / 1000).toFixed(2);
-        
-        // Handle new return format with try counts
-        if (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) {
-          searchResults = searchResponse.results;
-          // Track try counts for this game
-          if (!gameTryCounts[gameTitle]) {
-            gameTryCounts[gameTitle] = { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-          }
-          gameTryCounts[gameTitle].firebaseTries += searchResponse.firebaseTries || 0;
-          gameTryCounts[gameTitle].bggTries += searchResponse.bggTries || 0;
-          gameTryCounts[gameTitle].totalTries = gameTryCounts[gameTitle].firebaseTries + gameTryCounts[gameTitle].bggTries;
-        } else {
-          // Fallback for old format (shouldn't happen, but just in case)
-          searchResults = searchResponse || [];
-        }
         
         // Log if Firebase search might have timed out (took > 2.5 seconds)
         if (parseFloat(searchAttemptDuration) > 2.5) {
@@ -273,7 +283,6 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           
           if (!searchResults || searchResults.length === 0) {
             performanceStats.gamesNotFound++;
-            const tryCounts = gameTryCounts[gameTitle] || { firebaseTries: 0, bggTries: 0, totalTries: 0 };
             
             // Track when the first failure occurs (after we've tried at least once)
             // Only start the "stuck" timer after multiple retries with exponential backoff
@@ -304,11 +313,8 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             logger.warn(`⚠️ No results for "${gameTitle}" - adding to pending retries`, {
               attempt: retryCount + 1,
               gameTitle,
-              firebaseTries: tryCounts.firebaseTries,
-              bggTries: tryCounts.bggTries,
-              totalTries: tryCounts.totalTries,
             });
-            console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - adding to pending retries for later (BGG API may need multiple attempts) - Firebase tries: ${tryCounts.firebaseTries}, BGG tries: ${tryCounts.bggTries}`);
+            console.warn(`${logPrefix} ⚠️ No search results returned for "${gameTitle}" - adding to pending retries for later (BGG API may need multiple attempts)`);
             // Add to pending retries instead of showing alert - BGG API often needs multiple attempts
             if (addPendingRetry) {
               try {
@@ -479,110 +485,22 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             
             const bestMatch = scoredResults[0];
             const matchScore = bestMatch._matchScore;
-            const matchType = bestMatch._matchType;
-            const tryCounts = gameTryCounts[gameTitle] || { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-            
-            // Minimum match score threshold for auto-selection
-            // Prevents auto-selecting poor matches (e.g., "Mayan Prophecy" -> "Prophecy")
-            // Exact match: 1000+ (always auto-select)
-            // Starts with: 500+ (auto-select if score >= 300)
-            // Contains: 100+ (auto-select if score >= 250)
-            // Reverse contains: 80-100 (auto-select if score >= 250)
-            // Strategy: Higher threshold for worse match types
-            const MIN_MATCH_SCORE_EXACT = 1000; // Always auto-select exact matches
-            const MIN_MATCH_SCORE_STARTS_WITH = 300; // Auto-select if score >= 300
-            const MIN_MATCH_SCORE_CONTAINS = 250; // Auto-select if score >= 250
-            const MIN_MATCH_SCORE_REVERSE_CONTAINS = 250; // Auto-select if score >= 250
-            const MIN_MATCH_SCORE_NONE = 250; // Auto-select if score >= 250
-            
-            const getMinScoreForMatchType = (type) => {
-              switch (type) {
-                case 'exact': return MIN_MATCH_SCORE_EXACT;
-                case 'startsWith': return MIN_MATCH_SCORE_STARTS_WITH;
-                case 'contains': return MIN_MATCH_SCORE_CONTAINS;
-                case 'reverseContains': return MIN_MATCH_SCORE_REVERSE_CONTAINS;
-                default: return MIN_MATCH_SCORE_NONE;
-              }
-            };
-            
-            const minScore = getMinScoreForMatchType(matchType);
-            const isGoodMatch = matchScore >= minScore;
             
             // Remove the temporary _matchScore and _matchType fields before storing
             const { _matchScore, _matchType, ...cleanResult } = bestMatch;
             
-            // Store match quality info on results for UI display
-            // Add a flag to indicate if this is a poor match that requires manual selection
-            const enrichedResults = scoredResults.map(({ _matchScore: score, _matchType: type, ...clean }) => ({
-              ...clean,
-              _matchScore: score, // Keep score for UI display
-              _matchType: type, // Keep type for UI display
-              _isPoorMatch: score < getMinScoreForMatchType(type), // Flag for poor matches
-            }));
+            // Update results with cleaned data (remove _matchScore and _matchType from all)
+            results[gameTitle] = scoredResults.map(({ _matchScore, _matchType, ...clean }) => clean);
             
-            // Update results with enriched data
-            results[gameTitle] = enrichedResults;
+            console.log(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, rank: ${bestMatch.rank || 'N/A'})`);
             
-            // Log success with try counts and rank
-            if (isGoodMatch) {
-              logger.info(`✅ Found "${gameTitle}" (good match)`, {
-                gameTitle,
-                bggId: bestMatch.id,
-                bggName: bestMatch.name,
-                rank: bestMatch.rank || 'N/A',
-                firebaseTries: tryCounts.firebaseTries,
-                bggTries: tryCounts.bggTries,
-                totalTries: tryCounts.totalTries,
-                matchScore,
-                matchType,
-                resultCount: resultsWithThumbnails.length,
-              });
-              
-              console.log(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, type: ${matchType}, rank: ${bestMatch.rank || 'N/A'}, Firebase tries: ${tryCounts.firebaseTries}, BGG tries: ${tryCounts.bggTries})`);
-              
-              selected[gameTitle] = bestMatch.id;
-              setSelectedGames({ ...selected });
-              
-              // Remove from pending retries since we successfully found it
-              if (addPendingRetry) {
-                try {
-                  const { removePendingRetries } = await import('./pendingGameRetries');
-                  await removePendingRetries([gameTitle]);
-                  console.log(`${logPrefix} ✅ Removed "${gameTitle}" from pending retries (successfully found)`);
-                } catch (removeError) {
-                  console.error(`${logPrefix} ❌ Error removing "${gameTitle}" from pending retries:`, removeError);
-                }
-              }
-              
-              console.log(`${logPrefix} Updated selectedGames, total selected: ${Object.keys(selected).length + 1}`);
-            } else {
-              logger.warn(`⚠️ Found "${gameTitle}" but match quality is poor - requires manual selection`, {
-                gameTitle,
-                bestMatchBggId: bestMatch.id,
-                bestMatchName: bestMatch.name,
-                rank: bestMatch.rank || 'N/A',
-                firebaseTries: tryCounts.firebaseTries,
-                bggTries: tryCounts.bggTries,
-                totalTries: tryCounts.totalTries,
-                matchScore,
-                matchType,
-                minScoreRequired: minScore,
-                resultCount: resultsWithThumbnails.length,
-              });
-              
-              console.warn(`${logPrefix} ⚠️ Poor match for "${gameTitle}" - found "${bestMatch.name}" (score: ${matchScore}, type: ${matchType}, min required: ${minScore}) - NOT auto-selecting, requires manual selection`);
-            }
+            selected[gameTitle] = bestMatch.id;
+            setSelectedGames({ ...selected });
             
-            console.log(`${logPrefix} ${isGoodMatch ? 'Auto-selected' : 'Found'} BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, type: ${matchType}, rank: ${bestMatch.rank || 'N/A'})`);
+            console.log(`${logPrefix} Updated selectedGames, total selected: ${Object.keys(selected).length + 1}`);
+            console.log(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, rank: ${bestMatch.rank || 'N/A'})`);
           } else {
-            const tryCounts = gameTryCounts[gameTitle] || { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-            logger.warn(`⚠️ No results for "${gameTitle}"`, {
-              gameTitle,
-              firebaseTries: tryCounts.firebaseTries,
-              bggTries: tryCounts.bggTries,
-              totalTries: tryCounts.totalTries,
-            });
-            console.warn(`${logPrefix} No BGG results found for "${gameTitle}" - added to pending retries (will try again later) - Firebase tries: ${tryCounts.firebaseTries}, BGG tries: ${tryCounts.bggTries}`);
+            console.warn(`${logPrefix} No BGG results found for "${gameTitle}" - added to pending retries (will try again later)`);
           }
         } catch (processError) {
           console.error(`${logPrefix} ❌ Error processing results for "${gameTitle}":`, processError);
@@ -616,51 +534,17 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         lastError = err;
         const isRateLimited = err.isRateLimited || (err.message && err.message.includes('rate limited'));
         
-        // Track try counts from error if available
-        if (err.firebaseTries !== undefined || err.bggTries !== undefined) {
-          if (!gameTryCounts[gameTitle]) {
-            gameTryCounts[gameTitle] = { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-          }
-          if (err.firebaseTries !== undefined) {
-            gameTryCounts[gameTitle].firebaseTries += err.firebaseTries;
-          }
-          if (err.bggTries !== undefined) {
-            gameTryCounts[gameTitle].bggTries += err.bggTries;
-          }
-          gameTryCounts[gameTitle].totalTries = gameTryCounts[gameTitle].firebaseTries + gameTryCounts[gameTitle].bggTries;
-        }
-        
         if (isRateLimited) {
           performanceStats.rateLimitHits++;
-          const tryCounts = gameTryCounts[gameTitle] || { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-          logger.warn(`⚠️ Rate limited for "${gameTitle}"`, {
-            gameTitle,
-            attempt: retryCount + 1,
-            maxRetries,
-            firebaseTries: tryCounts.firebaseTries,
-            bggTries: tryCounts.bggTries,
-            totalTries: tryCounts.totalTries,
-            error: err.message,
-            willRetry: retryCount < maxRetries,
-          });
           console.warn(`${logPrefix} ⚠️ Rate limited for "${gameTitle}" (attempt ${retryCount + 1}/${maxRetries})`, {
             error: err.message,
             willRetry: retryCount < maxRetries,
-            firebaseTries: tryCounts.firebaseTries,
-            bggTries: tryCounts.bggTries,
           });
           
           if (retryCount < maxRetries) {
             retryCount++;
             continue; // Retry
           } else {
-            const tryCounts = gameTryCounts[gameTitle] || { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-            logger.error(`❌ Exhausted retries for "${gameTitle}" due to rate limiting`, {
-              gameTitle,
-              firebaseTries: tryCounts.firebaseTries,
-              bggTries: tryCounts.bggTries,
-              totalTries: tryCounts.totalTries,
-            });
             console.error(`${logPrefix} ❌ Exhausted ${maxRetries} retries for "${gameTitle}" due to rate limiting`);
             // Set timing data even for failed searches
             const totalGameDuration = ((Date.now() - gameSearchStartTime) / 1000).toFixed(2);
@@ -828,24 +712,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         for (const query of queriesToTry) {
           try {
             console.log(`${logPrefix} 📡 Bucket retry: searching for "${query}" (from "${stuckGameTitle}")`);
-            const bucketRetryResponse = await searchGamesByName(query, true);
-            bucketRetryResults = (bucketRetryResponse && typeof bucketRetryResponse === 'object' && 'results' in bucketRetryResponse) 
-              ? bucketRetryResponse.results 
-              : bucketRetryResponse || [];
-            
-            // Track try counts
-            if (bucketRetryResponse && typeof bucketRetryResponse === 'object') {
-              if (!gameTryCounts[stuckGameTitle]) {
-                gameTryCounts[stuckGameTitle] = { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-              }
-              if (bucketRetryResponse.firebaseTries) {
-                gameTryCounts[stuckGameTitle].firebaseTries += bucketRetryResponse.firebaseTries;
-              }
-              if (bucketRetryResponse.bggTries) {
-                gameTryCounts[stuckGameTitle].bggTries += bucketRetryResponse.bggTries;
-              }
-              gameTryCounts[stuckGameTitle].totalTries = gameTryCounts[stuckGameTitle].firebaseTries + gameTryCounts[stuckGameTitle].bggTries;
-            }
+            bucketRetryResults = await searchGamesByName(query, true);
             
             if (bucketRetryResults && bucketRetryResults.length > 0) {
               bucketRetrySuccess = true;
@@ -915,17 +782,6 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             
             console.log(`${logPrefix} ✅ Bucket retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${stuckGameTitle}"`);
             performanceStats.gamesFound++;
-            
-            // Remove from pending retries since we successfully found it
-            if (addPendingRetry) {
-              try {
-                const { removePendingRetries } = await import('./pendingGameRetries');
-                await removePendingRetries([stuckGameTitle]);
-                console.log(`${logPrefix} ✅ Removed "${stuckGameTitle}" from pending retries (bucket retry succeeded)`);
-              } catch (removeError) {
-                console.error(`${logPrefix} ❌ Error removing "${stuckGameTitle}" from pending retries:`, removeError);
-              }
-            }
           }
         } else {
           // Bucket retry also failed - add to pending retries for background retry
@@ -1010,24 +866,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         for (const strategy of strategies) {
           try {
             console.log(`${logPrefix} 📡 Strategy retry: searching for "${strategy}" (from "${zeroResultGameTitle}")`);
-            const strategyRetryResponse = await searchGamesByName(strategy, true);
-            strategyRetryResults = (strategyRetryResponse && typeof strategyRetryResponse === 'object' && 'results' in strategyRetryResponse) 
-              ? strategyRetryResponse.results 
-              : strategyRetryResponse || [];
-            
-            // Track try counts
-            if (strategyRetryResponse && typeof strategyRetryResponse === 'object') {
-              if (!gameTryCounts[zeroResultGameTitle]) {
-                gameTryCounts[zeroResultGameTitle] = { firebaseTries: 0, bggTries: 0, totalTries: 0 };
-              }
-              if (strategyRetryResponse.firebaseTries) {
-                gameTryCounts[zeroResultGameTitle].firebaseTries += strategyRetryResponse.firebaseTries;
-              }
-              if (strategyRetryResponse.bggTries) {
-                gameTryCounts[zeroResultGameTitle].bggTries += strategyRetryResponse.bggTries;
-              }
-              gameTryCounts[zeroResultGameTitle].totalTries = gameTryCounts[zeroResultGameTitle].firebaseTries + gameTryCounts[zeroResultGameTitle].bggTries;
-            }
+            strategyRetryResults = await searchGamesByName(strategy, true);
             
             if (strategyRetryResults && strategyRetryResults.length > 0) {
               strategyRetrySuccess = true;
@@ -1066,34 +905,22 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           const resultsWithThumbnails = [...enrichedResults, ...remainingResults];
           results[zeroResultGameTitle] = resultsWithThumbnails;
           
-          // Auto-select best match (with quality check)
+          // Auto-select best match
           if (resultsWithThumbnails.length > 0) {
             const normalizedSearchTitle = zeroResultGameTitle.toLowerCase().trim();
             const scoredResults = resultsWithThumbnails.map(result => {
               let score = 0;
-              let matchType = 'none';
               const normalizedResultName = (result.name || '').toLowerCase().trim();
               
-              if (normalizedResultName === normalizedSearchTitle) {
-                score += 1000;
-                matchType = 'exact';
-              } else if (normalizedResultName.startsWith(normalizedSearchTitle)) {
-                score += 500;
-                matchType = 'startsWith';
-              } else if (normalizedResultName.includes(normalizedSearchTitle)) {
-                score += 100;
-                matchType = 'contains';
-              } else if (normalizedResultName.length >= 4 && normalizedSearchTitle.includes(normalizedResultName)) {
-                const matchRatio = normalizedResultName.length / normalizedSearchTitle.length;
-                score += Math.max(80, Math.floor(100 * matchRatio));
-                matchType = 'reverseContains';
-              }
+              if (normalizedResultName === normalizedSearchTitle) score += 1000;
+              else if (normalizedResultName.startsWith(normalizedSearchTitle)) score += 500;
+              else if (normalizedResultName.includes(normalizedSearchTitle)) score += 100;
               
               if (result.type === 'boardgame') score += 50;
               if (result.rank && result.rank > 0) score += Math.max(0, 10000 - result.rank);
               if (result.thumbnail) score += 10;
               
-              return { ...result, _matchScore: score, _matchType: matchType };
+              return { ...result, _matchScore: score };
             });
             
             scoredResults.sort((a, b) => {
@@ -1102,79 +929,13 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             });
             
             const bestMatch = scoredResults[0];
-            const matchScore = bestMatch._matchScore;
-            const matchType = bestMatch._matchType;
+            const { _matchScore, ...cleanResult } = bestMatch;
+            results[zeroResultGameTitle] = scoredResults.map(({ _matchScore, ...clean }) => clean);
+            selected[zeroResultGameTitle] = bestMatch.id;
+            setSelectedGames({ ...selected });
             
-            // Apply same minimum match score threshold as main search
-            const MIN_MATCH_SCORE_EXACT = 1000;
-            const MIN_MATCH_SCORE_STARTS_WITH = 300;
-            const MIN_MATCH_SCORE_CONTAINS = 250;
-            const MIN_MATCH_SCORE_REVERSE_CONTAINS = 250;
-            const MIN_MATCH_SCORE_NONE = 250;
-            
-            const getMinScoreForMatchType = (type) => {
-              switch (type) {
-                case 'exact': return MIN_MATCH_SCORE_EXACT;
-                case 'startsWith': return MIN_MATCH_SCORE_STARTS_WITH;
-                case 'contains': return MIN_MATCH_SCORE_CONTAINS;
-                case 'reverseContains': return MIN_MATCH_SCORE_REVERSE_CONTAINS;
-                default: return MIN_MATCH_SCORE_NONE;
-              }
-            };
-            
-            const minScore = getMinScoreForMatchType(matchType);
-            const isGoodMatch = matchScore >= minScore;
-            
-            // Store enriched results with match quality info
-            const enrichedResults = scoredResults.map(({ _matchScore: score, _matchType: type, ...clean }) => ({
-              ...clean,
-              _matchScore: score,
-              _matchType: type,
-              _isPoorMatch: score < getMinScoreForMatchType(type),
-            }));
-            
-            results[zeroResultGameTitle] = enrichedResults;
-            
-            if (isGoodMatch) {
-              const { _matchScore, _matchType, ...cleanResult } = bestMatch;
-              selected[zeroResultGameTitle] = bestMatch.id;
-              setSelectedGames({ ...selected });
-              
-              logger.info(`✅ Strategy retry found "${zeroResultGameTitle}" (good match)`, {
-                gameTitle: zeroResultGameTitle,
-                bggId: bestMatch.id,
-                bggName: bestMatch.name,
-                matchScore,
-                matchType,
-                rank: bestMatch.rank || 'N/A',
-              });
-              
-              console.log(`${logPrefix} ✅ Strategy retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${zeroResultGameTitle}" (score: ${matchScore}, type: ${matchType})`);
-              performanceStats.gamesFound++;
-              
-              // Remove from pending retries since we successfully found it
-              if (addPendingRetry) {
-                try {
-                  const { removePendingRetries } = await import('./pendingGameRetries');
-                  await removePendingRetries([zeroResultGameTitle]);
-                  console.log(`${logPrefix} ✅ Removed "${zeroResultGameTitle}" from pending retries (strategy retry succeeded)`);
-                } catch (removeError) {
-                  console.error(`${logPrefix} ❌ Error removing "${zeroResultGameTitle}" from pending retries:`, removeError);
-                }
-              }
-            } else {
-              logger.warn(`⚠️ Strategy retry found "${zeroResultGameTitle}" but match quality is poor - requires manual selection`, {
-                gameTitle: zeroResultGameTitle,
-                bestMatchBggId: bestMatch.id,
-                bestMatchName: bestMatch.name,
-                matchScore,
-                matchType,
-                minScoreRequired: minScore,
-                rank: bestMatch.rank || 'N/A',
-              });
-              
-              console.warn(`${logPrefix} ⚠️ Strategy retry found "${zeroResultGameTitle}" but poor match - found "${bestMatch.name}" (score: ${matchScore}, type: ${matchType}, min required: ${minScore}) - NOT auto-selecting, requires manual selection`);
-            }
+            console.log(`${logPrefix} ✅ Strategy retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${zeroResultGameTitle}"`);
+            performanceStats.gamesFound++;
           }
         } else {
           // Strategy retry also failed - add to pending retries for background retry

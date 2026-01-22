@@ -10,7 +10,7 @@ import GameCollectionView from '../components/GameCollectionView';
 import BGGImport from '../components/BGGImport';
 import PoweredByBGG from '../components/PoweredByBGG';
 import Modal from '../components/common/Modal';
-import { batchGetGamesById } from '../services/gameDatabase';
+import { getGames } from '../utils/api';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
 import { retryPendingGameSearches } from '../utils/retryPendingGames';
@@ -175,11 +175,9 @@ const CollectionScreen = () => {
   const [bggDataCache, setBggDataCache] = useState({}); // { gameId: bggData }
   const enrichingRef = useRef(false); // Prevent concurrent enrichment
   const enrichedGameIdsRef = useRef(new Set()); // Track which games have been enriched (use ref to avoid dependency issues)
-  const isMountedRef = useRef(true); // Track if component is mounted
   
   // Component mount/unmount logging
   useEffect(() => {
-    isMountedRef.current = true;
     console.log('[CollectionScreen] Component mounted');
     
     // Retry pending game searches when screen loads
@@ -188,18 +186,15 @@ const CollectionScreen = () => {
         console.log('[CollectionScreen] Checking for pending game retries...');
         const result = await retryPendingGameSearches(addGameToCollection);
         
-        // Only show alert if component is still mounted
-        if (isMountedRef.current) {
-          if (result.successCount > 0) {
-            console.log('[CollectionScreen] Successfully retried', result.successCount, 'games');
-            Alert.alert(
-              'Games Added!',
-              `We found and added ${result.successCount} game${result.successCount !== 1 ? 's' : ''} from your previous search:\n\n${result.addedGames.join(', ')}`,
-              [{ text: 'OK' }]
-            );
-          } else if (result.failedCount > 0) {
-            console.log('[CollectionScreen]', result.failedCount, 'games still pending (not found)');
-          }
+        if (result.successCount > 0) {
+          console.log('[CollectionScreen] Successfully retried', result.successCount, 'games');
+          Alert.alert(
+            'Games Added!',
+            `We found and added ${result.successCount} game${result.successCount !== 1 ? 's' : ''} from your previous search:\n\n${result.addedGames.join(', ')}`,
+            [{ text: 'OK' }]
+          );
+        } else if (result.failedCount > 0) {
+          console.log('[CollectionScreen]', result.failedCount, 'games still pending (not found)');
         }
       } catch (error) {
         console.error('[CollectionScreen] Error retrying pending games:', error);
@@ -211,14 +206,12 @@ const CollectionScreen = () => {
     const timeoutId = setTimeout(handlePendingRetries, 1000);
     
     return () => {
-      isMountedRef.current = false;
       clearTimeout(timeoutId);
       console.log('[CollectionScreen] Component unmounting');
     };
   }, [addGameToCollection]);
 
-  // Helper to enrich a single game with BGG data from Firebase only (no BGG API calls)
-  // Games in collection should already have BGG data stored in Firebase
+  // Helper to enrich a single game with BGG data
   const enrichGame = useCallback(async (game) => {
     const gameId = game.bggId || game.id;
     if (!gameId || enrichedGameIdsRef.current.has(gameId)) {
@@ -239,59 +232,23 @@ const CollectionScreen = () => {
         return cached;
       }
 
-      // Fetch from Firebase only - games in collection should already have BGG data stored
-      const { batchGetGamesById } = await import('../services/gameDatabase');
-      const gameDataMap = await batchGetGamesById([gameId]);
-      const bggData = gameDataMap.get(gameId.toString());
-      
+      const bggData = await getGames(gameId);
       if (bggData) {
-        // Format to match expected structure
-        const formattedData = {
-          id: bggData.id,
-          name: bggData.name,
-          yearPublished: bggData.yearPublished || '',
-          rank: bggData.rank || '',
-          bayesAverage: bggData.bayesAverage || '',
-          average: bggData.average || '',
-          usersRated: bggData.usersRated || '',
-          thumbnail: bggData.thumbnail || null,
-          image: bggData.image || null,
-          minPlayers: bggData.minPlayers || null,
-          maxPlayers: bggData.maxPlayers || null,
-          playingTime: bggData.playingTime || null,
-          minAge: bggData.minAge || null,
-          description: bggData.description || null,
-          strategyGamesRank: bggData.strategyGamesRank || '',
-          familyGamesRank: bggData.familyGamesRank || '',
-          partyGamesRank: bggData.partyGamesRank || '',
-          abstractsRank: bggData.abstractsRank || '',
-          thematicRank: bggData.thematicRank || '',
-          wargamesRank: bggData.wargamesRank || '',
-          childrensGamesRank: bggData.childrensGamesRank || '',
-          cgsRank: bggData.cgsRank || '',
-          mechanics: bggData.mechanics || null,
-          categories: bggData.categories || null,
-          publishers: bggData.publishers || null,
-          publisher: bggData.publisher || null,
-          averageWeight: bggData.averageWeight || bggData.complexity || null,
-        };
-        
         if (__DEV__) {
-          console.log(`[CollectionScreen] Enriched game ${gameId} from Firebase (${game.title || 'unknown'}):`, {
-            hasThumbnail: !!formattedData.thumbnail,
-            thumbnail: formattedData.thumbnail ? formattedData.thumbnail.substring(0, 50) + '...' : null,
-            hasImage: !!formattedData.image,
+          console.log(`[CollectionScreen] Enriched game ${gameId} (${game.title || 'unknown'}):`, {
+            hasThumbnail: !!bggData.thumbnail,
+            thumbnail: bggData.thumbnail ? bggData.thumbnail.substring(0, 50) + '...' : null,
+            hasImage: !!bggData.image,
+            keys: Object.keys(bggData),
           });
         }
-        // Update cache only if component is still mounted
-        if (isMountedRef.current) {
-          setBggDataCache(prev => ({ ...prev, [gameId]: formattedData }));
-        }
+        // Update cache
+        setBggDataCache(prev => ({ ...prev, [gameId]: bggData }));
         enrichedGameIdsRef.current.add(gameId);
-        return formattedData;
+        return bggData;
       } else {
         if (__DEV__) {
-          console.warn(`[CollectionScreen] ⚠️ No Firebase data found for game ${gameId} (${game.title || 'unknown'})`);
+          console.warn(`[CollectionScreen] ⚠️ No BGG data returned for game ${gameId} (${game.title || 'unknown'})`);
         }
       }
     } catch (error) {
@@ -417,8 +374,7 @@ const CollectionScreen = () => {
     });
   }, [enrichedGames, searchQuery]);
 
-  // Lazy enrichment: Enrich games in batches from Firebase only (no BGG API calls)
-  // Games in collection should already have BGG data stored in Firebase
+  // Lazy enrichment: Enrich games in batches
   const enrichGamesBatch = useCallback(async (gameIdsToEnrich) => {
     if (enrichingRef.current) return; // Already enriching
     if (gameIdsToEnrich.length === 0) return;
@@ -426,75 +382,58 @@ const CollectionScreen = () => {
     enrichingRef.current = true;
     
     try {
-      // Filter out already enriched games and games already in cache
-      const idsToFetch = gameIdsToEnrich
-        .filter(id => id && !enrichedGameIdsRef.current.has(id) && !bggDataCache[id]);
+      const gamesToEnrich = gameIdsToEnrich
+        .map(id => rawCollection.find(g => (g.bggId || g.id) === id))
+        .filter(Boolean);
 
-      if (idsToFetch.length === 0) {
-        enrichingRef.current = false;
-        return;
-      }
-
-      // Fetch from Firebase in batches (Firebase can handle larger batches than BGG API)
+      // Enrich in batches of 50 (BGG API limit) to minimize API calls
+      // Conservative approach: longer delays between batches to be gentle on BGG API
       const BATCH_SIZE = 50;
-      for (let i = 0; i < idsToFetch.length; i += BATCH_SIZE) {
-        const batch = idsToFetch.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < gamesToEnrich.length; i += BATCH_SIZE) {
+        const batch = gamesToEnrich.slice(i, i + BATCH_SIZE);
         
-        try {
-          // Batch fetch from Firebase
-          const { batchGetGamesById } = await import('../services/gameDatabase');
-          const gameDataMap = await batchGetGamesById(batch);
-          
-          // Format and cache the results
-          const cacheUpdates = {};
-          gameDataMap.forEach((gameData, gameId) => {
-            if (!enrichedGameIdsRef.current.has(gameId)) {
-              // Format to match expected structure
-              const formattedData = {
-                id: gameData.id,
-                name: gameData.name,
-                yearPublished: gameData.yearPublished || '',
-                rank: gameData.rank || '',
-                bayesAverage: gameData.bayesAverage || '',
-                average: gameData.average || '',
-                usersRated: gameData.usersRated || '',
-                thumbnail: gameData.thumbnail || null,
-                image: gameData.image || null,
-                minPlayers: gameData.minPlayers || null,
-                maxPlayers: gameData.maxPlayers || null,
-                playingTime: gameData.playingTime || null,
-                minAge: gameData.minAge || null,
-                description: gameData.description || null,
-                strategyGamesRank: gameData.strategyGamesRank || '',
-                familyGamesRank: gameData.familyGamesRank || '',
-                partyGamesRank: gameData.partyGamesRank || '',
-                abstractsRank: gameData.abstractsRank || '',
-                thematicRank: gameData.thematicRank || '',
-                wargamesRank: gameData.wargamesRank || '',
-                childrensGamesRank: gameData.childrensGamesRank || '',
-                cgsRank: gameData.cgsRank || '',
-                mechanics: gameData.mechanics || null,
-                categories: gameData.categories || null,
-                publishers: gameData.publishers || null,
-                publisher: gameData.publisher || null,
-                averageWeight: gameData.averageWeight || gameData.complexity || null,
-              };
-              
-              cacheUpdates[gameId] = formattedData;
-              enrichedGameIdsRef.current.add(gameId);
+        // Enrich all games in batch and collect results
+        const enrichResults = await Promise.all(
+          batch.map(async (game) => {
+            const gameId = game.bggId || game.id;
+            if (!gameId || enrichedGameIdsRef.current.has(gameId)) {
+              return null; // Already enriched or no ID
             }
-          });
 
-          // Batch update cache once per batch to reduce re-renders (only if mounted)
-          if (Object.keys(cacheUpdates).length > 0 && isMountedRef.current) {
-            setBggDataCache(prev => ({ ...prev, ...cacheUpdates }));
-            
-            if (__DEV__) {
-              console.log(`[CollectionScreen] Enriched ${Object.keys(cacheUpdates).length} games from Firebase batch`);
+            try {
+              // Check if already in cache
+              if (bggDataCache[gameId]) {
+                enrichedGameIdsRef.current.add(gameId);
+                return { gameId, bggData: bggDataCache[gameId] };
+              }
+
+              const bggData = await getGames(gameId);
+              if (bggData) {
+                enrichedGameIdsRef.current.add(gameId);
+                return { gameId, bggData };
+              }
+            } catch (error) {
+              console.error(`[CollectionScreen] Error enriching game ${gameId}:`, error);
             }
-          }
-        } catch (error) {
-          console.error('[CollectionScreen] Error fetching batch from Firebase:', error);
+            return null;
+          })
+        );
+
+        // Batch update cache once per batch to reduce re-renders
+        const cacheUpdates = enrichResults
+          .filter(result => result !== null)
+          .reduce((acc, { gameId, bggData }) => {
+            acc[gameId] = bggData;
+            return acc;
+          }, {});
+
+        if (Object.keys(cacheUpdates).length > 0) {
+          setBggDataCache(prev => ({ ...prev, ...cacheUpdates }));
+        }
+        
+        // Conservative delay between batches (3 seconds) to be gentle on BGG API
+        if (i + BATCH_SIZE < gamesToEnrich.length) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
       }
     } catch (error) {
@@ -502,7 +441,7 @@ const CollectionScreen = () => {
     } finally {
       enrichingRef.current = false;
     }
-  }, [bggDataCache]);
+  }, [rawCollection, bggDataCache]);
 
   // Handle visible items changed for lazy enrichment
   // Conservative: Only enrich visible items + one page ahead (since we have pagination)
@@ -648,7 +587,7 @@ const CollectionScreen = () => {
     } else if (sortBy !== 'category') {
       // For non-category views (rating/title), enrich first page for thumbnails
       const itemsPerPage = 18; // 3 cols × 6 rows
-      const initialEnrichCount = 10; // Only 10 games initially (reduced from 36 for performance)
+      const initialEnrichCount = itemsPerPage * 2; // 2 pages
       const gamesToEnrich = sortedGames.slice(0, initialEnrichCount);
       const gameIdsToEnrich = gamesToEnrich
         .map(g => g.bggId || g.id)

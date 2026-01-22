@@ -516,9 +516,7 @@ const ClaudeGameIdentifier = ({
           
           // Use searchGamesByName with BGG fallback enabled
           // This will check Firestore first, then BGG API if needed, and cache results
-          const searchPromise = query ? searchGamesByName(query, true).then(response => {
-            return (response && typeof response === 'object' && 'results' in response) ? response.results : (response || []);
-          }) : Promise.resolve([]);
+          const searchPromise = query ? searchGamesByName(query, true) : Promise.resolve([]);
           
           // Add a timeout wrapper to prevent hanging
           const timeoutPromise = new Promise((_, reject) => {
@@ -1812,10 +1810,7 @@ const ClaudeGameIdentifier = ({
 
       try {
         // Check Firebase first, then BGG API if needed
-        const searchResponse = await searchGamesByName(queryToSearch, true);
-        const matches = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-          ? searchResponse.results 
-          : (searchResponse || []);
+        const matches = await searchGamesByName(queryToSearch, true);
 
         if (__DEV__) {
           console.log('[Correction Modal] Found matches:', matches.length);
@@ -2021,10 +2016,7 @@ const ClaudeGameIdentifier = ({
         }
 
         // Check Firebase first, then BGG API if needed (searchGamesByName handles this)
-        const searchResponse = await searchGamesByName(searchQuery, true);
-        const matches = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-          ? searchResponse.results 
-          : (searchResponse || []);
+        const matches = await searchGamesByName(searchQuery, true);
 
         if (!matches || matches.length === 0) {
           // Don't show alert - just silently fail and let the user use the buttons in ShowGames
@@ -2376,10 +2368,7 @@ const ClaudeGameIdentifier = ({
                       
                       try {
                         // Check Firebase first, then BGG API if needed (searchGamesByName handles this)
-                        const searchResponse = await searchGamesByName(searchQuery, true);
-                        const results = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-                          ? searchResponse.results 
-                          : (searchResponse || []);
+                        const results = await searchGamesByName(searchQuery, true);
                         
                         if (results && results.length > 0) {
                           // Load details for first result
@@ -2443,10 +2432,7 @@ const ClaudeGameIdentifier = ({
                           }
                           try {
                             // searchGamesByName checks Firebase first, then BGG API if needed
-                            const searchResponse = await searchGamesByName(query, true);
-                            const additionalResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-                              ? searchResponse.results 
-                              : (searchResponse || []);
+                            const additionalResults = await searchGamesByName(query, true);
                             if (additionalResults && additionalResults.length > 0) {
                               // Combine results, removing duplicates
                               const existingIds = new Set(resultsToShow.map(r => r.id));
@@ -2981,17 +2967,11 @@ const ClaudeGameIdentifier = ({
       const searchQuery = cleanedTitle !== newTitle ? cleanedTitle : newTitle;
       
       // Search for the game
-      let searchResponse = await searchGamesByName(searchQuery, true);
-      let searchResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-        ? searchResponse.results 
-        : (searchResponse || []);
+      let searchResults = await searchGamesByName(searchQuery, true);
       
       // If no results with cleaned title, try original
       if ((!searchResults || searchResults.length === 0) && searchQuery !== newTitle) {
-        searchResponse = await searchGamesByName(newTitle, true);
-        searchResults = (searchResponse && typeof searchResponse === 'object' && 'results' in searchResponse) 
-          ? searchResponse.results 
-          : (searchResponse || []);
+        searchResults = await searchGamesByName(newTitle, true);
       }
       
       if (searchResults && searchResults.length > 0) {

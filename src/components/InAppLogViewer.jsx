@@ -8,9 +8,6 @@ import {
   StyleSheet,
   Share,
   TextInput,
-  Clipboard,
-  Platform,
-  Alert,
 } from 'react-native';
 import logger from '../utils/inAppLogger';
 import { theme } from '../utils/theme';
@@ -62,68 +59,6 @@ const InAppLogViewer = ({ visible, onClose }) => {
     }
   };
 
-  const handleCopyAllAndShare = async () => {
-    try {
-      // Get all logs (not just filtered ones)
-      const allLogText = logs.map(log => log.displayText).join('\n\n');
-      const fullLogText = `MeepleUp Debug Logs\n\nTotal Logs: ${logs.length}\n\n${allLogText}`;
-      
-      // Copy to clipboard
-      let copied = false;
-      if (Platform.OS === 'web') {
-        // For web, use the Clipboard API
-        try {
-          await navigator.clipboard.writeText(fullLogText);
-          copied = true;
-        } catch (clipError) {
-          // Fallback: try to use Share API
-          if (__DEV__) {
-            console.log('Clipboard API not available, using Share instead');
-          }
-        }
-      } else {
-        // For React Native, try Clipboard (may be deprecated but might still work)
-        try {
-          if (Clipboard && Clipboard.setString) {
-            Clipboard.setString(fullLogText);
-            copied = true;
-          }
-        } catch (clipError) {
-          // Clipboard not available, will use Share instead
-          if (__DEV__) {
-            console.log('Clipboard not available, using Share instead');
-          }
-        }
-      }
-      
-      // Try to share (this works on both web and mobile)
-      try {
-        const shareResult = await Share.share({
-          message: fullLogText,
-          title: 'MeepleUp Debug Logs',
-        });
-        
-        if (copied) {
-          // Show success message after share completes
-          setTimeout(() => {
-            Alert.alert('Success', 'Logs copied to clipboard and shared!');
-          }, 500);
-        }
-      } catch (shareError) {
-        // If share fails but we copied, that's okay
-        if (copied) {
-          Alert.alert('Copied!', 'All logs have been copied to clipboard. Share dialog was not available.');
-        } else {
-          // Neither worked
-          throw new Error('Both clipboard and share failed');
-        }
-      }
-    } catch (error) {
-      logger.error('Failed to copy and share logs', error);
-      Alert.alert('Error', 'Failed to copy logs. Please try the "Share Filtered" button instead.');
-    }
-  };
-
   const handleClear = () => {
     logger.clear();
   };
@@ -149,11 +84,8 @@ const InAppLogViewer = ({ visible, onClose }) => {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Debug Logs</Text>
           <View style={styles.headerActions}>
-            <Pressable onPress={handleCopyAllAndShare} style={styles.headerButton}>
-              <Text style={styles.headerButtonText}>Copy All & Share</Text>
-            </Pressable>
             <Pressable onPress={handleShare} style={styles.headerButton}>
-              <Text style={styles.headerButtonText}>Share Filtered</Text>
+              <Text style={styles.headerButtonText}>Share</Text>
             </Pressable>
             <Pressable onPress={handleClear} style={styles.headerButton}>
               <Text style={styles.headerButtonText}>Clear</Text>
@@ -222,56 +154,11 @@ const InAppLogViewer = ({ visible, onClose }) => {
                 <Text style={styles.logMessage}>{log.message}</Text>
                 {log.data && (
                   <View style={styles.logData}>
-                    {typeof log.data === 'object' ? (
-                      <View>
-                        {/* Display try counts prominently if available */}
-                        {(log.data.firebaseTries !== undefined || log.data.bggTries !== undefined) && (
-                          <View style={styles.tryCountsContainer}>
-                            <Text style={styles.tryCountsLabel}>Try Counts:</Text>
-                            <View style={styles.tryCountsRow}>
-                              {log.data.firebaseTries !== undefined && (
-                                <Text style={styles.tryCountText}>
-                                  Firebase: <Text style={styles.tryCountNumber}>{log.data.firebaseTries}</Text>
-                                </Text>
-                              )}
-                              {log.data.bggTries !== undefined && (
-                                <Text style={styles.tryCountText}>
-                                  BGG: <Text style={styles.tryCountNumber}>{log.data.bggTries}</Text>
-                                </Text>
-                              )}
-                              {log.data.totalTries !== undefined && (
-                                <Text style={styles.tryCountText}>
-                                  Total: <Text style={styles.tryCountNumber}>{log.data.totalTries}</Text>
-                                </Text>
-                              )}
-                            </View>
-                          </View>
-                        )}
-                        {/* Display rank prominently if available */}
-                        {log.data.rank !== undefined && log.data.rank !== 'N/A' && (
-                          <View style={styles.rankContainer}>
-                            <Text style={styles.rankLabel}>
-                              BGG Rank: <Text style={styles.rankNumber}>{log.data.rank}</Text>
-                            </Text>
-                          </View>
-                        )}
-                        {/* Display game title if available */}
-                        {log.data.gameTitle && (
-                          <Text style={styles.gameTitleText}>
-                            <Text style={styles.gameTitleLabel}>Game: </Text>
-                            {log.data.gameTitle}
-                          </Text>
-                        )}
-                        {/* Display remaining data */}
-                        <Text style={styles.logDataText}>
-                          {JSON.stringify(log.data, null, 2)}
-                        </Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.logDataText}>
-                        {String(log.data)}
-                      </Text>
-                    )}
+                    <Text style={styles.logDataText}>
+                      {typeof log.data === 'object'
+                        ? JSON.stringify(log.data, null, 2)
+                        : String(log.data)}
+                    </Text>
                   </View>
                 )}
               </View>
@@ -444,63 +331,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     textAlign: 'center',
-  },
-  tryCountsContainer: {
-    backgroundColor: '#e8f4f8',
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#3498db',
-  },
-  tryCountsLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2c3e50',
-    marginBottom: 4,
-  },
-  tryCountsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  tryCountText: {
-    fontSize: 13,
-    color: '#34495e',
-    fontWeight: '600',
-  },
-  tryCountNumber: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#2980b9',
-  },
-  rankContainer: {
-    backgroundColor: '#fff3cd',
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#f39c12',
-  },
-  rankLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#856404',
-  },
-  rankNumber: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#d68910',
-  },
-  gameTitleText: {
-    fontSize: 13,
-    color: '#2c3e50',
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  gameTitleLabel: {
-    fontWeight: '700',
-    color: '#34495e',
   },
 });
 
