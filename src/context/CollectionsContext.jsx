@@ -360,12 +360,13 @@ export const CollectionsProvider = ({ children }) => {
               console.log('[Collections] Enrichment completed', {
                 userId,
                 enrichedCount: enriched.length,
-              sampleEnriched: enriched.slice(0, 2).map(g => ({
-                id: g.id,
-                bggId: g.bggId,
-                title: g.title || g.name,
-              })),
-            });
+                sampleEnriched: enriched.slice(0, 2).map(g => ({
+                  id: g.id,
+                  bggId: g.bggId,
+                  title: g.title || g.name,
+                })),
+              });
+            }
             enrichedGames = [...enrichedGames, ...enriched];
           }
           
@@ -379,7 +380,9 @@ export const CollectionsProvider = ({ children }) => {
             // Check for duplicates by bggId first (most reliable)
             if (bggId) {
               if (seenBggIds.has(bggId)) {
-                console.warn(`[Collections] Removing duplicate game by bggId: ${bggId}`);
+                if (__DEV__) {
+                  console.warn(`[Collections] Removing duplicate game by bggId: ${bggId}`);
+                }
                 return false;
               }
               seenBggIds.add(bggId);
@@ -388,7 +391,9 @@ export const CollectionsProvider = ({ children }) => {
             // Also check by game id as fallback
             if (gameId) {
               if (seenIds.has(gameId)) {
-                console.warn(`[Collections] Removing duplicate game by id: ${gameId}`);
+                if (__DEV__) {
+                  console.warn(`[Collections] Removing duplicate game by id: ${gameId}`);
+                }
                 return false;
               }
               seenIds.add(gameId);
@@ -397,15 +402,17 @@ export const CollectionsProvider = ({ children }) => {
             return true;
           });
           
-          console.log('[Collections] Setting collections state', {
-            userId,
-            gameCount: deduplicatedGames.length,
-            sampleGames: deduplicatedGames.slice(0, 3).map(g => ({
-              id: g.id,
-              bggId: g.bggId,
-              title: g.title || g.name,
-            })),
-          });
+          if (__DEV__) {
+            console.log('[Collections] Setting collections state', {
+              userId,
+              gameCount: deduplicatedGames.length,
+              sampleGames: deduplicatedGames.slice(0, 3).map(g => ({
+                id: g.id,
+                bggId: g.bggId,
+                title: g.title || g.name,
+              })),
+            });
+          }
           
           setCollections(prev => ({
             ...prev,
@@ -420,8 +427,9 @@ export const CollectionsProvider = ({ children }) => {
             console.log('[Collections] ⚠️ No games found in Firestore', {
               userId,
               email: user.email,
-            path: `userGames/${userId}/games`,
-          });
+              path: `userGames/${userId}/games`,
+            });
+          }
           // Set empty array so we know the sync completed
           setCollections(prev => ({
             ...prev,
