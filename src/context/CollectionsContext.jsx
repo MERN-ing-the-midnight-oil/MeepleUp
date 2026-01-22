@@ -644,11 +644,12 @@ export const CollectionsProvider = ({ children }) => {
       console.log('[Collections] Collections state changed, saving to storage', {
         userIds,
         totalGames,
-      gamesPerUser: userIds.reduce((acc, uid) => {
-        acc[uid] = collections[uid]?.length || 0;
-        return acc;
-      }, {}),
-    });
+        gamesPerUser: userIds.reduce((acc, uid) => {
+          acc[uid] = collections[uid]?.length || 0;
+          return acc;
+        }, {}),
+      });
+    }
     
     const timeoutId = setTimeout(() => {
       storage.setItem('meepleup_collections', JSON.stringify(collections));
