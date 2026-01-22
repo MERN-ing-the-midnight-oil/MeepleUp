@@ -102,7 +102,9 @@ export const CollectionsProvider = ({ children }) => {
           };
         } else {
           // Game not found in main collection - return reference with minimal data
-          console.warn(`[Collections] Game ${ref.bggId} not found in main collection, using reference data only`);
+          if (__DEV__) {
+            console.warn(`[Collections] Game ${ref.bggId} not found in main collection, using reference data only`);
+          }
           return {
             id: ref.id || `bgg_${ref.bggId}`,
             bggId: ref.bggId,
@@ -690,12 +692,13 @@ export const CollectionsProvider = ({ children }) => {
       console.log('[Collections] addGameToCollection called', {
         userId,
         gameId: gameData.id,
-      bggId: gameData.bggId,
-      title: gameData.title || gameData.name,
-      hasBggId: !!gameData.bggId,
-      hasDb: !!db,
-      gameDataKeys: Object.keys(gameData),
-    });
+        bggId: gameData.bggId,
+        title: gameData.title || gameData.name,
+        hasBggId: !!gameData.bggId,
+        hasDb: !!db,
+        gameDataKeys: Object.keys(gameData),
+      });
+    }
 
     if (!userId) {
       if (__DEV__) {
@@ -926,8 +929,9 @@ export const CollectionsProvider = ({ children }) => {
               userId,
               gameDocId,
               bggId: gameData.bggId,
-            firestorePath,
-          });
+              firestorePath,
+            });
+          }
         })
         .catch((firestoreError) => {
           console.error('[Collections] ❌ Error saving game reference to Firestore:', {
@@ -972,11 +976,13 @@ export const CollectionsProvider = ({ children }) => {
         .collection('games').doc(gameData.id)
         .set(fullGameData, { merge: true })
         .then(() => {
-          console.log('[Collections] ✅ Successfully saved full game data to Firestore (legacy mode)', {
-            userId,
-            gameId: gameData.id,
-            firestorePath,
-          });
+          if (__DEV__) {
+            console.log('[Collections] ✅ Successfully saved full game data to Firestore (legacy mode)', {
+              userId,
+              gameId: gameData.id,
+              firestorePath,
+            });
+          }
         })
         .catch((firestoreError) => {
           console.error('[Collections] ❌ Error saving game to Firestore (legacy mode):', {
@@ -990,13 +996,15 @@ export const CollectionsProvider = ({ children }) => {
           });
         });
     } else {
-      console.warn('[Collections] ⚠️ Cannot save to Firestore - missing db or game identifier', {
-        userId,
-        hasDb: !!db,
-        hasBggId: !!gameData.bggId,
-        hasId: !!gameData.id,
-        gameDataKeys: Object.keys(gameData),
-      });
+      if (__DEV__) {
+        console.warn('[Collections] ⚠️ Cannot save to Firestore - missing db or game identifier', {
+          userId,
+          hasDb: !!db,
+          hasBggId: !!gameData.bggId,
+          hasId: !!gameData.id,
+          gameDataKeys: Object.keys(gameData),
+        });
+      }
     }
   }, [db]);
 
