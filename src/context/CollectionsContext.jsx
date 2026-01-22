@@ -186,28 +186,68 @@ export const CollectionsProvider = ({ children }) => {
     const sync = async () => {
       setLoading(true);
       try {
-        console.log('[Collections] Fetching games from Firestore', {
+        console.log('[Collections] Fetching games from Firestore with pagination', {
           userId,
           path: `userGames/${userId}/games`,
         });
         
-        const snapshot = await db.collection('userGames').doc(userId).collection('games').get();
+        // Load games with pagination to handle large collections (>1MB response limit)
+        const BATCH_SIZE = 500; // Firestore recommended batch size
+        let allDocs = [];
+        let lastDoc = null;
+        let batchNumber = 0;
+        let hasMore = true;
+
+        while (hasMore) {
+          batchNumber++;
+          
+          try {
+            let query = db
+              .collection('userGames')
+              .doc(userId)
+              .collection('games')
+              .limit(BATCH_SIZE);
+            
+            if (lastDoc) {
+              query = query.startAfter(lastDoc);
+            }
+            
+            const batch = await query.get();
+            allDocs = [...allDocs, ...batch.docs];
+            
+            hasMore = batch.docs.length === BATCH_SIZE;
+            
+            if (hasMore && batch.docs.length > 0) {
+              lastDoc = batch.docs[batch.docs.length - 1];
+              // Small delay to avoid overwhelming Firestore
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            console.log(`[Collections] Batch ${batchNumber}: ${batch.docs.length} games (total: ${allDocs.length})`);
+            
+          } catch (batchError) {
+            console.error(`[Collections] Error loading batch ${batchNumber}:`, batchError);
+            // Continue with what we have - partial data is better than no data
+            // But log the error for monitoring
+            hasMore = false;
+          }
+        }
         
         console.log('[Collections] Firestore query completed', {
           userId,
-          snapshotSize: snapshot.size,
-          empty: snapshot.empty,
-          docsCount: snapshot.docs.length,
+          totalGames: allDocs.length,
+          batches: batchNumber,
+          empty: allDocs.length === 0,
         });
         
-        if (!snapshot.empty) {
+        if (allDocs.length > 0) {
           console.log('[Collections] Parsing game documents', {
             userId,
-            docCount: snapshot.docs.length,
+            docCount: allDocs.length,
           });
           
           // Parse references from Firestore (may be new format references or old format full data)
-          const references = snapshot.docs.map(doc => {
+          const references = allDocs.map(doc => {
             const data = doc.data();
             const isRef = isReferenceOnly(data);
             
