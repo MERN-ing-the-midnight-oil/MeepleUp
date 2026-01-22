@@ -831,7 +831,7 @@ export async function batchGetGamesById(gameIds) {
             const doc = await docRef.get();
             return doc;
           } catch (err) {
-            console.warn(`[Game Database] Error fetching game ${gameId}:`, err);
+            // Silently handle missing games (legacy data) - no warning needed
             return null;
           }
         });

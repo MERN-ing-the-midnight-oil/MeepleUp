@@ -223,6 +223,8 @@ service cloud.firestore {
 
     }
     
+    // Main games collection - contains game data from BoardGameGeek
+    // All authenticated users can read game data (needed for event members to see game details)
     match /games/{gameId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
@@ -230,6 +232,10 @@ service cloud.firestore {
     }
     
     match /userGames/{userId}/games/{gameId} {
+      // Allow reading if:
+      // 1. User is the owner of the games
+      // 2. User is authenticated (members of the same event can see each other's games)
+      //    The app filters to show only games from event members when viewing an event
       allow read: if isAuthenticated();
       allow write: if isOwner(userId);
     }

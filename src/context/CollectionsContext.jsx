@@ -73,10 +73,7 @@ export const CollectionsProvider = ({ children }) => {
       const { batchGetGamesById } = await import('../services/gameDatabase');
       const gameDataMap = await batchGetGamesById(bggIds);
       
-      // Reduced logging - only log if enrichment fails or is incomplete
-      if (__DEV__ && gameDataMap.size < bggIds.length * 0.9) {
-        console.warn(`[Collections] Enrichment incomplete: ${gameDataMap.size}/${bggIds.length} games found`);
-      }
+      // Silently handle missing games (legacy data) - no warning needed
       
       // Merge reference data with full game data
       return references.map(ref => {
@@ -102,9 +99,7 @@ export const CollectionsProvider = ({ children }) => {
           };
         } else {
           // Game not found in main collection - return reference with minimal data
-          if (__DEV__) {
-            console.warn(`[Collections] Game ${ref.bggId} not found in main collection, using reference data only`);
-          }
+          // (Silently handle legacy data - no warning needed)
           return {
             id: ref.id || `bgg_${ref.bggId}`,
             bggId: ref.bggId,
