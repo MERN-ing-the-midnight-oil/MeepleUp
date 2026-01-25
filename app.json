@@ -21,8 +21,8 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Allow MeepleUp to access your photo library to select game images.",
-        "NSPhotoLibraryAddUsageDescription": "Allow MeepleUp to save images to your photo library.",
+        "NSPhotoLibraryUsageDescription": "MeepleUp needs access to your photo library to let you select photos for your profile picture and to share photos in group discussions. For example, you can choose a photo from your library to use as your profile picture, or select a photo to share with other members in your private game group's discussion.",
+        "NSPhotoLibraryAddUsageDescription": "MeepleUp needs permission to save photos to your photo library. For example, you can choose to save photos shared in group discussions to your library for future reference.",
         "NSMicrophoneUsageDescription": "Allow MeepleUp to access your microphone to record audio narration when taking photos of games."
       }
     },
@@ -42,7 +42,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow MeepleUp to access your camera to scan barcodes."
+          "cameraPermission": "MeepleUp needs access to your camera to take photos of board games for AI-powered identification. For example, you can take a photo of a board game box and the app will use AI to identify the game and add it to your collection automatically."
         }
       ],
       "expo-web-browser",

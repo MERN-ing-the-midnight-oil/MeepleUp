@@ -61,13 +61,13 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>Allow MeepleUp to access your camera to scan barcodes.</string>
-    <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Allow MeepleUp to access your location to find nearby game events.</string>
+    <string>MeepleUp needs access to your camera to take photos of board games for AI-powered identification. For example, you can take a photo of a board game box and the app will use AI to identify the game and add it to your collection automatically.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow MeepleUp to access your microphone to record audio narration when taking photos of games.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow MeepleUp to access your photos</string>
+    <string>MeepleUp needs access to your photo library to let you select photos for your profile picture and to share photos in group discussions. For example, you can choose a photo from your library to use as your profile picture, or select a photo to share with other members in your private game group's discussion.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>MeepleUp needs permission to save photos to your photo library. For example, you can choose to save photos shared in group discussions to your library for future reference.</string>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UILaunchStoryboardName</key>
