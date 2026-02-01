@@ -23,6 +23,7 @@
     },
     "production": {
       "distribution": "store",
+      "autoIncrement": true,
       "ios": {
         "buildConfiguration": "Release",
         "simulator": false

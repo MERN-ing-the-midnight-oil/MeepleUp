@@ -355,31 +355,43 @@ export const AuthProvider = ({ children }) => {
     const initialUser = auth.currentUser;
     if (initialUser) {
       console.log('[AuthContext] Initial auth.currentUser found:', initialUser.email);
+      logger.info(`[AuthContext] Initial auth.currentUser found: ${initialUser.email}`);
     } else {
       console.log('[AuthContext] No initial auth.currentUser - waiting for onAuthStateChanged');
+      logger.info('[AuthContext] No initial auth.currentUser - waiting for onAuthStateChanged');
     }
 
     // Set up auth state listener
     // This will fire when auth state changes AND on initial load with persisted user
     // onAuthStateChanged fires immediately with the current user if one exists
+    // For React Native, Firebase restores the session from AsyncStorage and then fires this listener
     const unsubscribe = auth.onAuthStateChanged(
       async (firebaseUser) => {
-        if (!isMounted) return;
+        if (!isMounted) {
+          console.log('[AuthContext] Component unmounted, ignoring auth state change');
+          return;
+        }
 
         authStateResolved = true;
+        console.log('[AuthContext] onAuthStateChanged fired:', firebaseUser ? `User: ${firebaseUser.email}` : 'No user');
+        logger.info(`[AuthContext] onAuthStateChanged fired: ${firebaseUser ? `User: ${firebaseUser.email}` : 'No user'}`);
 
         try {
           if (!firebaseUser) {
             console.log('[AuthContext] Auth state: No user (user logged out or no persisted session)');
+            logger.info('[AuthContext] Auth state: No user (user logged out or no persisted session)');
             setUser(null);
             setLoading(false);
             return;
           }
 
           console.log('[AuthContext] Auth state changed: User found', firebaseUser.email, firebaseUser.uid);
+          logger.info(`[AuthContext] Auth state changed: User found ${firebaseUser.email} (${firebaseUser.uid})`);
           await loadUserProfile(firebaseUser);
         } catch (error) {
           console.error('[AuthContext] Auth state change error:', error);
+          logger.error('[AuthContext] Auth state change error:', error);
+          // Even if profile loading fails, set the basic user info
           setUser(mapUser(firebaseUser));
         } finally {
           if (isMounted) {
@@ -389,6 +401,7 @@ export const AuthProvider = ({ children }) => {
       },
       (error) => {
         console.error('[AuthContext] Failed to initialize auth listener:', error);
+        logger.error('[AuthContext] Failed to initialize auth listener:', error);
         authStateResolved = true;
         if (isMounted) {
           setLoading(false);
@@ -396,34 +409,41 @@ export const AuthProvider = ({ children }) => {
       },
     );
 
-    // Fallback: If onAuthStateChanged doesn't fire within 2 seconds, check currentUser directly
+    // Fallback: If onAuthStateChanged doesn't fire within 5 seconds, check currentUser directly
     // This handles edge cases where the listener might not fire immediately
+    // Increased timeout to 5 seconds to give Firebase more time to restore from AsyncStorage
     const timeoutId = setTimeout(async () => {
       if (!authStateResolved && isMounted) {
-        console.log('[AuthContext] Auth state listener timeout, checking currentUser directly...');
+        console.log('[AuthContext] ⚠️ Auth state listener timeout (5s), checking currentUser directly...');
+        logger.warn('[AuthContext] Auth state listener timeout (5s), checking currentUser directly');
         try {
           const currentUser = auth.currentUser;
           if (currentUser) {
-            console.log('[AuthContext] Found currentUser after timeout:', currentUser.email);
+            console.log('[AuthContext] ✅ Found currentUser after timeout:', currentUser.email);
+            logger.info(`[AuthContext] Found currentUser after timeout: ${currentUser.email}`);
             await loadUserProfile(currentUser);
           } else {
-            console.log('[AuthContext] No currentUser found after timeout');
+            console.log('[AuthContext] No currentUser found after timeout - user not logged in');
+            logger.info('[AuthContext] No currentUser found after timeout - user not logged in');
             setUser(null);
           }
         } catch (error) {
           console.error('[AuthContext] Error checking currentUser after timeout:', error);
+          logger.error('[AuthContext] Error checking currentUser after timeout:', error);
         } finally {
           if (isMounted) {
             setLoading(false);
           }
         }
       }
-    }, 2000);
+    }, 5000); // Increased from 2s to 5s to allow more time for AsyncStorage restoration
 
     return () => {
       isMounted = false;
       clearTimeout(timeoutId);
-      unsubscribe();
+      if (unsubscribe) {
+        unsubscribe();
+      }
     };
   }, []);
 

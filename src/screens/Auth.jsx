@@ -363,7 +363,7 @@ const Auth = ({ route: routeProp }) => {
             <Pressable
               onPress={handleGoogleSignIn}
               disabled={loading}
-              style={[styles.badgeButton, { opacity: loading ? 0.5 : 1 }]}
+              style={[styles.oauthButton, styles.googleButton, { opacity: loading ? 0.5 : 1 }]}
             >
               <Image
                 source={signInWithGoogleBadge}
@@ -374,7 +374,7 @@ const Auth = ({ route: routeProp }) => {
             <Pressable
               onPress={handleAppleSignIn}
               disabled={loading}
-              style={[styles.appleButton, { opacity: loading ? 0.5 : 1 }]}
+              style={[styles.oauthButton, styles.appleButton, { opacity: loading ? 0.5 : 1 }]}
             >
               <View style={styles.appleButtonContent}>
                 <Text style={styles.appleLogo}></Text>
@@ -487,25 +487,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
     marginBottom: 8,
+    gap: 12,
   },
-  badgeButton: {
+  oauthButton: {
+    flex: 1,
+    minWidth: 200,
+    maxWidth: 250,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  googleButton: {
     opacity: 1,
-    marginHorizontal: 6,
-    marginBottom: 0,
   },
   badge: {
     height: 50,
-    width: 219, // Aspect ratio: 350/80 = 4.375, so 50 * 4.375 ≈ 219
+    width: '100%',
   },
   appleButton: {
     backgroundColor: '#000000',
     borderRadius: 6,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 6,
   },
   appleButtonContent: {
     flexDirection: 'row',

@@ -75,16 +75,21 @@ const Landing = () => {
       fontSize: isMobile ? 14 : 18,
       marginBottom: isMobile ? 16 : 32,
     },
+    oauthButton: {
+      flex: 1,
+      minWidth: isMobile ? 150 : 200,
+      maxWidth: isMobile ? 200 : 250,
+      height: isMobile ? 40 : 50,
+    },
+    googleButton: {
+      opacity: loading ? 0.5 : 1,
+    },
     badge: {
       height: isMobile ? 40 : 50,
-      width: isMobile ? 175 : 219, // Aspect ratio: 350/80 = 4.375
+      width: '100%',
     },
     appleButton: {
       height: isMobile ? 40 : 50,
-      minWidth: undefined, // Let it size naturally
-    },
-    badgeButton: {
-      opacity: loading ? 0.5 : 1,
     },
     input: {
       marginBottom: isMobile ? 10 : 16,
@@ -417,7 +422,7 @@ const Landing = () => {
               <Pressable
                 onPress={handleGoogleSignIn}
                 disabled={loading}
-                style={[styles.badgeButton, dynamicStyles.badgeButton, { opacity: loading ? 0.5 : 1 }]}
+                style={[styles.oauthButton, styles.googleButton, dynamicStyles.oauthButton, dynamicStyles.googleButton, { opacity: loading ? 0.5 : 1 }]}
               >
                 <Image
                   source={signInWithGoogleBadge}
@@ -428,7 +433,7 @@ const Landing = () => {
               <Pressable
                 onPress={handleAppleSignIn}
                 disabled={loading}
-                style={[styles.appleButton, dynamicStyles.badgeButton, dynamicStyles.appleButton, { opacity: loading ? 0.5 : 1 }]}
+                style={[styles.oauthButton, styles.appleButton, dynamicStyles.oauthButton, dynamicStyles.appleButton, { opacity: loading ? 0.5 : 1 }]}
               >
                 <View style={styles.appleButtonContent}>
                   <Text style={styles.appleLogo}></Text>
@@ -593,23 +598,28 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     marginBottom: 8,
   },
-  badgeButton: {
+  oauthButton: {
+    flex: 1,
+    minWidth: 200,
+    maxWidth: 250,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  googleButton: {
     opacity: 1,
-    marginHorizontal: 6,
   },
   badge: {
     height: 50,
-    width: 219, // Aspect ratio: 350/80 = 4.375, so 50 * 4.375 ≈ 219
+    width: '100%',
   },
   appleButton: {
     backgroundColor: '#000000',
     borderRadius: 6,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 6,
   },
   appleButtonContent: {
     flexDirection: 'row',

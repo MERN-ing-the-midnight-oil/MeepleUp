@@ -63,3 +63,10 @@ firebase functions:config:get
 - **Function not triggered?** Verify the document is being created in `betaSignups` collection with `platforms: ['ios']`
 
 
+
+
+
+
+
+
+

@@ -121,7 +121,6 @@ if (!firebaseInitError && firebase.apps.length > 0) {
     storageInstance = firebase.storage();
     
     // Explicitly set persistence for web (local = persists across browser sessions)
-    // React Native/Expo automatically uses AsyncStorage, so no configuration needed
     if (Platform.OS === 'web' && authInstance && authInstance.setPersistence) {
       // For web, explicitly set to 'local' persistence (default, but being explicit)
       // This ensures users stay logged in across page refreshes and server restarts
@@ -131,6 +130,18 @@ if (!firebaseInitError && firebase.apps.length > 0) {
         logger.warn('Error setting auth persistence:', error);
         // Continue anyway - default behavior should still work
       });
+    }
+    
+    // For React Native/Expo, Firebase Auth automatically uses AsyncStorage for persistence
+    // However, we need to ensure the auth instance is ready before using it
+    // The onAuthStateChanged listener will fire with the persisted user once Firebase
+    // has restored the session from AsyncStorage
+    if (Platform.OS !== 'web' && authInstance) {
+      // Log that we're using AsyncStorage for persistence (for debugging)
+      if (__DEV__) {
+        console.log('✅ Firebase Auth configured for React Native - will use AsyncStorage for persistence');
+        logger.info('Firebase Auth configured for React Native - will use AsyncStorage for persistence');
+      }
     }
   } catch (error) {
     logger.error('Error initializing Firebase services:', error);
@@ -146,6 +157,8 @@ export const storage = storageInstance;
 // Note: 
 // - Web: Uses localStorage (persists across browser sessions)
 // - React Native/Expo: Automatically uses AsyncStorage (persists across app restarts)
+//   The onAuthStateChanged listener will fire with the persisted user once Firebase
+//   has restored the session from AsyncStorage on app startup.
 // Users will remain logged in across app restarts in both environments.
 
 // Initialize Firebase Functions (if available)

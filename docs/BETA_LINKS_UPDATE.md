@@ -80,3 +80,10 @@ sed -i '' 's|https://play.google.com/apps/internaltest/YOUR_GOOGLE_PLAY_CODE|htt
 
 Replace `ACTUAL_CODE` with your actual codes.
 
+
+
+
+
+
+
+

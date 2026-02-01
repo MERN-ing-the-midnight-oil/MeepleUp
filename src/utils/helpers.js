@@ -2,8 +2,6 @@
  * Utility functions for the MeepleUp app
  */
 
-import * as Location from 'expo-location';
-
 /**
  * Format date for display
  */
@@ -66,25 +64,5 @@ export const debounce = (func, wait) => {
 export const truncateText = (text, maxLength) => {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + '...';
-};
-
-/**
- * Get user's location (Expo Location API)
- */
-export const getUserLocation = async () => {
-  try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      throw new Error('Permission to access location was denied');
-    }
-
-    const location = await Location.getCurrentPositionAsync({});
-    return {
-      latitude: location.coords.latitude,
-      longitude: location.coords.longitude,
-    };
-  } catch (error) {
-    throw error;
-  }
 };
 
