@@ -628,7 +628,9 @@ const CollectionScreen = () => {
     console.log('[CollectionScreen] handleAddToCollection called for:', gameData.title || gameData.id);
     if (userIdentifier) {
       try {
-        addGameToCollection(userIdentifier, gameData);
+        const wasAdded = addGameToCollection(userIdentifier, gameData);
+        // Return whether the game was actually added (not a duplicate)
+        return wasAdded;
         // Don't show alert for each game - too many alerts
         // The user will see the games in their collection
       } catch (addError) {
@@ -637,6 +639,7 @@ const CollectionScreen = () => {
       }
     } else {
       console.warn('[CollectionScreen] handleAddToCollection: No userIdentifier');
+      return false;
     }
   };
 

@@ -838,43 +838,48 @@ export const CollectionsProvider = ({ children }) => {
       });
     }
 
-    setCollections(prev => {
-      const currentCollection = prev[userId] || [];
-      const gameId = gameData.id || (gameData.bggId ? `bgg_${gameData.bggId}` : null);
-      const bggId = gameData.bggId?.toString();
-      
+    // Check for duplicates synchronously before updating state
+    // This allows us to return whether the game was actually added
+    const currentCollection = collections[userId] || [];
+    const gameId = gameData.id || (gameData.bggId ? `bgg_${gameData.bggId}` : null);
+    const bggId = gameData.bggId?.toString();
+    
+    if (__DEV__) {
+      console.log('[Collections] Checking for duplicates', {
+        userId,
+        gameId,
+        bggId,
+        currentCollectionLength: currentCollection.length,
+      });
+    }
+    
+    // Check for duplicates by bggId first (most reliable), then by id
+    const isDuplicate = currentCollection.some(existingGame => {
+      if (bggId && existingGame.bggId) {
+        return existingGame.bggId.toString() === bggId;
+      }
+      if (gameId && existingGame.id) {
+        return existingGame.id === gameId;
+      }
+      return false;
+    });
+    
+    if (isDuplicate) {
       if (__DEV__) {
-        console.log('[Collections] Checking for duplicates', {
+        console.log(`[Collections] ⚠️ Skipping duplicate game: ${gameId || bggId || 'unknown'}`, {
           userId,
           gameId,
           bggId,
-          currentCollectionLength: currentCollection.length,
         });
       }
-      
-      // Check for duplicates by bggId first (most reliable), then by id
-      const isDuplicate = currentCollection.some(existingGame => {
-        if (bggId && existingGame.bggId) {
-          return existingGame.bggId.toString() === bggId;
-        }
-        if (gameId && existingGame.id) {
-          return existingGame.id === gameId;
-        }
-        return false;
-      });
-      
-      if (isDuplicate) {
-        if (__DEV__) {
-          console.log(`[Collections] ⚠️ Skipping duplicate game: ${gameId || bggId || 'unknown'}`, {
-            userId,
-            gameId,
-            bggId,
-          });
-        }
-        return prev; // Return unchanged if duplicate
-      }
-      
-      const newCollection = [...currentCollection, gameData];
+      // Return false to indicate this was a duplicate (not added)
+      return false;
+    }
+
+    // Not a duplicate, proceed with adding
+    setCollections(prev => {
+      const prevCollection = prev[userId] || [];
+      const newCollection = [...prevCollection, gameData];
       if (__DEV__) {
         console.log('[Collections] ✅ Added game to local state', {
           userId,
@@ -1001,7 +1006,10 @@ export const CollectionsProvider = ({ children }) => {
         });
       }
     }
-  }, [db]);
+
+    // Return true to indicate the game was successfully added (not a duplicate)
+    return true;
+  }, [db, collections]);
 
   const removeGameFromCollection = useCallback((userId, gameId) => {
     if (!userId) return;

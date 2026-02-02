@@ -3119,7 +3119,8 @@ const ClaudeGameIdentifier = ({
     setIsProcessing(true);
     setError(null);
 
-    let successCount = 0;
+    let addedCount = 0;
+    let duplicateCount = 0;
     let failCount = 0;
 
     try {
@@ -3148,8 +3149,12 @@ const ClaudeGameIdentifier = ({
             };
 
             if (onAddToCollection) {
-              onAddToCollection(gameData);
-              successCount++;
+              const wasAdded = onAddToCollection(gameData);
+              if (wasAdded) {
+                addedCount++;
+              } else {
+                duplicateCount++;
+              }
             }
           } else {
             failCount++;
@@ -3160,10 +3165,22 @@ const ClaudeGameIdentifier = ({
         }
       }
 
-      if (successCount > 0) {
+      // Build notification message
+      const messageParts = [];
+      if (addedCount > 0) {
+        messageParts.push(`Successfully added ${addedCount} game${addedCount !== 1 ? 's' : ''} to your collection.`);
+      }
+      if (duplicateCount > 0) {
+        messageParts.push(`${duplicateCount} game${duplicateCount !== 1 ? 's were' : ' was'} already in your collection.`);
+      }
+      if (failCount > 0) {
+        messageParts.push(`${failCount} game${failCount !== 1 ? 's' : ''} failed to add.`);
+      }
+
+      if (addedCount > 0 || duplicateCount > 0 || failCount > 0) {
         Alert.alert(
-          'Games Added',
-          `Successfully added ${successCount} game${successCount !== 1 ? 's' : ''} to your collection.${failCount > 0 ? ` ${failCount} game${failCount !== 1 ? 's' : ''} failed.` : ''}`,
+          'Games Processed',
+          messageParts.join(' '),
           [
             {
               text: 'OK',
@@ -3185,7 +3202,7 @@ const ClaudeGameIdentifier = ({
           ]
         );
       } else {
-        setError(`Failed to add games. ${failCount > 0 ? `${failCount} game${failCount !== 1 ? 's' : ''} failed.` : ''}`);
+        setError('No games were processed. Please try again.');
       }
     } catch (err) {
       console.error('[ClaudeGameIdentifier] Error adding games:', err);
