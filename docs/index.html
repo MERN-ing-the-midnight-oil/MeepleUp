@@ -106,8 +106,8 @@
             </style>
             <div class="download-content-wrapper">
               <!-- QR Code for Desktop Users -->
-              <div id="downloadQrContainer" style="display: none; text-align: center;">
-                <p id="downloadQrLabel" style="font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem; white-space: nowrap; display: inline-block;">Download on Mobile</p>
+              <div id="downloadQrContainer" style="display: none; flex-direction: column; align-items: center;">
+                <p id="downloadQrLabel" style="font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem; white-space: nowrap; text-align: center; width: 100%; font-weight: bold;">Download on Mobile</p>
                 <img id="downloadQrImage" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com/download.html" alt="Scan to download MeepleUp" style="height: auto; border: 2px solid var(--border-color, #dee2e6); border-radius: 8px; padding: 8px; background: white; box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));">
               </div>
               <!-- Download buttons container -->
@@ -188,7 +188,7 @@
         // Show download section QR code
         const downloadQrContainer = document.getElementById('downloadQrContainer');
         if (downloadQrContainer) {
-          downloadQrContainer.style.display = 'block';
+          downloadQrContainer.style.display = 'flex';
           // Match QR code width to text width
           const label = document.getElementById('downloadQrLabel');
           const qrImage = document.getElementById('downloadQrImage');
