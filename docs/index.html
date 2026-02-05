@@ -20,8 +20,9 @@
           <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
         </figure>
         
-        <figure class="website-qr-container">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com" alt="Scan to visit meepleup.com" class="website-qr-code">
+        <figure class="website-qr-container" id="qrContainer" style="display: none;">
+          <p style="text-align: center; font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem;">Download on Mobile</p>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com/download.html" alt="Scan to download MeepleUp" class="website-qr-code">
         </figure>
         
         <header class="sidebar-header">
@@ -77,22 +78,60 @@
         <div class="signup-forms-container">
           <section class="beta-signup-section" style="text-align: center;">
             <h3 style="font-size: 1.5rem; margin-bottom: 1.5rem; color: var(--text-primary);">Download MeepleUp Today</h3>
-            <div style="display: flex; justify-content: center; gap: 20px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
-              <a href="https://apps.apple.com/app/meepleup" target="_blank" rel="noopener noreferrer" style="display: inline-block;">
-                <img src="images/appstore.svg" alt="Download on the App Store" style="max-width: 180px; height: auto; transition: transform 0.2s ease;">
-              </a>
-              <a href="https://play.google.com/store/apps/details?id=com.meepleup" target="_blank" rel="noopener noreferrer" style="display: inline-block;">
-                <img src="images/google-play-badge.png" alt="Get it on Google Play" style="max-width: 180px; height: auto; transition: transform 0.2s ease;">
-              </a>
+            <style>
+              .download-content-wrapper {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+                align-items: center;
+                width: 100%;
+              }
+              #appStoreButtons {
+                display: none;
+              }
+              @media (min-width: 768px) {
+                .download-content-wrapper {
+                  flex-direction: row;
+                  align-items: flex-start;
+                  justify-content: center;
+                }
+                #downloadQrContainer {
+                  flex-shrink: 0;
+                }
+                .download-buttons-container {
+                  flex: 1;
+                  max-width: none;
+                }
+              }
+            </style>
+            <div class="download-content-wrapper">
+              <!-- QR Code for Desktop Users -->
+              <div id="downloadQrContainer" style="display: none; text-align: center;">
+                <p id="downloadQrLabel" style="font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem; white-space: nowrap; display: inline-block;">Download on Mobile</p>
+                <img id="downloadQrImage" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com/download.html" alt="Scan to download MeepleUp" style="height: auto; border: 2px solid var(--border-color, #dee2e6); border-radius: 8px; padding: 8px; background: white; box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));">
+              </div>
+              <!-- Download buttons container -->
+              <div class="download-buttons-container" style="display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 600px; align-items: stretch;">
+                <!-- App Store buttons row - Only visible on mobile -->
+                <div id="appStoreButtons" style="display: none; gap: 15px; width: 100%; align-items: stretch;">
+                  <a href="https://apps.apple.com/us/app/meepleup/id6754894730" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px; background-color: #000; border-radius: 8px; transition: transform 0.2s ease, opacity 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'; this.style.opacity='0.9';" onmouseout="this.style.transform='scale(1)'; this.style.opacity='1';">
+                    <img src="images/appstore.svg" alt="Download on the App Store" style="max-width: 100%; height: auto; max-height: 50px;">
+                  </a>
+                  <a href="https://play.google.com/store/apps/details?id=com.meepleup.app" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px; background-color: #000; border-radius: 8px; transition: transform 0.2s ease, opacity 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'; this.style.opacity='0.9';" onmouseout="this.style.transform='scale(1)'; this.style.opacity='1';">
+                    <img src="images/google-play-badge.png" alt="Get it on Google Play" style="max-width: 100%; height: auto; max-height: 50px;">
+                  </a>
+                </div>
+                <!-- Web browser button -->
+                <a href="https://meepleup-951a1.web.app" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px 24px; background-color: var(--primary-color, #d45d5d); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 1rem; transition: transform 0.2s ease, background-color 0.2s ease; box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));" onmouseover="this.style.transform='scale(1.02)'; this.style.backgroundColor='#c04d4d'; this.style.boxShadow='var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1))';" onmouseout="this.style.transform='scale(1)'; this.style.backgroundColor='var(--primary-color, #d45d5d)'; this.style.boxShadow='var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1))';">
+                  Use your browser
+                </a>
+              </div>
             </div>
-            <p style="text-align: center; margin-top: 15px; color: var(--text-secondary); font-size: 0.9rem;">
-              Available now on iOS and Android
-            </p>
           </section>
         </div>
 
         <!-- Contact Email -->
-        <address>
+        <address style="text-align: center;">
           <a href="mailto:contact@meepleup.com" class="contact-button">
             contact@meepleup.com
           </a>
@@ -122,6 +161,47 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
     
+    // Show/hide elements based on device type
+    (function() {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
+      const isTablet = /ipad|android(?!.*mobile)/i.test(userAgent);
+      
+      if (isMobile || isTablet) {
+        // Mobile/Tablet: Show app store buttons, hide QR codes
+        const appStoreButtons = document.getElementById('appStoreButtons');
+        if (appStoreButtons) {
+          appStoreButtons.style.display = 'flex';
+        }
+      } else {
+        // Desktop: Show QR codes, hide app store buttons
+        // Explicitly hide app store buttons on desktop
+        const appStoreButtons = document.getElementById('appStoreButtons');
+        if (appStoreButtons) {
+          appStoreButtons.style.display = 'none';
+        }
+        // Show sidebar QR code
+        const qrContainer = document.getElementById('qrContainer');
+        if (qrContainer) {
+          qrContainer.style.display = 'block';
+        }
+        // Show download section QR code
+        const downloadQrContainer = document.getElementById('downloadQrContainer');
+        if (downloadQrContainer) {
+          downloadQrContainer.style.display = 'block';
+          // Match QR code width to text width
+          const label = document.getElementById('downloadQrLabel');
+          const qrImage = document.getElementById('downloadQrImage');
+          if (label && qrImage) {
+            // Wait for layout to calculate text width
+            setTimeout(function() {
+              const textWidth = label.offsetWidth;
+              qrImage.style.width = textWidth + 'px';
+            }, 0);
+          }
+        }
+      }
+    })();
 
   </script>
   
