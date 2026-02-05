@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download MeepleUp</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+      text-align: center;
+    }
+    .spinner {
+      border: 3px solid var(--border-color, #dee2e6);
+      border-top: 3px solid var(--primary-color, #d45d5d);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1rem;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .download-options {
+      margin-top: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      align-items: center;
+    }
+    .download-button {
+      display: inline-block;
+      padding: 12px 24px;
+      background-color: var(--primary-color, #d45d5d);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: transform 0.2s ease, background-color 0.2s ease;
+    }
+    .download-button:hover {
+      transform: scale(1.05);
+      background-color: #c04d4d;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="spinner"></div>
+    <p>Detecting your device...</p>
+    <p style="font-size: 0.9rem; color: var(--text-secondary, #6c757d);">Redirecting you to the app store...</p>
+    
+    <div class="download-options" id="downloadOptions" style="display: none;">
+      <p style="margin-bottom: 1rem;">Choose your platform:</p>
+      <a href="https://apps.apple.com/us/app/meepleup/id6754894730" class="download-button" style="background-color: #007AFF;">
+        Download for iOS
+      </a>
+      <a href="https://play.google.com/store/apps/details?id=com.meepleup.app" class="download-button" style="background-color: #34A853;">
+        Download for Android
+      </a>
+      <a href="index.html" class="download-button" style="background-color: var(--text-secondary, #6c757d);">
+        Back to Home
+      </a>
+    </div>
+  </div>
+
+  <script>
+    // Device detection and redirect - immediate execution
+    (function() {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      
+      // Check for iOS (including iPad on iOS 13+)
+      const isIOS = /iPad|iPhone|iPod/.test(userAgent) || 
+                    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      
+      // Check for Android
+      const isAndroid = /android/i.test(userAgent);
+      
+      // Redirect based on device type - use replace to avoid back button issues
+      if (isIOS) {
+        // Redirect to iOS App Store immediately
+        window.location.replace('https://apps.apple.com/us/app/meepleup/id6754894730');
+      } else if (isAndroid) {
+        // Redirect to Google Play Store immediately
+        window.location.replace('https://play.google.com/store/apps/details?id=com.meepleup.app');
+      } else {
+        // Desktop or unknown device - show download options after a brief delay
+        setTimeout(function() {
+          const spinner = document.querySelector('.spinner');
+          const paragraphs = document.querySelectorAll('p');
+          if (spinner) spinner.style.display = 'none';
+          paragraphs.forEach(p => p.style.display = 'none');
+          const options = document.getElementById('downloadOptions');
+          if (options) options.style.display = 'flex';
+        }, 1000);
+      }
+    })();
+  </script>
+</body>
+</html>
+
