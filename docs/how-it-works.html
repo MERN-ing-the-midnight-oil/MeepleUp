@@ -52,6 +52,16 @@
             }
         }
         
+        /* Shimmer animation */
+        @keyframes shimmer {
+            0% {
+                background-position: -1000px 0;
+            }
+            100% {
+                background-position: 1000px 0;
+            }
+        }
+        
         /* Player Aid Card Specific Styles */
         .player-aid-card {
             background: linear-gradient(to bottom, #fef8e8 0%, #fef3d6 100%);
@@ -67,6 +77,18 @@
             overflow: hidden;
             margin: 0 auto; /* Center the card */
             box-sizing: border-box;
+            /* Subtle shimmer effect */
+            background-image: 
+                linear-gradient(
+                    90deg,
+                    transparent 0%,
+                    rgba(255, 255, 255, 0.1) 50%,
+                    transparent 100%
+                ),
+                linear-gradient(to bottom, #fef8e8 0%, #fef3d6 100%);
+            background-size: 1000px 100%, 100% 100%;
+            background-position: -1000px 0, 0 0;
+            animation: shimmer 8s infinite;
         }
 
         /* Linen texture overlay */
@@ -194,15 +216,14 @@
             padding: 0;
             margin: 0;
             flex: 1; /* Allow list to grow and fill space */
-            overflow: hidden; /* No scrolling - content must fit */
             display: flex;
             flex-direction: column;
-            justify-content: space-between; /* Distribute items evenly */
         }
         
         @media (max-width: 640px) {
             .actions-list {
                 gap: 0; /* Remove gaps between items */
+                overflow: visible; /* Allow content to be visible */
             }
         }
 
@@ -365,14 +386,16 @@
                 padding: 15px 12px;
                 border-radius: 0;
                 margin: 0;
-                overflow: hidden; /* No scrolling - content must fit */
+                overflow-y: auto; /* Allow scrolling to see all content */
+                overflow-x: hidden;
+                -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
             }
             
             .card-content {
                 height: 100%;
                 display: flex;
                 flex-direction: column;
-                overflow: hidden;
+                min-height: min-content; /* Allow content to expand */
             }
 
             .card-title {
