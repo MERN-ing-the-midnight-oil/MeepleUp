@@ -796,6 +796,13 @@ body {
     position: relative;
     transition: all 0.1s ease-out;
   }
+}
+
+/* Remove sticky positioning on mobile for logo section */
+@media (max-width: 767.98px) {
+  .logo-section {
+    position: static !important;
+  }
 
   .logo-section.scrolled {
     position: fixed;
