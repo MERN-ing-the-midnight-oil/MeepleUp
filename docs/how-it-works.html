@@ -13,35 +13,25 @@
     <style>
         /* Mobile-specific styles for Player Aid page */
         @media (max-width: 767.98px) {
-            /* Remove sticky positioning from logo section */
+            /* Hide logo section on mobile for player aid page */
             .logo-section {
-                position: static !important;
+                display: none !important;
             }
             
-            /* Ensure content-wrapper stacks vertically on mobile */
+            /* Ensure content-wrapper uses full width */
             .content-wrapper {
                 display: flex !important;
                 flex-direction: column !important;
                 gap: 0 !important;
-            }
-            
-            /* Ensure logo section and content section stack */
-            .logo-section,
-            .content-section {
                 width: 100% !important;
                 max-width: 100% !important;
             }
             
-            /* Center the logo section items */
-            .logo-section {
-                order: 1;
-                align-items: center;
-            }
-            
-            /* Content section comes after logo */
+            /* Content section takes full width */
             .content-section {
-                order: 2;
-                padding: 0.5rem 0 0 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                padding: 0 !important;
                 margin: 0 !important;
             }
             
@@ -164,7 +154,7 @@
         
         @media (max-width: 640px) {
             .card-header {
-                margin-bottom: 25px;
+                margin-bottom: 15px; /* Reduce spacing on mobile */
             }
         }
 
@@ -192,13 +182,28 @@
             font-size: 18px;
             opacity: 0.7;
         }
+        
+        @media (max-width: 640px) {
+            .divider {
+                margin: 15px 0 20px 0; /* Reduce spacing on mobile */
+            }
+        }
 
         .actions-list {
             list-style: none;
             padding: 0;
             margin: 0;
             flex: 1; /* Allow list to grow and fill space */
-            overflow-y: auto; /* Allow scrolling if content is too long */
+            overflow: hidden; /* No scrolling - content must fit */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between; /* Distribute items evenly */
+        }
+        
+        @media (max-width: 640px) {
+            .actions-list {
+                gap: 0; /* Remove gaps between items */
+            }
         }
 
         .action-item {
@@ -210,6 +215,13 @@
             border-radius: 12px;
             border: 1px solid rgba(244, 197, 66, 0.3);
         }
+        
+        @media (max-width: 640px) {
+            .action-item {
+                padding: 12px 15px; /* Reduce padding on mobile */
+                margin-bottom: 0;
+            }
+        }
 
         .action-item:last-child {
             margin-bottom: 0;
@@ -220,6 +232,12 @@
             justify-content: center;
             margin: 12px 0;
             list-style: none;
+        }
+        
+        @media (max-width: 640px) {
+            .action-separator {
+                margin: 6px 0; /* Reduce spacing on mobile */
+            }
         }
 
         .action-icon-wrapper {
@@ -246,6 +264,15 @@
             fill: none;
             margin: 16px 0;
             opacity: 0.8;
+        }
+        
+        @media (max-width: 640px) {
+            .arrow-down {
+                width: 20px;
+                height: 24px;
+                stroke-width: 3.5; /* Make it bold */
+                margin: 8px 0; /* Reduce spacing */
+            }
         }
 
         .action-content {
@@ -333,54 +360,49 @@
             .player-aid-card {
                 width: 100%;
                 max-width: 100%;
-                height: calc(100vh - 60px); /* Fill screen minus back button space */
+                height: calc(100vh - 50px); /* Fill screen minus back button space */
                 max-height: none;
-                padding: 20px 15px;
+                padding: 15px 12px;
                 border-radius: 0;
                 margin: 0;
-                overflow-y: auto;
-                overflow-x: hidden;
-                -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+                overflow: hidden; /* No scrolling - content must fit */
             }
             
             .card-content {
                 height: 100%;
                 display: flex;
                 flex-direction: column;
+                overflow: hidden;
             }
 
             .card-title {
-                font-size: 24px;
+                font-size: 32px; /* Keep original size */
             }
             
             .card-subtitle {
-                font-size: 14px;
+                font-size: 16px; /* Keep original size */
             }
 
             .action-verb {
-                font-size: 16px;
+                font-size: 20px; /* Keep original size */
             }
 
             .action-description {
-                font-size: 13px;
+                font-size: 15px; /* Keep original size */
             }
 
             .action-icon {
-                width: 36px;
-                height: 36px;
+                width: 48px; /* Keep original size */
+                height: 48px;
             }
             
-            .action-item {
-                padding: 15px;
-            }
-            
-            .divider {
-                margin: 20px 0;
+            .action-icon-wrapper {
+                margin-right: 15px; /* Slightly reduce icon margin */
             }
             
             .back-link {
-                margin-bottom: 1rem;
-                padding: 0.5rem 0;
+                margin-bottom: 0.5rem;
+                padding: 0.5rem 1rem;
             }
         }
 
@@ -416,7 +438,7 @@
 
       <!-- Right Side: Content Section with Player Aid Card -->
       <section class="content-section">
-        <a href="index.html" class="back-link">← Back to Home</a>
+        <a href="index.html" class="back-link">Back</a>
         
         <article class="player-aid-card">
             <div class="corner-ornament top-left" aria-hidden="true"></div>
