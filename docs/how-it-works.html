@@ -22,7 +22,7 @@
             .content-wrapper {
                 display: flex !important;
                 flex-direction: column !important;
-                gap: 2rem !important;
+                gap: 0 !important;
             }
             
             /* Ensure logo section and content section stack */
@@ -41,6 +41,24 @@
             /* Content section comes after logo */
             .content-section {
                 order: 2;
+                padding: 0.5rem 0 0 0 !important;
+                margin: 0 !important;
+            }
+            
+            /* Make main container fill viewport on mobile */
+            .main-container {
+                padding: 0 !important;
+                align-items: flex-start !important;
+                min-height: 100vh !important;
+            }
+            
+            /* Ensure back button is visible */
+            .back-link {
+                position: relative;
+                z-index: 10;
+                background: rgba(255, 255, 255, 0.9);
+                padding: 0.5rem 1rem;
+                margin-bottom: 0.5rem;
             }
         }
         
@@ -135,11 +153,19 @@
         .card-content {
             position: relative;
             z-index: 1;
+            min-height: 0; /* Allow flex shrinking */
         }
 
         .card-header {
             text-align: center;
             margin-bottom: 40px;
+            flex-shrink: 0; /* Don't shrink header */
+        }
+        
+        @media (max-width: 640px) {
+            .card-header {
+                margin-bottom: 25px;
+            }
         }
 
         .card-title {
@@ -171,6 +197,8 @@
             list-style: none;
             padding: 0;
             margin: 0;
+            flex: 1; /* Allow list to grow and fill space */
+            overflow-y: auto; /* Allow scrolling if content is too long */
         }
 
         .action-item {
@@ -303,28 +331,56 @@
 
         @media (max-width: 640px) {
             .player-aid-card {
-                width: 90%;
-                max-width: 400px;
-                height: calc(90vw * 2); /* Maintain 2:1 ratio */
-                max-height: 800px;
-                padding: 35px 25px;
+                width: 100%;
+                max-width: 100%;
+                height: calc(100vh - 60px); /* Fill screen minus back button space */
+                max-height: none;
+                padding: 20px 15px;
+                border-radius: 0;
+                margin: 0;
+                overflow-y: auto;
+                overflow-x: hidden;
+                -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+            }
+            
+            .card-content {
+                height: 100%;
+                display: flex;
+                flex-direction: column;
             }
 
             .card-title {
-                font-size: 26px;
+                font-size: 24px;
             }
-
-            .action-verb {
-                font-size: 18px;
-            }
-
-            .action-description {
+            
+            .card-subtitle {
                 font-size: 14px;
             }
 
+            .action-verb {
+                font-size: 16px;
+            }
+
+            .action-description {
+                font-size: 13px;
+            }
+
             .action-icon {
-                width: 40px;
-                height: 40px;
+                width: 36px;
+                height: 36px;
+            }
+            
+            .action-item {
+                padding: 15px;
+            }
+            
+            .divider {
+                margin: 20px 0;
+            }
+            
+            .back-link {
+                margin-bottom: 1rem;
+                padding: 0.5rem 0;
             }
         }
 
