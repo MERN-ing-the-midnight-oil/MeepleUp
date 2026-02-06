@@ -11,6 +11,39 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&family=Garamond:wght@400;700&display=swap" rel="stylesheet">
     <style>
+        /* Mobile-specific styles for Player Aid page */
+        @media (max-width: 767.98px) {
+            /* Remove sticky positioning from logo section */
+            .logo-section {
+                position: static !important;
+            }
+            
+            /* Ensure content-wrapper stacks vertically on mobile */
+            .content-wrapper {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 2rem !important;
+            }
+            
+            /* Ensure logo section and content section stack */
+            .logo-section,
+            .content-section {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            
+            /* Center the logo section items */
+            .logo-section {
+                order: 1;
+                align-items: center;
+            }
+            
+            /* Content section comes after logo */
+            .content-section {
+                order: 2;
+            }
+        }
+        
         /* Player Aid Card Specific Styles */
         .player-aid-card {
             background: linear-gradient(to bottom, #fef8e8 0%, #fef3d6 100%);
@@ -329,17 +362,17 @@
       <section class="content-section">
         <a href="index.html" class="back-link">← Back to Home</a>
         
-        <div class="player-aid-card">
-            <div class="corner-ornament top-left"></div>
-            <div class="corner-ornament top-right"></div>
-            <div class="corner-ornament bottom-left"></div>
-            <div class="corner-ornament bottom-right"></div>
+        <article class="player-aid-card">
+            <div class="corner-ornament top-left" aria-hidden="true"></div>
+            <div class="corner-ornament top-right" aria-hidden="true"></div>
+            <div class="corner-ornament bottom-left" aria-hidden="true"></div>
+            <div class="corner-ornament bottom-right" aria-hidden="true"></div>
             
             <div class="card-content">
-                <div class="card-header">
+                <header class="card-header">
                     <h1 class="card-title">Player Aid</h1>
                     <p class="card-subtitle">Plan Apart, Play Together</p>
-                </div>
+                </header>
 
                 <div class="divider">━━◆━━</div>
 
@@ -355,8 +388,8 @@
                             </svg>
                         </div>
                         <div class="action-content">
-                            <div class="action-verb">Confirm</div>
-                            <div class="action-description">Members RSVP for a date</div>
+                            <h3 class="action-verb">Confirm</h3>
+                            <p class="action-description">Members RSVP for a date</p>
                         </div>
                     </li>
 
@@ -377,8 +410,8 @@
                             </svg>
                         </div>
                         <div class="action-content">
-                            <div class="action-verb">Propose</div>
-                            <div class="action-description">Confirmed members browse everyone's games and propose their favorite options</div>
+                            <h3 class="action-verb">Propose</h3>
+                            <p class="action-description">Confirmed members browse everyone's games and propose their favorite options</p>
                         </div>
                     </li>
 
@@ -396,8 +429,8 @@
                             </svg>
                         </div>
                         <div class="action-content">
-                            <div class="action-verb">Weigh In</div>
-                            <div class="action-description">Members give star ratings to proposed games</div>
+                            <h3 class="action-verb">Weigh In</h3>
+                            <p class="action-description">Members give star ratings to proposed games</p>
                         </div>
                     </li>
 
@@ -417,24 +450,15 @@
                             </svg>
                         </div>
                         <div class="action-content">
-                            <div class="action-verb">Bring</div>
-                            <div class="action-description">Members bring games from their libraries with high interest</div>
+                            <h3 class="action-verb">Bring</h3>
+                            <p class="action-description">Members bring games from their libraries with high interest</p>
                         </div>
                     </li>
                 </ol>
             </div>
-        </div>
+        </article>
       </section>
     </div>
-    
-    <!-- Legal Links Footer -->
-    <footer class="legal-links-footer">
-      <nav class="legal-links-nav">
-        <a href="privacy-policy.html">Privacy Policy</a>
-        <span class="legal-links-separator">•</span>
-        <a href="terms-of-service.html">Terms of Service</a>
-      </nav>
-    </footer>
   </main>
   <script src="script.js"></script>
 </body>

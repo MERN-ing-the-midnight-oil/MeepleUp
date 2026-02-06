@@ -10,6 +10,24 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    /* Show sidebar legal links on desktop, hide on mobile */
+    @media (max-width: 767.98px) {
+      .sidebar-legal-links {
+        display: none !important;
+      }
+      .mobile-legal-links {
+        display: block !important;
+      }
+    }
+    
+    /* Show mobile legal links on mobile, hide on desktop */
+    @media (min-width: 768px) {
+      .mobile-legal-links {
+        display: none !important;
+      }
+    }
+  </style>
 </head>
 <body>
   <main class="main-container">
@@ -32,15 +50,15 @@
 
         <!-- Player Aid Button -->
         <a href="how-it-works.html" class="player-aid-card">
-          <div class="player-aid-header">Player Aid</div>
+          <h2 class="player-aid-header">Player Aid</h2>
         </a>
 
         <figure class="bgg-badge" id="bggBadge">
           <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
         </figure>
 
-        <!-- Legal Links -->
-        <nav class="sidebar-legal-links">
+        <!-- Legal Links - Desktop only (hidden on mobile) -->
+        <nav class="sidebar-legal-links" style="display: block;">
           <a href="privacy-policy.html">Privacy Policy</a>
           <span class="legal-separator">•</span>
           <a href="terms-of-service.html">Terms of Service</a>
@@ -49,15 +67,15 @@
 
       <!-- Right Side: Content Section -->
       <section class="content-section">
-        <div class="welcome-intro">
-          <div class="welcome-text">
+        <article class="welcome-intro">
+          <header class="welcome-text">
             <h2 class="welcome-header">Game Night, Pre-Loaded.</h2>
             
             <p class="welcome-subheader">
               Browse your group's complete collection and vote on games before you arrive. MeepleUp suggests what to play based on votes and your preferences—so game night can start with dice hitting the table.
             </p>
-          </div>
-        </div>
+          </header>
+        </article>
 
         <p class="welcome-content">
           <strong>Smart Collection Management</strong><br>
@@ -106,26 +124,26 @@
             </style>
             <div class="download-content-wrapper">
               <!-- QR Code for Desktop Users -->
-              <div id="downloadQrContainer" style="display: none; flex-direction: column; align-items: center;">
-                <p id="downloadQrLabel" style="font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem; white-space: nowrap; text-align: center; width: 100%; font-weight: bold;">Download on Mobile</p>
+              <figure id="downloadQrContainer" style="display: none; flex-direction: column; align-items: center;">
+                <figcaption id="downloadQrLabel" style="font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem; white-space: nowrap; text-align: center; width: 100%; font-weight: bold;">Download on Mobile</figcaption>
                 <img id="downloadQrImage" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com/download.html" alt="Scan to download MeepleUp" style="height: auto; border: 2px solid var(--border-color, #dee2e6); border-radius: 8px; padding: 8px; background: white; box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));">
-              </div>
+              </figure>
               <!-- Download buttons container -->
-              <div class="download-buttons-container" style="display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 600px; align-items: stretch;">
+              <nav class="download-buttons-container" style="display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 600px; align-items: stretch;">
                 <!-- App Store buttons row - Only visible on mobile -->
-                <div id="appStoreButtons" style="display: none; gap: 15px; width: 100%; align-items: stretch;">
+                <nav id="appStoreButtons" style="display: none; gap: 15px; width: 100%; align-items: stretch;">
                   <a href="https://apps.apple.com/us/app/meepleup/id6754894730" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px; background-color: #000; border-radius: 8px; transition: transform 0.2s ease, opacity 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'; this.style.opacity='0.9';" onmouseout="this.style.transform='scale(1)'; this.style.opacity='1';">
                     <img src="images/appstore.svg" alt="Download on the App Store" style="max-width: 100%; height: auto; max-height: 50px;">
                   </a>
                   <a href="https://play.google.com/store/apps/details?id=com.meepleup.app" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px; background-color: #000; border-radius: 8px; transition: transform 0.2s ease, opacity 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'; this.style.opacity='0.9';" onmouseout="this.style.transform='scale(1)'; this.style.opacity='1';">
                     <img src="images/google-play-badge.png" alt="Get it on Google Play" style="max-width: 100%; height: auto; max-height: 50px;">
                   </a>
-                </div>
+                </nav>
                 <!-- Web browser button -->
                 <a href="https://meepleup-951a1.web.app" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px 24px; background-color: var(--primary-color, #d45d5d); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 1rem; transition: transform 0.2s ease, background-color 0.2s ease; box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));" onmouseover="this.style.transform='scale(1.02)'; this.style.backgroundColor='#c04d4d'; this.style.boxShadow='var(--shadow-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1))';" onmouseout="this.style.transform='scale(1)'; this.style.backgroundColor='var(--primary-color, #d45d5d)'; this.style.boxShadow='var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1))';">
                   Use your browser
                 </a>
-              </div>
+              </nav>
             </div>
           </section>
         </div>
@@ -136,6 +154,13 @@
             contact@meepleup.com
           </a>
         </address>
+
+        <!-- Legal Links - Mobile only (hidden on desktop) -->
+        <nav class="mobile-legal-links" style="text-align: center; margin-top: 2rem; padding: 1rem 0; display: none;">
+          <a href="privacy-policy.html" style="color: var(--text-secondary, #6c757d); text-decoration: none; font-size: 0.875rem; margin: 0 0.5rem;">Privacy Policy</a>
+          <span style="color: var(--text-secondary, #6c757d); margin: 0 0.25rem;">•</span>
+          <a href="terms-of-service.html" style="color: var(--text-secondary, #6c757d); text-decoration: none; font-size: 0.875rem; margin: 0 0.5rem;">Terms of Service</a>
+        </nav>
       </section>
     </div>
   </main>
