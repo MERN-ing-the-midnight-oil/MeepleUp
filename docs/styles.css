@@ -805,20 +805,16 @@ body {
   }
 
   .logo-section.scrolled {
-    position: fixed;
-    top: 1rem;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 100;
-    flex-direction: row;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.5rem 1rem;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
-    box-shadow: var(--shadow-lg);
-    width: auto;
+    position: static !important;
+    transform: none !important;
+    left: auto !important;
+    width: 100% !important;
+    flex-direction: column !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 1rem !important;
   }
 
   .app-icon-container {
