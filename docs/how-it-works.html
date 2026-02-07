@@ -91,8 +91,8 @@
             animation: shimmer 8s infinite;
         }
 
-        /* Linen texture overlay */
-        .player-aid-card::before {
+        /* Linen texture overlay - moved to card-content to stay within yellow border */
+        .card-content::before {
             content: '';
             position: absolute;
             top: 0;
@@ -104,6 +104,13 @@
                 repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(0,0,0,.03) 2px, rgba(0,0,0,.03) 4px);
             pointer-events: none;
             opacity: 0.5;
+            border-radius: 14px; /* Match the border radius minus 2px for border width */
+            z-index: 0; /* Behind content but above background */
+        }
+        
+        /* Remove texture from card itself */
+        .player-aid-card::before {
+            display: none;
         }
 
         /* Inner border - moved to card-content to expand with content */
@@ -171,6 +178,8 @@
             text-align: center;
             margin-bottom: 40px;
             flex-shrink: 0; /* Don't shrink header */
+            position: relative;
+            z-index: 1; /* Above texture */
         }
         
         @media (max-width: 640px) {
@@ -217,6 +226,8 @@
             flex: 1; /* Allow list to grow and fill space */
             display: flex;
             flex-direction: column;
+            position: relative;
+            z-index: 1; /* Above texture */
         }
         
         @media (max-width: 640px) {
