@@ -106,18 +106,20 @@
             opacity: 0.5;
         }
 
-        /* Inner border */
-        .player-aid-card::after {
-            content: '';
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            right: 12px;
-            bottom: 12px;
+        /* Inner border - moved to card-content to expand with content */
+        .card-content {
+            position: relative;
+            z-index: 1;
             border: 2px solid #f4c542;
             border-radius: 16px;
-            pointer-events: none;
-            opacity: 0.6;
+            padding: 8px;
+            min-height: calc(100% - 16px);
+            box-sizing: border-box;
+        }
+        
+        /* Remove the old ::after border */
+        .player-aid-card::after {
+            display: none;
         }
 
         /* Corner embellishments */
