@@ -122,7 +122,7 @@
             padding: 8px;
             min-height: calc(100% - 16px);
             box-sizing: border-box;
-            overflow: hidden; /* Prevent texture from going outside border */
+            overflow: visible; /* Allow content to scroll */
         }
         
         /* Remove the old ::after border */
@@ -409,13 +409,14 @@
             }
             
             .card-content {
-                height: 100%;
+                height: auto;
+                min-height: 100%;
                 display: flex;
                 flex-direction: column;
-                min-height: min-content; /* Allow content to expand */
                 padding: 6px; /* Reduce padding on mobile but keep border */
                 border: 2px solid rgba(244, 197, 66, 0.6); /* Ensure border is maintained on mobile with opacity */
                 border-radius: 12px; /* Slightly smaller radius on mobile */
+                overflow: visible; /* Allow content to scroll */
             }
 
             .card-title {
