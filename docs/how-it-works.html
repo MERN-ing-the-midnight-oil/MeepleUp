@@ -72,7 +72,7 @@
             width: 600px;
             height: 1200px; /* 2:1 height to width ratio */
             padding: 45px;
-            border: 6px solid #c63d2f;
+            border: none; /* Removed red border */
             position: relative;
             overflow: hidden;
             margin: 0 auto; /* Center the card */
@@ -246,6 +246,12 @@
 
         .action-item:last-child {
             margin-bottom: 0;
+        }
+        
+        @media (max-width: 640px) {
+            .action-item:last-child {
+                margin-bottom: 20px; /* Add padding after last item on mobile */
+            }
         }
 
         .action-separator {
