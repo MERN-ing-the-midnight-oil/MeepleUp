@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Print a MeepleUp flyer for your business or venue.">
+  <title>Print a Flyer – MeepleUp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #f1f5f9;
+      padding: 1.5rem;
+      color: #1e293b;
+    }
+
+    .back-link {
+      display: inline-block;
+      margin-bottom: 1rem;
+      color: #475569;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .back-link:hover { color: #0f172a; text-decoration: underline; }
+
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+      color: #0f172a;
+    }
+
+    .flyer-form {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      max-width: 28rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .flyer-form label {
+      display: block;
+      font-weight: 500;
+      font-size: 0.875rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .flyer-form input[type="text"] {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .flyer-form input[type="text"]::placeholder {
+      color: #94a3b8;
+    }
+
+    .flyer-form fieldset {
+      border: none;
+      margin-bottom: 0.5rem;
+    }
+
+    .flyer-form legend {
+      font-weight: 500;
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .flyer-form .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .flyer-form .radio-option input { width: auto; margin: 0; }
+
+    .print-button-container {
+      margin-top: 1rem;
+    }
+
+    .print-button {
+      background: #0f172a;
+      color: white;
+      border: none;
+      padding: 0.65rem 1.25rem;
+      font-size: 1rem;
+      font-weight: 500;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .print-button:hover {
+      background: #1e293b;
+    }
+
+    .flyer-preview {
+      margin-top: 1.5rem;
+    }
+
+    .preview-placeholder {
+      color: #64748b;
+      font-size: 0.95rem;
+      padding: 1rem 0;
+    }
+
+    .print-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ----- Join-code flyer layout (from mailers) ----- */
+    .jcf {
+      position: relative;
+      width: 8.5in;
+      min-height: 11in;
+      padding: 0;
+      overflow: hidden;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+
+    .jcf-panel {
+      position: relative;
+      width: 55%;
+      max-width: 4.75in;
+      margin: -1in auto 0;
+      min-height: 11in;
+      padding: 0.5in 0.4in 0.5in 0.65in;
+      background: transparent;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .jcf-panel .jcf-title,
+    .jcf-panel .jcf-lead {
+      color: #1e293b;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .jcf-panel .jcf-title {
+      font-size: 28pt;
+      margin-bottom: 0.15in;
+    }
+
+    .jcf-panel .jcf-lead {
+      font-size: 18pt;
+      font-weight: 500;
+      margin-bottom: 0.1in;
+    }
+
+    .jcf-panel .jcf-banners {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25in;
+      margin-top: 0.1in;
+    }
+
+    .jcf-panel .jcf-banners img {
+      display: block;
+      height: auto;
+      object-fit: contain;
+    }
+
+    .jcf-banner-meeple { height: 0.91in; }
+    .jcf-banner-bgg { height: 0.84in; }
+
+    /* Dungeon only: push copy down ~1in; center banners; 50% larger banners; 20% larger text */
+    .jcf:not(.jcf-skyscraper) .jcf-panel .jcf-title {
+      margin-top: 0.5in;
+      font-size: 30.6pt;
+    }
+
+    .jcf:not(.jcf-skyscraper) .jcf-panel .jcf-lead {
+      font-size: 19.8pt;
+    }
+
+    .jcf:not(.jcf-skyscraper) .jcf-panel .jcf-banners {
+      max-width: 65%;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .jcf:not(.jcf-skyscraper) .jcf-banners .jcf-banner-meeple,
+    .jcf:not(.jcf-skyscraper) .jcf-banners .jcf-banner-bgg {
+      height: auto;
+      max-width: 100%;
+    }
+
+    .jcf:not(.jcf-skyscraper) .jcf-banners .jcf-banner-meeple { max-height: 1.23in; }
+    .jcf:not(.jcf-skyscraper) .jcf-banners .jcf-banner-bgg { max-height: 1.26in; }
+
+    .jcf-cta {
+      position: absolute;
+      bottom: 0.2in;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      min-width: 2.35in;
+      width: max-content;
+      max-width: 7in;
+      padding: 0.14in 0.18in;
+      background: rgba(220, 208, 194, 0.92);
+      border-radius: 6px;
+      border: 1px solid rgba(114, 47, 55, 0.3);
+      box-sizing: border-box;
+    }
+
+    .jcf-cta .jcf-join {
+      margin: 0 0 0.08in 0;
+      font-size: 10pt;
+      font-weight: 700;
+      color: #1e293b;
+    }
+
+    .jcf-cta-inner {
+      display: flex;
+      gap: 0.12in;
+      align-items: flex-start;
+    }
+
+    .jcf-cta-qr {
+      flex-shrink: 0;
+    }
+
+    .jcf-cta-qr .jcf-qr {
+      width: 0.65in;
+      height: 0.65in;
+      display: block;
+    }
+
+    .jcf-cta-steps {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .jcf-cta-steps .jcf-step {
+      font-size: 17pt;
+      line-height: 1.4;
+      margin: 0 0 0.05in 0;
+    }
+
+    .jcf-cta-steps .jcf-step:last-child {
+      margin-bottom: 0;
+    }
+
+    .jcf-cta-steps .jcf-step-code {
+      display: flex;
+      flex-direction: column;
+      gap: 0.02in;
+      margin-top: 0.04in;
+    }
+
+    .jcf-cta-steps .jcf-step-label {
+      font-size: 12.75pt;
+    }
+
+    .jcf-cta .jcf-code {
+      color: #722f37;
+      font-size: 30pt;
+      line-height: 1.1;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      display: block;
+      white-space: nowrap;
+    }
+
+    /* Skyscraper: trapezoid panel */
+    .jcf-skyscraper .jcf-panel {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      max-width: none;
+      min-height: 11in;
+      padding: 0 8% 6% 8%;
+      clip-path: polygon(33% 2%, 67% 2%, 84% 78%, 16% 78%);
+      justify-content: flex-start;
+      align-items: center;
+    }
+
+    .jcf-skyscraper .jcf-panel .jcf-title,
+    .jcf-skyscraper .jcf-panel .jcf-lead,
+    .jcf-skyscraper .jcf-panel .jcf-banners {
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+      margin-left: auto;
+      margin-right: auto;
+      text-align: center;
+    }
+
+    .jcf-skyscraper .jcf-panel .jcf-title {
+      max-width: 32%;
+      margin-top: 0.25in;
+      font-size: 26pt;
+    }
+
+    .jcf-skyscraper .jcf-panel .jcf-lead {
+      max-width: 50%;
+      font-size: 24pt;
+      margin-bottom: 0.05in;
+    }
+
+    .jcf-skyscraper .jcf-panel .jcf-banners {
+      max-width: 65%;
+      margin-top: 0.05in;
+      flex-direction: row;
+    }
+
+    .jcf-skyscraper .jcf-banners .jcf-banner-meeple { height: 0.91in; }
+    .jcf-skyscraper .jcf-banners .jcf-banner-bgg { height: 0.84in; }
+
+    /* Skyscraper: CTA box variant (different background/border) */
+    .jcf-skyscraper .jcf-cta {
+      background: rgba(255, 252, 240, 0.92);
+      border-color: rgba(0, 0, 0, 0.15);
+    }
+
+    /* Screen: scale preview to fit */
+    @media screen {
+      .flyer-preview .jcf {
+        margin: 0 auto;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        max-width: 100%;
+        width: 8.5in;
+      }
+    }
+
+    /* Print: one page, hide form */
+    @media print {
+      body {
+        background: white;
+        padding: 0;
+      }
+
+      .back-link,
+      .flyer-form,
+      .print-button-container,
+      h1 {
+        display: none !important;
+      }
+
+      .flyer-preview {
+        margin: 0;
+      }
+
+      .flyer-preview .jcf {
+        width: 8.5in;
+        min-height: 11in;
+        height: 11in;
+        margin: 0;
+        box-shadow: none;
+      }
+
+      @page {
+        size: 8.5in 11in portrait;
+        margin: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a href="index.html" class="back-link">← Back to MeepleUp</a>
+  <h1>Print a flyer</h1>
+
+  <form class="flyer-form" id="flyerForm">
+    <label for="cafeName">Business or venue name</label>
+    <input type="text" id="cafeName" name="cafeName" placeholder="e.g. The Dice & Mug Cafe" required aria-required="true" />
+
+    <fieldset>
+      <legend>Flyer style</legend>
+      <label class="radio-option">
+        <input type="radio" name="template" value="dungeon" checked />
+        Dungeon (parchment)
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="template" value="skyscraper" />
+        Skyscraper (retro sci‑fi)
+      </label>
+    </fieldset>
+
+    <div class="print-button-container">
+      <button type="button" class="print-button" id="printBtn">Print flyer</button>
+    </div>
+  </form>
+
+  <div class="flyer-preview" id="flyerPreview" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      const DOWNLOAD_QR_URL = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent('https://meepleup.com/download.html');
+      const DUNGEON_IMG = 'images/flyer-dungeon.png';
+      const SKYSCRAPER_IMG = 'images/flyer-skyscraper.png';
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      function renderJoinCodeFlierPage(cafeName, useSkyscraper) {
+        const safeCafe = escapeHtml((cafeName || '').trim());
+        // Possessive: name ends in s → [Name]' (e.g. Rhys'); otherwise → [Name]'s (e.g. Acme's)
+        const possessive = /s$/i.test(safeCafe) ? safeCafe + "'" : safeCafe + "'s";
+        const title = safeCafe + " is on MeepleUp.";
+        const lead = "Browse our game library anytime, and your fellow gamers' libraries too. Get recommendations, make connections, and come ready to play.";
+        const joinText = "Join " + possessive + " MeepleUp";
+
+        const bgImg = useSkyscraper ? SKYSCRAPER_IMG : DUNGEON_IMG;
+        const bgStyle = 'background-image: url(' + bgImg + ');';
+        const skyscraperClass = useSkyscraper ? ' jcf-skyscraper' : '';
+
+        const qrBlock = '<div class="jcf-cta-qr"><img src="' + escapeHtml(DOWNLOAD_QR_URL) + '" alt="Download MeepleUp" class="jcf-qr" /></div>';
+        const jcfBannersHtml = '<div class="jcf-banners">' +
+          '<img src="images/meeple-banner.png" alt="MeepleUp" class="jcf-banner-meeple" />' +
+          '<img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="jcf-banner-bgg" />' +
+          '</div>';
+
+        return '<div class="flier-page jcf' + skyscraperClass + '" style="' + bgStyle + '">' +
+          '<div class="jcf-panel">' +
+            '<p class="jcf-title">' + title + '</p>' +
+            '<p class="jcf-lead">' + lead + '</p>' +
+            jcfBannersHtml +
+          '</div>' +
+          '<div class="jcf-cta">' +
+            '<p class="jcf-join">' + joinText + '</p>' +
+            '<div class="jcf-cta-inner">' +
+              qrBlock +
+              '<div class="jcf-cta-steps">' +
+                '<p class="jcf-step jcf-step-code">' +
+                  '<span class="jcf-step-label">Scan to download. Use this three-word join code:</span>' +
+                  '<span class="jcf-code">____ · ____ · ____</span>' +
+                '</p>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function updatePreview() {
+        const cafeName = document.getElementById('cafeName').value.trim();
+        const useSkyscraper = document.querySelector('input[name="template"]:checked').value === 'skyscraper';
+        const previewEl = document.getElementById('flyerPreview');
+        const printBtn = document.getElementById('printBtn');
+        if (!cafeName) {
+          previewEl.innerHTML = '<p class="preview-placeholder">Enter a business or venue name to preview the flyer.</p>';
+          printBtn.disabled = true;
+          return;
+        }
+        printBtn.disabled = false;
+        previewEl.innerHTML = renderJoinCodeFlierPage(cafeName, useSkyscraper);
+      }
+
+      document.getElementById('cafeName').addEventListener('input', updatePreview);
+      document.getElementById('cafeName').addEventListener('change', updatePreview);
+      document.querySelectorAll('input[name="template"]').forEach(function (radio) {
+        radio.addEventListener('change', updatePreview);
+      });
+
+      document.getElementById('printBtn').addEventListener('click', function () {
+        const cafeName = document.getElementById('cafeName').value.trim();
+        if (!cafeName) {
+          document.getElementById('cafeName').focus();
+          document.getElementById('cafeName').reportValidity();
+          return;
+        }
+        window.print();
+      });
+
+      updatePreview();
+    })();
+  </script>
+</body>
+</html>
