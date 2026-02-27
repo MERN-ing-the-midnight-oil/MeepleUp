@@ -3,234 +3,232 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="MeepleUp - Plan Apart, Play Together. The mobile app that makes game night planning effortless.">
-  <title>MeepleUp - Plan Apart, Play Together</title>
+  <meta name="description" content="MeepleUp is temporarily closed for emergency maintenance. Leave your email and we'll notify you when we're back.">
+  <title>MeepleUp - Emergency Maintenance</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    /* Show sidebar legal links on desktop, hide on mobile */
-    @media (max-width: 767.98px) {
-      .sidebar-legal-links {
-        display: none !important;
-      }
-      .mobile-legal-links {
-        display: block !important;
+    .maintenance-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+    .maintenance-page .app-icon {
+      width: 100px;
+      height: 100px;
+      margin-bottom: 1rem;
+    }
+    @media (min-width: 768px) {
+      .maintenance-page .app-icon {
+        width: 140px;
+        height: 140px;
       }
     }
-    
-    /* Show mobile legal links on mobile, hide on desktop */
+    .maintenance-page h1 {
+      font-size: 1.75rem;
+      color: #d45d5d;
+      margin: 0 0 1rem;
+      font-weight: 700;
+    }
     @media (min-width: 768px) {
-      .mobile-legal-links {
-        display: none !important;
+      .maintenance-page h1 {
+        font-size: 2.5rem;
       }
+    }
+    .maintenance-page .message {
+      font-size: 1rem;
+      color: #2b2b2b;
+      line-height: 1.5;
+      margin: 0 0 1.25rem;
+    }
+    @media (min-width: 768px) {
+      .maintenance-page .message {
+        font-size: 1.25rem;
+      }
+    }
+    .maintenance-page .question {
+      font-size: 0.95rem;
+      color: #6f6f6f;
+      line-height: 1.5;
+      margin: 0 0 1.5rem;
+    }
+    @media (min-width: 768px) {
+      .maintenance-page .question {
+        font-size: 1.125rem;
+      }
+    }
+    .maintenance-page .form-wrap {
+      width: 100%;
+      max-width: 320px;
+      margin: 0 auto;
+    }
+    .maintenance-page input[type="email"] {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 1rem;
+      border: 1px solid #c9b79c;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    .maintenance-page input[type="email"]:focus {
+      outline: none;
+      border-color: #d45d5d;
+      box-shadow: 0 0 0 2px rgba(212, 93, 93, 0.2);
+    }
+    .maintenance-page button {
+      width: 100%;
+      padding: 12px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      background-color: #d45d5d;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background-color 0.2s, opacity 0.2s;
+    }
+    .maintenance-page button:hover:not(:disabled) {
+      background-color: #c04d4d;
+    }
+    .maintenance-page button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+    .maintenance-page .error {
+      color: #c0392b;
+      font-size: 0.875rem;
+      margin-bottom: 12px;
+    }
+    .maintenance-page .success-box {
+      margin-top: 1.5rem;
+      padding: 1rem;
+      background-color: #e8f5e9;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 320px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .maintenance-page .success-box p {
+      margin: 0;
+      font-size: 1rem;
+      color: #2e7d32;
+      text-align: center;
+    }
+    .maintenance-page .legal {
+      margin-top: 2.5rem;
+      font-size: 0.875rem;
+      color: #6f6f6f;
+    }
+    .maintenance-page .legal a {
+      color: #4a90e2;
+      text-decoration: none;
+    }
+    .maintenance-page .legal a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <main class="main-container">
-    <div class="content-wrapper">
-      <!-- Left Side: Logo Section -->
-      <aside class="logo-section" id="logoSection">
-        <figure class="app-icon-container" id="appIconContainer">
-          <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
-        </figure>
-        
-        <figure class="website-qr-container" id="qrContainer" style="display: none;">
-          <p style="text-align: center; font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem;">Download on Mobile</p>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com/download.html" alt="Scan to download MeepleUp" class="website-qr-code">
-        </figure>
-        
-        <header class="sidebar-header">
-          <h1 class="brand-name">MeepleUp</h1>
-          <p class="tagline">Plan Apart, Play Together.</p>
-        </header>
+  <main class="maintenance-page">
+    <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" onerror="this.style.display='none'">
+    <h1>MeepleUp</h1>
+    <p class="message">MeepleUp is closed for emergency maintenance.</p>
+    <p class="question">Can I send you an email when MeepleUp is feeling better?</p>
 
-        <!-- Player Aid Button -->
-        <a href="how-it-works.html" class="player-aid-card">
-          <h2 class="player-aid-header">Player Aid</h2>
-        </a>
-
-        <!-- Print a Flyer (for businesses) -->
-        <a href="print-flyer.html" class="player-aid-card" style="margin-top: 0.5rem;">
-          <h2 class="player-aid-header">Print a Flyer</h2>
-        </a>
-
-        <figure class="bgg-badge" id="bggBadge">
-          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
-        </figure>
-
-        <!-- Legal Links - Desktop only (hidden on mobile) -->
-        <nav class="sidebar-legal-links" style="display: block;">
-          <a href="privacy-policy.html">Privacy Policy</a>
-          <span class="legal-separator">•</span>
-          <a href="terms-of-service.html">Terms of Service</a>
-        </nav>
-      </aside>
-
-      <!-- Right Side: Content Section -->
-      <section class="content-section">
-        <article class="welcome-intro">
-          <header class="welcome-text">
-            <h2 class="welcome-header">Game Night, Pre-Loaded.</h2>
-            
-            <p class="welcome-subheader">
-              Browse your group's complete collection and vote on games before you arrive. MeepleUp suggests what to play based on votes and your preferences—so game night can start with dice hitting the table.
-            </p>
-          </header>
-        </article>
-
-        <p class="welcome-content">
-          <strong>Smart Collection Management</strong><br>
-          Snap a photo of your shelf and MeepleUp automatically catalogs your games. Already on BoardGameGeek? Sync your collection instantly.
-        </p>
-
-        <p class="welcome-content">
-          <strong>Decide Before You Arrive</strong><br>
-          Browse everyone's games, propose favorites, and vote together. No more spending the first forty-five minutes deciding what to play.
-        </p>
-
-        <p class="welcome-content">
-          <strong>Everything in One Place</strong><br>
-          Event planning, group chat, RSVPs, and game selection—all in one app. Coordinate schedules and keep everyone in the loop.
-        </p>
-
-        <!-- App Download Section -->
-        <div class="signup-forms-container">
-          <section class="beta-signup-section" style="text-align: center;">
-            <h3 style="font-size: 1.5rem; margin-bottom: 1.5rem; color: var(--text-primary);">Download MeepleUp Today</h3>
-            <style>
-              .download-content-wrapper {
-                display: flex;
-                flex-direction: column;
-                gap: 20px;
-                align-items: center;
-                width: 100%;
-              }
-              #appStoreButtons {
-                display: none;
-              }
-              @media (min-width: 768px) {
-                .download-content-wrapper {
-                  flex-direction: row;
-                  align-items: flex-start;
-                  justify-content: center;
-                }
-                #downloadQrContainer {
-                  flex-shrink: 0;
-                }
-                .download-buttons-container {
-                  flex: 1;
-                  max-width: none;
-                }
-              }
-            </style>
-            <div class="download-content-wrapper">
-              <!-- QR Code for Desktop Users -->
-              <figure id="downloadQrContainer" style="display: none; flex-direction: column; align-items: center;">
-                <figcaption id="downloadQrLabel" style="font-size: 0.9rem; color: var(--text-secondary, #6c757d); margin-bottom: 0.5rem; white-space: nowrap; text-align: center; width: 100%; font-weight: bold;">Download on Mobile</figcaption>
-                <img id="downloadQrImage" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://meepleup.com/download.html" alt="Scan to download MeepleUp" style="height: auto; border: 2px solid var(--border-color, #dee2e6); border-radius: 8px; padding: 8px; background: white; box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));">
-              </figure>
-              <!-- Download buttons container -->
-              <nav class="download-buttons-container" style="display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 600px; align-items: stretch;">
-                <!-- App Store buttons row - Only visible on mobile -->
-                <nav id="appStoreButtons" style="display: none; gap: 15px; width: 100%; align-items: stretch;">
-                  <a href="https://apps.apple.com/us/app/meepleup/id6754894730" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px; background-color: #000; border-radius: 8px; transition: transform 0.2s ease, opacity 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'; this.style.opacity='0.9';" onmouseout="this.style.transform='scale(1)'; this.style.opacity='1';">
-                    <img src="images/appstore.svg" alt="Download on the App Store" style="max-width: 100%; height: auto; max-height: 50px;">
-                  </a>
-                  <a href="https://play.google.com/store/apps/details?id=com.meepleup.app" target="_blank" rel="noopener noreferrer" style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 12px; background-color: #000; border-radius: 8px; transition: transform 0.2s ease, opacity 0.2s ease;" onmouseover="this.style.transform='scale(1.02)'; this.style.opacity='0.9';" onmouseout="this.style.transform='scale(1)'; this.style.opacity='1';">
-                    <img src="images/google-play-badge.png" alt="Get it on Google Play" style="max-width: 100%; height: auto; max-height: 50px;">
-                  </a>
-                </nav>
-              </nav>
-            </div>
-          </section>
-        </div>
-
-        <!-- Contact Email -->
-        <address style="text-align: center;">
-          <a href="mailto:contact@meepleup.com" class="contact-button">
-            contact@meepleup.com
-          </a>
-        </address>
-
-        <!-- Legal Links - Mobile only (hidden on desktop) -->
-        <nav class="mobile-legal-links" style="text-align: center; margin-top: 2rem; padding: 1rem 0; display: none;">
-          <a href="privacy-policy.html" style="color: var(--text-secondary, #6c757d); text-decoration: none; font-size: 0.875rem; margin: 0 0.5rem;">Privacy Policy</a>
-          <span style="color: var(--text-secondary, #6c757d); margin: 0 0.25rem;">•</span>
-          <a href="terms-of-service.html" style="color: var(--text-secondary, #6c757d); text-decoration: none; font-size: 0.875rem; margin: 0 0.5rem;">Terms of Service</a>
-        </nav>
-      </section>
+    <div id="formSection" class="form-wrap">
+      <p id="errorMsg" class="error" style="display: none;"></p>
+      <input type="email" id="emailInput" placeholder="Your email" autocomplete="email" required>
+      <button type="button" id="submitBtn">Notify me</button>
     </div>
+
+    <div id="successSection" class="success-box" style="display: none;">
+      <p>Thanks! We'll email you when we're back.</p>
+    </div>
+
+    <nav class="legal">
+      <a href="privacy-policy.html">Privacy Policy</a>
+      <span> · </span>
+      <a href="terms-of-service.html">Terms of Service</a>
+    </nav>
   </main>
-  
+
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  
   <script>
-    // Firebase configuration - using your existing Firebase project
-    // Note: You may need to add a web app in Firebase Console to get a proper web appId
-    // Go to: Firebase Console → Project Settings → Your apps → Add app → Web
     const firebaseConfig = {
       apiKey: "AIzaSyAjVgWb8wApwT1n0hSe_63nI5S3NgROAbI",
       authDomain: "meepleup-951a1.firebaseapp.com",
       projectId: "meepleup-951a1",
       storageBucket: "meepleup-951a1.firebasestorage.app",
       messagingSenderId: "177622732549",
-      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"  // Using iOS appId - works for Firestore
+      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"
     };
-    
-    // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-    
-    // Show/hide elements based on device type
-    (function() {
-      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-      const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent.toLowerCase());
-      const isTablet = /ipad|android(?!.*mobile)/i.test(userAgent);
-      
-      if (isMobile || isTablet) {
-        // Mobile/Tablet: Show app store buttons, hide QR codes
-        const appStoreButtons = document.getElementById('appStoreButtons');
-        if (appStoreButtons) {
-          appStoreButtons.style.display = 'flex';
-        }
-      } else {
-        // Desktop: Show QR codes, hide app store buttons
-        // Explicitly hide app store buttons on desktop
-        const appStoreButtons = document.getElementById('appStoreButtons');
-        if (appStoreButtons) {
-          appStoreButtons.style.display = 'none';
-        }
-        // Show sidebar QR code
-        const qrContainer = document.getElementById('qrContainer');
-        if (qrContainer) {
-          qrContainer.style.display = 'block';
-        }
-        // Show download section QR code
-        const downloadQrContainer = document.getElementById('downloadQrContainer');
-        if (downloadQrContainer) {
-          downloadQrContainer.style.display = 'flex';
-          // Match QR code width to text width
-          const label = document.getElementById('downloadQrLabel');
-          const qrImage = document.getElementById('downloadQrImage');
-          if (label && qrImage) {
-            // Wait for layout to calculate text width
-            setTimeout(function() {
-              const textWidth = label.offsetWidth;
-              qrImage.style.width = textWidth + 'px';
-            }, 0);
-          }
-        }
-      }
-    })();
 
+    const emailInput = document.getElementById('emailInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    const formSection = document.getElementById('formSection');
+    const successSection = document.getElementById('successSection');
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.style.display = 'block';
+    }
+    function hideError() {
+      errorMsg.textContent = '';
+      errorMsg.style.display = 'none';
+    }
+
+    submitBtn.addEventListener('click', async function() {
+      hideError();
+      var trimmed = (emailInput.value || '').trim();
+      if (!trimmed) {
+        showError('Please enter your email');
+        return;
+      }
+      var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmed)) {
+        showError('Please enter a valid email address');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Please wait...';
+
+      try {
+        await db.collection('maintenanceNotify').add({
+          email: trimmed.toLowerCase(),
+          createdAt: new Date()
+        });
+        formSection.style.display = 'none';
+        successSection.style.display = 'block';
+      } catch (err) {
+        console.error('Maintenance signup error:', err);
+        showError(err.message || 'Something went wrong. Please try again.');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Notify me';
+      }
+    });
+
+    emailInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') submitBtn.click();
+    });
   </script>
-  
-  <script src="script.js"></script>
 </body>
 </html>
