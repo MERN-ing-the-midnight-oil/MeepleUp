@@ -173,8 +173,7 @@ const Auth = ({ route: routeProp }) => {
     }
   };
 
-  return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+  const scrollContent = (
       <KeyboardAwareScrollView
         ref={scrollViewRef}
           style={styles.keyboardAvoidingView}
@@ -404,6 +403,15 @@ const Auth = ({ route: routeProp }) => {
           </View>
         </View>
       </KeyboardAwareScrollView>
+  );
+
+  // On web (iOS Safari, Chrome), TouchableWithoutFeedback intercepts taps and prevents
+  // text inputs from receiving focus. Skip the wrapper on web so inputs work.
+  return Platform.OS === 'web' ? (
+    scrollContent
+  ) : (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      {scrollContent}
     </TouchableWithoutFeedback>
   );
 };

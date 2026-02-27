@@ -9,11 +9,16 @@
  * 4. Deploy: firebase deploy --only functions
  */
 
+// Load .env in functions directory (for local emulator); production uses Firebase config
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const jwt = require("jsonwebtoken");
 const jwksClient = require("jwks-rsa");
 const nodemailer = require("nodemailer");
+
+const ANTHROPIC_VERSION = "2023-06-01";
 
 // Initialize Firebase Admin if not already initialized
 // In Cloud Functions, this uses the default service account
@@ -288,6 +293,79 @@ exports.verifySubscription = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError(
         "internal",
         `Subscription verification failed: ${error.message}`,
+    );
+  }
+});
+
+/**
+ * Cloud Function: Proxy for Claude (Anthropic) API
+ * Keeps the API key server-side; client sends payload, function adds key and forwards to Anthropic.
+ * Requires the user to be authenticated.
+ */
+exports.callClaude = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+        "unauthenticated",
+        "You must be signed in to use game recognition.",
+    );
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY ||
+    (functions.config().anthropic && functions.config().anthropic.api_key);
+  if (!apiKey) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Claude API is not configured. Set ANTHROPIC_API_KEY in functions/.env (local) or firebase functions:config:set anthropic.api_key (production).",
+    );
+  }
+
+  const { model, max_tokens, temperature, system, messages } = data;
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "messages array is required.",
+    );
+  }
+
+  const payload = {
+    model: model || "claude-3-haiku-20240307",
+    max_tokens: max_tokens ?? 4096,
+    temperature: temperature ?? 0,
+    system: system || "Always produce output in strict JSON. Do not use Markdown code blocks. Return only the raw JSON object.",
+    messages,
+  };
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      const errMsg = responseData.error?.message || responseData.error || response.statusText;
+      console.error("Claude API error:", response.status, errMsg);
+      throw new functions.https.HttpsError(
+          "internal",
+          errMsg || "Claude API request failed",
+      );
+    }
+
+    return responseData;
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    console.error("callClaude error:", error);
+    throw new functions.https.HttpsError(
+        "internal",
+        error.message || "Failed to call Claude API",
     );
   }
 });

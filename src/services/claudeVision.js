@@ -1,5 +1,5 @@
-import axios from 'axios';
 import { API_CONFIG } from '../config/api';
+import { functions } from '../config/firebase';
 
 const DEFAULT_PROMPT_INTRO = `
 You are a font expert and graphic design expert analyzing board game spines. You are looking at the sides of board game boxes that are usually stacked vertically on a shelf.
@@ -347,14 +347,14 @@ const callClaudeAPI = async (userContent, options = {}) => {
   const {
     maxTokens = 4096,
     system = 'Always produce output in strict JSON that conforms to the documented schema. Do not use Markdown code blocks. Return only the raw JSON object.',
-    additionalHeaders = {},
     logPrefix = '[Claude API]',
   } = options;
 
-  if (!API_CONFIG.ANTHROPIC_API_KEY) {
-    throw new Error('Anthropic API key is not configured. Set EXPO_PUBLIC_ANTHROPIC_API_KEY before using this feature.');
+  if (!functions) {
+    throw new Error('Firebase is not available. Sign in and try again.');
   }
 
+  const callClaude = functions.httpsCallable('callClaude');
   const payload = {
     model: API_CONFIG.ANTHROPIC_DEFAULT_MODEL,
     max_tokens: maxTokens,
@@ -367,15 +367,6 @@ const callClaudeAPI = async (userContent, options = {}) => {
       },
     ],
   };
-
-  const headers = {
-    'x-api-key': API_CONFIG.ANTHROPIC_API_KEY,
-    'anthropic-version': API_CONFIG.ANTHROPIC_VERSION,
-    'content-type': 'application/json',
-    ...additionalHeaders,
-  };
-
-  const endpoint = `${API_CONFIG.ANTHROPIC_BASE_URL}/v1/messages`;
 
   // Retry logic for "Overloaded" errors
   const maxRetries = 3;
@@ -392,26 +383,26 @@ const callClaudeAPI = async (userContent, options = {}) => {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
 
-      const response = await axios.post(endpoint, payload, { headers });
-      
+      const { data: responseData } = await callClaude(payload);
+
       if (__DEV__) {
-        console.log(`${logPrefix} Full response structure:`, JSON.stringify(response.data, null, 2).substring(0, 1000));
+        console.log(`${logPrefix} Full response structure:`, JSON.stringify(responseData, null, 2).substring(0, 1000));
       }
-      
-      const rawText = extractTextFromClaudeResponse(response.data?.content);
-      
+
+      const rawText = extractTextFromClaudeResponse(responseData?.content);
+
       if (__DEV__) {
         console.log(`${logPrefix} Extracted raw text length:`, rawText?.length || 0);
       }
-      
+
       if (!rawText || rawText.trim().length === 0) {
         throw new Error('Claude returned an empty response. The API response may be malformed.');
       }
-      
+
       return rawText;
     } catch (error) {
       lastError = error;
-      
+
       // If this is a JSON parsing error, include more context
       if (error.message && error.message.includes('unreadable response')) {
         if (error.originalText && __DEV__) {
@@ -421,12 +412,9 @@ const callClaudeAPI = async (userContent, options = {}) => {
           console.error(`${logPrefix} Cleaned text that failed:`, error.cleanedText.substring(0, 2000));
         }
       }
-      
+
       const errorMessage =
-        error.response?.data?.error?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        'Unknown error';
+        error.message || (error.details && typeof error.details === 'string' ? error.details : null) || 'Unknown error';
 
       // If it's an "Overloaded" error and we have retries left, retry
       if (errorMessage.toLowerCase().includes('overloaded') && attempt < maxRetries) {

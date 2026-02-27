@@ -252,5 +252,11 @@ service cloud.firestore {
       allow create: if true;  // Public feedback form
       allow read, update, delete: if false;  // Admin only via Firebase Admin SDK
     }
+    
+    // Maintenance notify - allow anyone to add email for "when we're back" notifications
+    match /maintenanceNotify/{docId} {
+      allow create: if true;
+      allow read, update, delete: if false;  // Admin only via Firebase Admin SDK
+    }
   }
 }
