@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
+import { ensureSerializableId, ensureStringOrNull } from './helpers';
 
 // ============================================================================
 // ARCHIVED: Barcode Scanning Feature
@@ -894,17 +895,17 @@ export const getGames = async (gameId, source = 'unknown') => {
         }
         
         dataSource = 'firebase';
-        // Format to match BGG API response format
+        // Format to match BGG API response format (ensure id/thumbnail serializable for RN bridge)
         gameData = {
-          id: firestoreGame.id,
+          id: ensureSerializableId(firestoreGame.id),
           name: firestoreGame.name,
           yearPublished: firestoreGame.yearPublished || '',
           rank: firestoreGame.rank || '',
           bayesAverage: firestoreGame.bayesAverage || '',
           average: firestoreGame.average || '',
           usersRated: firestoreGame.usersRated || '',
-          thumbnail: firestoreGame.thumbnail || null,
-          image: firestoreGame.image || null,
+          thumbnail: ensureStringOrNull(firestoreGame.thumbnail),
+          image: ensureStringOrNull(firestoreGame.image),
           minPlayers: firestoreGame.minPlayers || null,
           maxPlayers: firestoreGame.maxPlayers || null,
           playingTime: firestoreGame.playingTime || null,
@@ -969,8 +970,8 @@ export const getGames = async (gameId, source = 'unknown') => {
               gameData = {
                 ...gameData,
                 // Always use BGG API data if available (it's more complete and up-to-date)
-                thumbnail: bggData.thumbnail || gameData.thumbnail,
-                image: bggData.image || gameData.image, // Large image for details view
+                thumbnail: ensureStringOrNull(bggData.thumbnail) || gameData.thumbnail,
+                image: ensureStringOrNull(bggData.image) || gameData.image, // Large image for details view
                 description: bggData.description || gameData.description,
                 yearPublished: bggData.yearPublished || gameData.yearPublished,
                 minPlayers: bggData.minPlayers || gameData.minPlayers,
@@ -1082,15 +1083,15 @@ export const getGames = async (gameId, source = 'unknown') => {
           dataSource = 'bgg';
           
           gameData = {
-            id: bggData.id,
+            id: ensureSerializableId(bggData.id),
             name: bggData.name,
             yearPublished: bggData.yearPublished || '',
             rank: bggData.rank || '',
             bayesAverage: bggData.bayesAverage || '',
             average: bggData.average || '',
             usersRated: bggData.usersRated || '',
-            thumbnail: bggData.thumbnail || null,
-            image: bggData.image || null,
+            thumbnail: ensureStringOrNull(bggData.thumbnail),
+            image: ensureStringOrNull(bggData.image),
             minPlayers: bggData.minPlayers || null,
             maxPlayers: bggData.maxPlayers || null,
             playingTime: bggData.playingTime || null,

@@ -1,0 +1,39 @@
+---
+description: When bumping app version, update every listed file and field
+alwaysApply: true
+---
+
+# App version bump checklist
+
+When incrementing the MeepleUp app version (e.g. for a new store release), update **all** of the following. Never bump only some of them.
+
+## 1. Version string (e.g. `1.0.5` → `1.0.6`)
+
+- **app.json** — `expo.version`
+- **package.json** — `version`
+- **ios/MeepleUp/Info.plist** — `CFBundleShortVersionString`
+- **ios/MeepleUp.xcodeproj/project.pbxproj** — `MARKETING_VERSION` (Debug and Release)
+- **android/app/build.gradle** — `versionName`
+
+## 2. iOS build number (integer, always increase)
+
+- **app.json** — `expo.ios.buildNumber` (string)
+- **ios/MeepleUp/Info.plist** — `CFBundleVersion`
+- **ios/MeepleUp.xcodeproj/project.pbxproj** — `CURRENT_PROJECT_VERSION` (Debug and Release)
+
+## 3. Android version code (integer, always increase)
+
+- **app.json** — `expo.android.versionCode`
+- **android/app/build.gradle** — `versionCode`
+
+## Summary
+
+| Location | Version field | Build/code field |
+|----------|----------------|------------------|
+| app.json | `version` | `ios.buildNumber`, `android.versionCode` |
+| package.json | `version` | — |
+| ios/MeepleUp/Info.plist | `CFBundleShortVersionString` | `CFBundleVersion` |
+| ios/.../project.pbxproj | `MARKETING_VERSION` | `CURRENT_PROJECT_VERSION` |
+| android/app/build.gradle | `versionName` | `versionCode` |
+
+Always increment both the version string and the build/version code when preparing a new store submission.

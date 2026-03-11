@@ -1,5 +1,15 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, View, Text, StyleSheet, ScrollView } from 'react-native';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithPopup,
+  signInWithCredential,
+  signInWithCustomToken,
+  signOut,
+  sendPasswordResetEmail,
+  applyActionCode,
+} from 'firebase/auth';
 import storage from '../utils/storage';
 import firebase, { auth, db, functions, firebaseInitError } from '../config/firebase';
 import logger from '../utils/logger';
@@ -303,7 +313,7 @@ export const AuthProvider = ({ children }) => {
           console.log('Processing email verification callback...');
           
           // Apply the verification code (works even if user is not logged in)
-          await auth.applyActionCode(actionCode);
+          await applyActionCode(auth, actionCode);
           
           // Reload the current user to update emailVerified status if logged in
           const currentUser = auth.currentUser;
@@ -442,7 +452,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signup = async ({ email, password, name }) => {
-    const credential = await auth.createUserWithEmailAndPassword(email.trim(), password);
+    const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
 
     if (name) {
       await credential.user.updateProfile({ displayName: name.trim() });
@@ -503,7 +513,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async ({ email, password }) => {
-    const credential = await auth.signInWithEmailAndPassword(email.trim(), password);
+    const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
     
     // Try to load from Firestore first
     let profile = null;
@@ -561,7 +571,7 @@ export const AuthProvider = ({ children }) => {
         provider.addScope('email');
         
         console.log('🔵 [Google OAuth] Opening Google sign-in popup...');
-        credential = await auth.signInWithPopup(provider);
+        credential = await signInWithPopup(auth, provider);
         console.log('🔵 [Google OAuth] Popup completed, credential received');
       } else {
         console.log('🔵 [Google OAuth] Using @react-native-google-signin/google-signin (native SDK)');
@@ -620,7 +630,7 @@ export const AuthProvider = ({ children }) => {
         
         // Sign in with Firebase using the Google ID token
         const googleCredential = firebase.auth.GoogleAuthProvider.credential(idToken);
-        credential = await auth.signInWithCredential(googleCredential);
+        credential = await signInWithCredential(auth, googleCredential);
         
         console.log('🔵 [Google OAuth] ✅ Firebase sign-in successful');
       }
@@ -763,7 +773,7 @@ export const AuthProvider = ({ children }) => {
         provider.addScope('name');
         
         console.log('🍎 [Apple OAuth] Opening Apple sign-in popup...');
-        credential = await auth.signInWithPopup(provider);
+        credential = await signInWithPopup(auth, provider);
         console.log('🍎 [Apple OAuth] Popup completed, credential received');
       } else {
         console.log('🍎 [Apple OAuth] Using native Apple Authentication');
@@ -850,7 +860,7 @@ export const AuthProvider = ({ children }) => {
         console.log('🍎 [Apple OAuth] Signing in with custom token...');
         
         // Sign in with the custom token
-        credential = await auth.signInWithCustomToken(customToken);
+        credential = await signInWithCustomToken(auth, customToken);
         console.log('🍎 [Apple OAuth] Firebase sign-in successful');
         
         // Update email if provided and not already set
@@ -1012,7 +1022,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    await auth.signOut();
+    await signOut(auth);
     setUser(null);
   };
 
@@ -1031,7 +1041,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const resetPassword = async (email) => {
-    await auth.sendPasswordResetEmail(email.trim());
+    await sendPasswordResetEmail(auth, email.trim());
   };
 
   const changePassword = async (currentPassword, newPassword) => {

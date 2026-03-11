@@ -5,6 +5,7 @@
 
 import { db, auth } from '../config/firebase';
 import firebase from 'firebase/compat/app';
+import { ensureSerializableId, ensureStringOrNull } from '../utils/helpers';
 
 const GAMES_COLLECTION = 'games';
 const GAMES_INDEX_COLLECTION = 'games_index'; // For faster searches
@@ -759,17 +760,17 @@ export async function getGamesFromFirebase(gameId) {
     }
     
     const game = doc.data();
-    
+    const rawId = game.id || doc.id;
     return {
-      id: game.id || doc.id,
+      id: ensureSerializableId(rawId),
       name: game.name,
       yearPublished: game.yearPublished || '',
       rank: game.rank || '0',
       average: game.average || '',
       bayesAverage: game.bayesAverage || '',
       usersRated: game.usersRated || '',
-      thumbnail: game.thumbnail || null,
-      image: game.image || null,
+      thumbnail: ensureStringOrNull(game.thumbnail),
+      image: ensureStringOrNull(game.image),
       minPlayers: game.minPlayers || null,
       maxPlayers: game.maxPlayers || null,
       playingTime: game.playingTime || null,
@@ -846,16 +847,16 @@ export async function batchGetGamesById(gameIds) {
             const game = doc.data();
             const gameId = game.id || doc.id;
             
-            gameMap.set(gameId.toString(), {
-              id: gameId,
+            gameMap.set(String(ensureSerializableId(gameId)), {
+              id: ensureSerializableId(gameId),
               name: game.name,
               yearPublished: game.yearPublished || '',
               rank: game.rank || '0',
               average: game.average || '',
               bayesAverage: game.bayesAverage || '',
               usersRated: game.usersRated || '',
-              thumbnail: game.thumbnail || null,
-              image: game.image || null,
+              thumbnail: ensureStringOrNull(game.thumbnail),
+              image: ensureStringOrNull(game.image),
               minPlayers: game.minPlayers || null,
               maxPlayers: game.maxPlayers || null,
               playingTime: game.playingTime || null,

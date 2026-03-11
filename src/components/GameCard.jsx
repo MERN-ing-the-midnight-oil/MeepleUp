@@ -11,28 +11,59 @@ import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
+import { buildGridGamePayloads } from '../utils/bridgeSafeGame';
 
 /**
- * Game Card Component with BGG Thumbnails
- * Displays game cards in a tall format (2 per row) with BGG thumbnail images
- * @param {Object} props
- * @param {Object} props.game - The game object
- * @param {Function} props.onDelete - Delete handler
- * @param {Object} props.preloadedBggData - Optional preloaded BGG data to avoid redundant API calls
- * @param {boolean} props.shouldLoadImage - Whether to load the image (for lazy loading)
+ * Presentational game card - no context. Use this when passing userId and collection helpers
+ * from parent to avoid "JS Symbols are not convertible to dynamic" (context can hold non-serializable data).
+ * When gamePayload (string) is passed instead of game (object), the bridge never sees an object - use for grids.
  */
-const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = false, containerPadding = 12, gap = 8, inGrid = false, onFavorite = null, onProposeGame = null, userProposals = new Set(), eventId = null, shouldLoadImage = true }) => {
-  const { user } = useAuth();
-  const { collections, updateGameInCollection, addGameToCollection } = useCollections();
-  const userId = user?.uid || user?.id;
-  console.log(
-    '[GameCard] Rendering for game:',
-    game.title || game.id,
-    'bggId:',
-    game.bggId,
-    'preloadedData:',
-    preloadedBggData ? 'yes' : 'no',
-  );
+const GameCardViewInner = (props) => {
+  // Read each prop individually — bulk destructure (} = props) triggers Fabric proxy crash on re-render.
+  const gamePayload = props.gamePayload ?? null;
+  const preloadedBggDataPayload = props.preloadedBggDataPayload ?? null;
+  const gameProp = props.game ?? null;
+  const preloadedBggDataProp = props.preloadedBggData ?? null;
+  const gameIdProp = props.gameId ?? null;
+  const userId = props.userId ?? null;
+  const onDelete = props.onDelete;
+  const disableModal = props.disableModal === true;
+  const onPress = props.onPress;
+  const containerPadding = props.containerPadding ?? 12;
+  const gap = props.gap ?? 8;
+  const inGrid = props.inGrid === true;
+  const onFavorite = props.onFavorite;
+  const onProposeGame = props.onProposeGame;
+  const userProposals = props.userProposals;
+  const eventId = props.eventId ?? null;
+  const shouldLoadImage = props.shouldLoadImage !== false;
+  const getCurrentUserCollection = props.getCurrentUserCollection;
+  const updateGameInCollection = props.updateGameInCollection;
+  const addGameToCollection = props.addGameToCollection;
+
+  const safeUserProposals = Array.isArray(userProposals) ? userProposals : [];
+
+  const game = useMemo(() => {
+    if (gamePayload != null && typeof gamePayload === 'string') {
+      try { return JSON.parse(gamePayload) || {}; } catch (_) { return {}; }
+    }
+    if (gameProp != null && typeof gameProp === 'object') {
+      try { return JSON.parse(JSON.stringify(gameProp)) || {}; } catch (_) { return {}; }
+    }
+    return gameProp ?? {};
+  }, [gamePayload, gameProp]);
+
+  const preloadedBggData = useMemo(() => {
+    if (preloadedBggDataPayload != null && typeof preloadedBggDataPayload === 'string') {
+      try { return JSON.parse(preloadedBggDataPayload) || null; } catch (_) { return null; }
+    }
+    if (preloadedBggDataProp != null && typeof preloadedBggDataProp === 'object') {
+      try { return JSON.parse(JSON.stringify(preloadedBggDataProp)) || null; } catch (_) { return null; }
+    }
+    return preloadedBggDataProp ?? null;
+  }, [preloadedBggDataPayload, preloadedBggDataProp]);
+
+  const _getUserGames = () => (typeof getCurrentUserCollection === 'function' ? getCurrentUserCollection() : []);
 
   const { width: screenWidth } = useWindowDimensions();
   const [bggData, setBggData] = useState(null);
@@ -41,7 +72,9 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showIncompleteExplanation, setShowIncompleteExplanation] = useState(false);
-  
+  const [imageError, setImageError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
   // Animation values for card press effects
   const scaleAnim = useRef(new Animated.Value(1)).current;
   
@@ -146,6 +179,12 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     });
   }, [currentKey, game.title, game.bggThumbnail, game.thumbnail, preloadedBggData]);
 
+  // Reset image error state when game/source changes so each card gets a fresh attempt
+  useEffect(() => {
+    setImageError(false);
+    setRetryCount(0);
+  }, [currentKey]);
+
   // Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true;
@@ -180,8 +219,8 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
       return game.isFavorite || false;
     }
 
-    const userGames = collections[userId] || [];
-    const userGame = userGames.find(g => {
+    const userGames = _getUserGames();
+    const userGame = Array.isArray(userGames) && userGames.find(g => {
       if (game.bggId && g.bggId) {
         return g.bggId === game.bggId;
       }
@@ -193,18 +232,15 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   };
   
   // Update favorite status only when THIS specific game's status changes
-  // We check collections on every render but only update state if the value actually changed
   useEffect(() => {
     const gameId = game.bggId || game.id;
     
-    // Only proceed if we're still looking at the same game
     if (gameId && gameIdRef.current !== gameId) {
       return;
     }
 
     const newFavoriteStatus = getFavoriteStatus();
     
-    // Only update if the favorite status actually changed for THIS specific game
     if (prevFavoriteStatusRef.current !== newFavoriteStatus) {
       setIsFavorite(newFavoriteStatus);
       prevFavoriteStatusRef.current = newFavoriteStatus;
@@ -214,8 +250,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     game?.bggId, 
     game?.isFavorite, 
     userId,
-    // Include collections but use ref comparison to only update when THIS game's status changes
-    collections
+    getCurrentUserCollection,
   ]);
 
   // Shimmer animation for favorite hearts - glitter effect
@@ -260,29 +295,33 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
   }, [isFavorite]);
 
   // Memoize computed values to prevent unnecessary recalculations
-  // Use thumbnail from preloadedBggData if game doesn't have one stored
+  // Use thumbnail from preloadedBggData if game doesn't have one stored.
+  // Always return a string or null (never Symbol) so native Image never receives non-serializable values.
   const thumbnail = useMemo(() => {
+    const asString = (v) => (typeof v === 'string' && v.length > 0 ? v : null);
     // First try stored thumbnail
     if (game.bggThumbnail || game.thumbnail) {
-      const result = game.bggThumbnail || game.thumbnail;
-      if (__DEV__) {
+      const result = asString(game.bggThumbnail) || asString(game.thumbnail);
+      if (result && __DEV__) {
         console.log('[GameCard] Using thumbnail from game object for:', game.title || game.id);
       }
       return result;
     }
     // Then try from preloadedBggData
-    if (preloadedBggData?.thumbnail) {
+    const fromPreloaded = asString(preloadedBggData?.thumbnail);
+    if (fromPreloaded) {
       if (__DEV__) {
         console.log('[GameCard] Using thumbnail from preloadedBggData for:', game.title || game.id);
       }
-      return preloadedBggData.thumbnail;
+      return fromPreloaded;
     }
     // Then try thumbnailUrl (from initialization)
-    if (thumbnailUrl) {
+    const fromUrl = asString(thumbnailUrl);
+    if (fromUrl) {
       if (__DEV__) {
         console.log('[GameCard] Using thumbnail from thumbnailUrl for:', game.title || game.id);
       }
-      return thumbnailUrl;
+      return fromUrl;
     }
     if (__DEV__) {
       console.log('[GameCard] ⚠️ No thumbnail found for:', game.title || game.id, {
@@ -382,12 +421,15 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
       return;
     }
     
+    if (typeof updateGameInCollection !== 'function' || typeof addGameToCollection !== 'function') {
+      return;
+    }
+    
     const gameId = game.bggId || game.id;
     if (!gameId) return;
     
-    // Check if user owns the game in their collection
-    const userGames = collections[userId] || [];
-    const userGame = userGames.find(g => {
+    const userGames = _getUserGames();
+    const userGame = Array.isArray(userGames) && userGames.find(g => {
       const gId = g.bggId || g.id;
       return gId === gameId;
     });
@@ -526,32 +568,27 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
 
         {/* Clickable Card Content */}
         <Pressable
-          onPress={disableModal ? undefined : openModal}
-          onPressIn={disableModal ? undefined : handlePressIn}
-          onPressOut={disableModal ? undefined : handlePressOut}
+          onPress={
+            onPress != null
+              ? (gameIdProp != null ? () => onPress(gameIdProp) : () => onPress())
+              : (disableModal ? undefined : openModal)
+          }
+          onPressIn={onPress || disableModal ? undefined : handlePressIn}
+          onPressOut={onPress || disableModal ? undefined : handlePressOut}
           style={styles.cardPressable}
           accessibilityRole="button"
-          accessibilityLabel={disableModal ? undefined : `View details for ${title}`}
-          pointerEvents={disableModal ? 'none' : 'auto'}
+          accessibilityLabel={onPress || disableModal ? undefined : `View details for ${title}`}
+          pointerEvents={onPress || !disableModal ? 'auto' : 'none'}
         >
           {/* Thumbnail Image */}
           <View style={styles.thumbnailContainer}>
             {thumbnail && shouldLoadImage && !imageError ? (
               <Image
-                source={{ uri: thumbnail }}
+                source={{ uri: typeof thumbnail === 'string' ? thumbnail : '' }}
                 style={styles.thumbnail}
                 contentFit="cover"
                 cachePolicy="memory-disk"
                 transition={200}
-                placeholder={
-                  <View style={styles.thumbnailPlaceholder}>
-                    <Text style={styles.thumbnailPlaceholderText}>
-                      {title && typeof title === 'string' && title.length > 0
-                        ? title.charAt(0).toUpperCase()
-                        : '?'}
-                    </Text>
-                  </View>
-                }
                 onError={(error) => {
                   console.error('[GameCard] Image load error:', error);
                   if (retryCount < 3) {
@@ -564,7 +601,7 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
                     setImageError(true);
                   }
                 }}
-                recyclingKey={game.bggId || game.id || thumbnail}
+                recyclingKey={String(game.bggId ?? game.id ?? thumbnail ?? '')}
               />
             ) : (
               <View style={styles.thumbnailPlaceholder}>
@@ -600,20 +637,20 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
           </View>
         </Pressable>
 
-        {/* Full Screen Modal */}
+        {/* Full Screen Modal - pass payloads so bridge never sees raw objects */}
         <GameDetailsModal
-          game={game}
+          gamePayload={gamePayload}
+          preloadedBggDataPayload={preloadedBggDataPayload}
           isOpen={isModalOpen}
           onClose={closeModal}
-          preloadedBggData={preloadedBggData}
           onProposeGame={onProposeGame}
-          userProposals={userProposals}
+          userProposals={safeUserProposals}
           eventId={eventId}
         />
       </Animated.View>
     );
   } catch (error) {
-    console.error('[GameCard] Error rendering game card:', error);
+    console.error('[GameCardView] Error rendering game card:', error);
     return (
       <Animated.View style={[dynamicStyles.card, styles.card]}>
         <Text style={styles.title}>Error loading game</Text>
@@ -621,6 +658,118 @@ const GameCard = ({ game, onDelete, preloadedBggData = null, disableModal = fals
     );
   }
 };
+
+// Memo with custom comparator: skip re-render when key props are identical (avoids touching Fabric proxy on second render).
+// onPress intentionally omitted — gameId is stable, onPress identity doesn't matter for correctness.
+const GameCardView = React.memo(GameCardViewInner, (prevProps, nextProps) => {
+  return (
+    prevProps.gamePayload === nextProps.gamePayload &&
+    prevProps.preloadedBggDataPayload === nextProps.preloadedBggDataPayload &&
+    prevProps.inGrid === nextProps.inGrid &&
+    prevProps.disableModal === nextProps.disableModal &&
+    prevProps.shouldLoadImage === nextProps.shouldLoadImage &&
+    prevProps.userId === nextProps.userId &&
+    prevProps.gameId === nextProps.gameId
+  );
+});
+
+// Build props for GameCardView that never include raw game/preloadedBggData (bridge-safe).
+function buildSafePropsForView(props) {
+  if (props.gamePayload != null && typeof props.gamePayload === 'string') {
+    return {
+      gamePayload: props.gamePayload,
+      preloadedBggDataPayload: props.preloadedBggDataPayload ?? null,
+      onDelete: props.onDelete,
+      disableModal: props.disableModal,
+      containerPadding: props.containerPadding,
+      gap: props.gap,
+      inGrid: props.inGrid,
+      onFavorite: props.onFavorite,
+      onProposeGame: props.onProposeGame,
+      userProposals: props.userProposals,
+      eventId: props.eventId,
+      shouldLoadImage: props.shouldLoadImage,
+      userId: props.userId,
+    };
+  }
+  if (props.game != null && typeof props.game === 'object') {
+    const { gamePayload: gp, preloadedBggDataPayload: pdp } = buildGridGamePayloads(props.game);
+    return {
+      gamePayload: gp,
+      preloadedBggDataPayload: pdp,
+      onDelete: props.onDelete,
+      disableModal: props.disableModal,
+      containerPadding: props.containerPadding,
+      gap: props.gap,
+      inGrid: props.inGrid,
+      onFavorite: props.onFavorite,
+      onProposeGame: props.onProposeGame,
+      userProposals: props.userProposals,
+      eventId: props.eventId,
+      shouldLoadImage: props.shouldLoadImage,
+      userId: props.userId,
+    };
+  }
+  return {
+    gamePayload: undefined,
+    preloadedBggDataPayload: undefined,
+    onDelete: props.onDelete,
+    disableModal: props.disableModal,
+    containerPadding: props.containerPadding,
+    gap: props.gap,
+    inGrid: props.inGrid,
+    onFavorite: props.onFavorite,
+    onProposeGame: props.onProposeGame,
+    userProposals: props.userProposals,
+    eventId: props.eventId,
+    shouldLoadImage: props.shouldLoadImage,
+    userId: props.userId,
+  };
+}
+
+// Wrapper that provides context so callers can use <GameCard /> without passing collection props.
+// Always passes bridge-safe payloads to GameCardView (never raw game object).
+function GameCard(props) {
+  const hasCollectionProps =
+    props.userId != null &&
+    typeof props.getCurrentUserCollection === 'function' &&
+    typeof props.updateGameInCollection === 'function' &&
+    typeof props.addGameToCollection === 'function';
+
+  const safeProps = buildSafePropsForView(props);
+
+  if (hasCollectionProps) {
+    if (__DEV__) {
+      console.log('[GameCard] Using GameCardView with props (no context)');
+    }
+    return <GameCardView {...safeProps} />;
+  }
+
+  if (__DEV__) {
+    console.log('[GameCard] Using context wrapper');
+  }
+  return <GameCardWithContext {...props} safePropsForView={safeProps} />;
+}
+
+function GameCardWithContext(props) {
+  const { safePropsForView } = props;
+  const { user } = useAuth();
+  const { collections, updateGameInCollection, addGameToCollection, getUserCollection } = useCollections();
+  const userId = (user?.uid || user?.id) ?? null;
+  const getCurrentUserCollection = useMemo(
+    () => () => (userId ? (collections[userId] || []) : []),
+    [userId, collections]
+  );
+  return (
+    <GameCardView
+      {...safePropsForView}
+      userId={userId}
+      getCurrentUserCollection={getCurrentUserCollection}
+      updateGameInCollection={updateGameInCollection}
+      addGameToCollection={addGameToCollection}
+    />
+  );
+}
 
 // Calculate responsive card width based on screen size
 // Returns a function that calculates width based on current dimensions
@@ -826,16 +975,23 @@ const styles = StyleSheet.create({
   },
 });
 
+export { GameCardView };
+
 // Simplified memo comparison - only compare essential props
+// Guard prevProps.game/nextProps.game - they may be undefined when using gamePayload
 export default React.memo(
   GameCard,
   (prevProps, nextProps) => {
+    const prevGame = prevProps.game ?? {};
+    const nextGame = nextProps.game ?? {};
     const gameChanged =
-      prevProps.game.id !== nextProps.game.id ||
-      prevProps.game.bggId !== nextProps.game.bggId;
+      prevProps.gamePayload !== nextProps.gamePayload ||
+      prevGame.id !== nextGame.id ||
+      prevGame.bggId !== nextGame.bggId;
 
     const bggDataChanged =
-      prevProps.preloadedBggData?.id !== nextProps.preloadedBggData?.id;
+      prevProps.preloadedBggDataPayload !== nextProps.preloadedBggDataPayload ||
+      (prevProps.preloadedBggData?.id !== nextProps.preloadedBggData?.id);
 
     const deleteHandlerChanged = prevProps.onDelete !== nextProps.onDelete;
     

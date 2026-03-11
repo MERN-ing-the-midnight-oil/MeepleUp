@@ -41,6 +41,9 @@ const CollectionScreen = () => {
   const scrollPositionRef = useRef(0);
   const inventoryHeaderRef = useRef(null);
   const inventoryHeaderY = useRef(0);
+  // Keep last non-empty collection so we don't unmount GameCollectionView when rawCollection
+  // briefly flickers to empty during context updates (e.g. "Collections state changed, saving to storage")
+  const lastNonEmptyRawCollectionRef = useRef([]);
   
   // Handler to change sort while preserving scroll position
   const handleSortChange = useCallback((newSortBy) => {
@@ -172,7 +175,7 @@ const CollectionScreen = () => {
     email: user?.email,
   });
   
-  const [bggDataCache, setBggDataCache] = useState({}); // { gameId: bggData }
+  const bggDataCacheRef = useRef({}); // { gameId: bggData } — ref to avoid re-renders on cache update
   const enrichingRef = useRef(false); // Prevent concurrent enrichment
   const enrichedGameIdsRef = useRef(new Set()); // Track which games have been enriched (use ref to avoid dependency issues)
   const isMountedRef = useRef(true); // Track if component is mounted
@@ -227,9 +230,9 @@ const CollectionScreen = () => {
 
     try {
       // Check if already in cache
-      if (bggDataCache[gameId]) {
+      if (bggDataCacheRef.current[gameId]) {
         enrichedGameIdsRef.current.add(gameId);
-        const cached = bggDataCache[gameId];
+        const cached = bggDataCacheRef.current[gameId];
         if (__DEV__) {
           console.log(`[CollectionScreen] Using cached BGG data for ${gameId}:`, {
             hasThumbnail: !!cached.thumbnail,
@@ -285,7 +288,7 @@ const CollectionScreen = () => {
         }
         // Update cache only if component is still mounted
         if (isMountedRef.current) {
-          setBggDataCache(prev => ({ ...prev, [gameId]: formattedData }));
+          bggDataCacheRef.current = { ...bggDataCacheRef.current, [gameId]: formattedData };
         }
         enrichedGameIdsRef.current.add(gameId);
         return formattedData;
@@ -298,7 +301,7 @@ const CollectionScreen = () => {
       console.error(`[CollectionScreen] Error enriching game ${gameId}:`, error);
     }
     return null;
-  }, [bggDataCache]);
+  }, []);
 
   // Sort collection without enrichment (fast, immediate)
   const sortedGames = useMemo(() => {
@@ -313,8 +316,8 @@ const CollectionScreen = () => {
       if (sortBy === 'rating') {
         const aId = a.bggId || a.id;
         const bId = b.bggId || b.id;
-        const aBgg = aId ? bggDataCache[aId] : null;
-        const bBgg = bId ? bggDataCache[bId] : null;
+        const aBgg = aId ? bggDataCacheRef.current[aId] : null;
+        const bBgg = bId ? bggDataCacheRef.current[bId] : null;
         const aRating = aBgg?.average ? getStarRating(aBgg.average) : 0;
         const bRating = bBgg?.average ? getStarRating(bBgg.average) : 0;
         if (aRating !== bRating) {
@@ -327,8 +330,8 @@ const CollectionScreen = () => {
         // Check game object first, then fall back to bggDataCache (for thumbnails only)
         const aHasCategoryRanks = a.strategyGamesRank !== undefined || a.familyGamesRank !== undefined || a.partyGamesRank !== undefined;
         const bHasCategoryRanks = b.strategyGamesRank !== undefined || b.familyGamesRank !== undefined || b.partyGamesRank !== undefined;
-        const aEffective = aHasCategoryRanks ? a : (a.bggId ? bggDataCache[a.bggId] : null);
-        const bEffective = bHasCategoryRanks ? b : (b.bggId ? bggDataCache[b.bggId] : null);
+        const aEffective = aHasCategoryRanks ? a : (a.bggId ? bggDataCacheRef.current[a.bggId] : null);
+        const bEffective = bHasCategoryRanks ? b : (b.bggId ? bggDataCacheRef.current[b.bggId] : null);
         const getCategory = (data) => {
           if (!data) return 'Other';
           return data.strategyGamesRank ? 'Strategy' :
@@ -357,7 +360,7 @@ const CollectionScreen = () => {
     });
 
     return sorted;
-  }, [rawCollection, sortBy, bggDataCache]);
+  }, [rawCollection, sortBy]);
 
   // Enrich games with BGG data from cache (for thumbnails/images)
   // Categories come from game object directly (games are stored with category rank fields)
@@ -365,7 +368,7 @@ const CollectionScreen = () => {
   const enrichedGames = useMemo(() => {
     return sortedGames.map(game => {
       const gameId = game.bggId || game.id;
-      const bggData = gameId ? bggDataCache[gameId] : null;
+      const bggData = gameId ? bggDataCacheRef.current[gameId] : null;
       
       // Helper to get category from rank fields (check game object first, then bggData)
       const getCategoryFromRanks = (data) => {
@@ -403,7 +406,7 @@ const CollectionScreen = () => {
         _primaryCategory: 'Other',
       };
     });
-  }, [sortedGames, bggDataCache]);
+  }, [sortedGames]);
 
   // Filter games by search query (client-side, works on basic title field)
   const filteredGames = useMemo(() => {
@@ -428,7 +431,7 @@ const CollectionScreen = () => {
     try {
       // Filter out already enriched games and games already in cache
       const idsToFetch = gameIdsToEnrich
-        .filter(id => id && !enrichedGameIdsRef.current.has(id) && !bggDataCache[id]);
+        .filter(id => id && !enrichedGameIdsRef.current.has(id) && !bggDataCacheRef.current[id]);
 
       if (idsToFetch.length === 0) {
         enrichingRef.current = false;
@@ -485,9 +488,9 @@ const CollectionScreen = () => {
             }
           });
 
-          // Batch update cache once per batch to reduce re-renders (only if mounted)
+          // Batch update cache once per batch (only if mounted)
           if (Object.keys(cacheUpdates).length > 0 && isMountedRef.current) {
-            setBggDataCache(prev => ({ ...prev, ...cacheUpdates }));
+            bggDataCacheRef.current = { ...bggDataCacheRef.current, ...cacheUpdates };
             
             if (__DEV__) {
               console.log(`[CollectionScreen] Enriched ${Object.keys(cacheUpdates).length} games from Firebase batch`);
@@ -502,7 +505,7 @@ const CollectionScreen = () => {
     } finally {
       enrichingRef.current = false;
     }
-  }, [bggDataCache]);
+  }, []);
 
   // Handle visible items changed for lazy enrichment
   // Conservative: Only enrich visible items + one page ahead (since we have pagination)
@@ -556,24 +559,15 @@ const CollectionScreen = () => {
 
   // Determine categories immediately - games should already have category rank fields
   useEffect(() => {
-    if (sortedGames.length === 0) {
-      setCategoriesDetermined(false);
-      return;
-    }
-
-    // If we're in category view, check if we have category data
-    if (sortBy === 'category' && selectedCategory === null) {
-      // Games should already have category rank fields when stored
-      // Mark as determined immediately if we have category data
-      setCategoriesDetermined(hasCategoryData);
-      return;
-    }
-
-    // For non-category view, mark as determined
-    if (sortBy !== 'category') {
-      setCategoriesDetermined(true);
-    }
-  }, [sortedGames, sortBy, selectedCategory, hasCategoryData]);
+    const determined = sortedGames.length === 0
+      ? false
+      : sortBy !== 'category'
+        ? true
+        : selectedCategory !== null
+          ? true
+          : hasCategoryData;
+    setCategoriesDetermined(determined);
+  }, [sortedGames.length, sortBy, selectedCategory, hasCategoryData]);
 
   // Group games by category when sortBy is 'category'
   const gamesByCategory = useMemo(() => {
@@ -664,15 +658,6 @@ const CollectionScreen = () => {
       }
     }
   }, [sortedGames, sortBy, selectedCategory, gamesByCategory, enrichGamesBatch]);
-
-  // Reset categoriesDetermined when sortBy changes to category
-  useEffect(() => {
-    if (sortBy === 'category') {
-      setCategoriesDetermined(false);
-    } else {
-      setCategoriesDetermined(true);
-    }
-  }, [sortBy]);
 
   // Toggle category sort preference
   const toggleCategorySort = useCallback((category) => {
@@ -1055,6 +1040,19 @@ const CollectionScreen = () => {
   // This allows cached games to show immediately while Firestore syncs in background
   const hasCachedGames = userIdentifier && (collections[userIdentifier]?.length > 0);
   const shouldShowLoading = !initialised || (loading && !hasCachedGames);
+
+  // Stabilize games passed to GameCollectionView so we don't unmount/remount when rawCollection
+  // briefly becomes empty during a context update (which would flip the ternary and crash on Fabric)
+  if (rawCollection.length > 0) {
+    lastNonEmptyRawCollectionRef.current = rawCollection;
+  } else if (!loading) {
+    lastNonEmptyRawCollectionRef.current = [];
+  }
+  const gamesForView = useMemo(
+    () => rawCollection.length > 0 ? rawCollection : lastNonEmptyRawCollectionRef.current,
+    [rawCollection]
+  );
+  const showGamesView = showMenu && gamesForView.length > 0;
   
   console.log('[CollectionScreen] Loading state check', {
     initialised,
@@ -1078,23 +1076,23 @@ const CollectionScreen = () => {
 
   return (
     <View style={styles.container}>
-      {showMenu && filteredGames.length > 0 ? (
+      {showGamesView ? (
         (() => {
           console.log('[CollectionScreen] Rendering GameCollectionView', {
             rawCollectionLength: rawCollection.length,
-            filteredGamesLength: filteredGames.length,
+            gamesForViewLength: gamesForView.length,
             hasHeaderComponent: !!headerComponent,
           });
           return (
             <GameCollectionView
-              games={rawCollection}
+              games={gamesForView}
               onGameDelete={handleDeleteGame}
               usePagination={false}
               defaultSortBy="category"
               availableSorts={['rating', 'category', 'title']}
               showSearch={true}
               showSortOptions={true}
-              headerTitle={`Your Games Inventory: ${rawCollection.length.toLocaleString()} games`}
+              headerTitle={`Your Games Inventory: ${gamesForView.length.toLocaleString()} games`}
               headerComponent={headerComponent}
             />
           );

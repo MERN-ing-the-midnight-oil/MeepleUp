@@ -460,51 +460,6 @@ exports.appleSubscriptionWebhook = functions.https.onRequest(async (req, res) =>
 });
 
 /**
- * HTTP Function: Webhook for Google Play Real-time Developer Notifications (Android)
- * Handles real-time subscription updates from Google
- * Configure this URL in Google Play Console
- */
-exports.googleSubscriptionWebhook = functions.pubsub
-    .topic("google-play-subscriptions")
-    .onPublish(async (message) => {
-      try {
-        const data = JSON.parse(Buffer.from(message.data, "base64").toString());
-        const subscriptionNotification = data.subscriptionNotification;
-
-        if (!subscriptionNotification) {
-          return;
-        }
-
-        const notificationType = subscriptionNotification.notificationType;
-        const purchaseToken = subscriptionNotification.purchaseToken;
-        const subscriptionId = subscriptionNotification.subscriptionId;
-
-        // Handle different notification types
-        // See: https://developer.android.com/google/play/billing/subscriptions#notification-types
-        switch (notificationType) {
-          case 1: // SUBSCRIPTION_RECOVERED
-          case 2: // SUBSCRIPTION_RENEWED
-            await handleGoogleSubscriptionUpdate(subscriptionId, purchaseToken, "active");
-            break;
-          case 3: // SUBSCRIPTION_CANCELED
-            await handleGoogleSubscriptionUpdate(subscriptionId, purchaseToken, "cancelled");
-            break;
-          case 4: // SUBSCRIPTION_PURCHASED
-            await handleGoogleSubscriptionUpdate(subscriptionId, purchaseToken, "active");
-            break;
-          case 12: // SUBSCRIPTION_EXPIRED
-            await handleGoogleSubscriptionUpdate(subscriptionId, purchaseToken, "expired");
-            break;
-          default:
-            console.log(`Unhandled Google notification type: ${notificationType}`);
-        }
-      } catch (error) {
-        console.error("Error processing Google webhook:", error);
-        throw error;
-      }
-    });
-
-/**
  * Helper function to handle subscription updates from Apple
  */
 async function handleSubscriptionUpdate(notification, status) {
@@ -528,33 +483,6 @@ async function handleSubscriptionUpdate(notification, status) {
 
   if (purchasesSnapshot.empty) {
     console.error(`No purchase found for transaction: ${originalTransactionId}`);
-    return;
-  }
-
-  const purchaseDoc = purchasesSnapshot.docs[0];
-  const userId = purchaseDoc.data().userId;
-
-  // Update user subscription
-  await db.collection("users").doc(userId).update({
-    "subscription.status": status,
-    "subscription.updatedAt": admin.firestore.Timestamp.now(),
-    "updatedAt": admin.firestore.Timestamp.now(),
-  });
-}
-
-/**
- * Helper function to handle subscription updates from Google
- */
-async function handleGoogleSubscriptionUpdate(subscriptionId, purchaseToken, status) {
-  // Find user by purchase token
-  const purchasesSnapshot = await db
-      .collection("subscriptionPurchases")
-      .where("transactionReceipt", "==", purchaseToken)
-      .limit(1)
-      .get();
-
-  if (purchasesSnapshot.empty) {
-    console.error(`No purchase found for token: ${purchaseToken}`);
     return;
   }
 

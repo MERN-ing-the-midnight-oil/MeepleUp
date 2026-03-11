@@ -19,8 +19,31 @@ import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRe
 import Input from './common/Input';
 import Button from './common/Button';
 
-const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = new Set(), userProposalLimit = 5, proposalId = null, selectedDate = null }) => {
+const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: preloadedBggDataProp = null, preloadedBggDataPayload, isOpen, onClose, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = [], userProposalLimit = 5, proposalId = null, selectedDate = null }) => {
   const navigation = useNavigation();
+  // Parse payloads when provided (bridge-safe); otherwise use raw props for backward compat
+  const game = useMemo(() => {
+    if (gamePayload != null && typeof gamePayload === 'string') {
+      try {
+        return JSON.parse(gamePayload) || {};
+      } catch (_) {
+        return {};
+      }
+    }
+    return gameProp ?? {};
+  }, [gamePayload, gameProp?.id, gameProp?.bggId]);
+  const preloadedBggData = useMemo(() => {
+    if (preloadedBggDataPayload != null && typeof preloadedBggDataPayload === 'string') {
+      try {
+        return JSON.parse(preloadedBggDataPayload) || null;
+      } catch (_) {
+        return null;
+      }
+    }
+    return preloadedBggDataProp ?? null;
+  }, [preloadedBggDataPayload, preloadedBggDataProp?.id]);
+  // Normalize to array so we never pass Set over the bridge (causes "JS Symbols are not convertible to dynamic")
+  const userProposalsList = Array.isArray(userProposals) ? userProposals : Array.from(userProposals || []);
   const { user } = useAuth();
   const { updateGameInCollection, addGameToCollection, collections } = useCollections();
   const [bggData, setBggData] = useState(preloadedBggData);
@@ -721,8 +744,8 @@ const GameDetailsModal = ({ game, isOpen, onClose, preloadedBggData = null, even
             <View style={styles.proposeButtonContainer}>
               {(() => {
                 const gameId = String(game.bggId || game.id);
-                const isProposed = userProposals.has(gameId);
-                const canPropose = userProposals.size < userProposalLimit || isProposed;
+                const isProposed = userProposalsList.includes(gameId);
+                const canPropose = userProposalsList.length < userProposalLimit || isProposed;
                 
                 if (!isProposed && canPropose) {
                   return (

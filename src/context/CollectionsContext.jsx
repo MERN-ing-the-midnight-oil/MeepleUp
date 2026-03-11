@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { startBackgroundRetryService, stopBackgroundRetryService } from '../utils/backgroundRetryService';
+import { ensureSerializableId, ensureStringOrNull } from '../utils/helpers';
 
 const CollectionsContext = createContext();
 
@@ -271,8 +272,8 @@ export const CollectionsProvider = ({ children }) => {
             if (isRef) {
               // New format: reference only
               return {
-                id: doc.id,
-                bggId: data.bggId,
+                id: ensureSerializableId(doc.id),
+                bggId: data.bggId != null ? ensureSerializableId(data.bggId) : null,
                 userRating: data.userRating || null,
                 numplays: data.numplays || null,
                 isFavorite: data.isFavorite || false,
@@ -283,11 +284,11 @@ export const CollectionsProvider = ({ children }) => {
             } else {
               // Old format: full data (backward compatibility)
               return {
-                id: doc.id,
+                id: ensureSerializableId(doc.id),
                 title: data.title || data.gameName || 'Unknown Game',
-                bggId: data.bggId || null,
-                image: data.image || data.thumbnail || null,
-                thumbnail: data.thumbnail || null,
+                bggId: data.bggId != null ? ensureSerializableId(data.bggId) : null,
+                image: ensureStringOrNull(data.image) || ensureStringOrNull(data.thumbnail),
+                thumbnail: ensureStringOrNull(data.thumbnail),
                 description: data.description || '',
                 yearPublished: data.yearPublished || null,
                 minPlayers: data.minPlayers || null,
@@ -477,8 +478,8 @@ export const CollectionsProvider = ({ children }) => {
             if (isRef) {
               // New format: reference only
               return {
-                id: doc.id,
-                bggId: data.bggId,
+                id: ensureSerializableId(doc.id),
+                bggId: data.bggId != null ? ensureSerializableId(data.bggId) : null,
                 userRating: data.userRating || null,
                 numplays: data.numplays || null,
                 isFavorite: data.isFavorite || false,
@@ -489,11 +490,11 @@ export const CollectionsProvider = ({ children }) => {
             } else {
               // Old format: full data (backward compatibility)
               return {
-                id: doc.id,
+                id: ensureSerializableId(doc.id),
                 title: data.title || data.gameName || 'Unknown Game',
-                bggId: data.bggId || null,
-                image: data.image || data.thumbnail || null,
-                thumbnail: data.thumbnail || null,
+                bggId: data.bggId != null ? ensureSerializableId(data.bggId) : null,
+                image: ensureStringOrNull(data.image) || ensureStringOrNull(data.thumbnail),
+                thumbnail: ensureStringOrNull(data.thumbnail),
                 description: data.description || '',
                 yearPublished: data.yearPublished || null,
                 minPlayers: data.minPlayers || null,

@@ -1,12 +1,29 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, useTransition } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, ScrollView, useWindowDimensions, PanResponder, Animated, Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useCollections } from '../context/CollectionsContext';
 import Input from './common/Input';
-import GameCard from './GameCard';
+import GameCard, { GameCardView } from './GameCard';
 import { theme } from '../utils/theme';
+
+/** Wrapper that passes only bridge-safe props to GameCardView (no ref/framework extras). Avoid nesting Pressable. */
+function GridGameCard({ gamePayload, preloadedBggDataPayload, gameId, onPress, shouldLoadImage, userId }) {
+  return (
+    <GameCardView
+      gamePayload={gamePayload}
+      preloadedBggDataPayload={preloadedBggDataPayload}
+      gameId={gameId}
+      inGrid={true}
+      disableModal={!!onPress}
+      onPress={onPress}
+      shouldLoadImage={shouldLoadImage}
+      userId={userId}
+    />
+  );
+}
 import { getStarRating as getStarRatingUtil } from '../utils/gameBadges';
+import { toPlainGame, toPlainGameViaJSON, buildGridGamePayloads } from '../utils/bridgeSafeGame';
 
 // Ensure function exists, fallback to simple conversion if not
 const getStarRating = (average) => {
@@ -452,7 +469,7 @@ const GameCollectionView = ({
   showOwners = false,
   ownersMap = {}, // { gameId: [ownerNames] }
   showProposals = false,
-  userProposals = new Set(),
+  userProposals = [],
   onProposeGame,
   userProposalLimit = 5,
   // Display options
@@ -480,7 +497,7 @@ const GameCollectionView = ({
       });
     }
     renderStartTime.current = performance.now();
-  });
+  }, [games]);
   
   console.log('[GameCollectionView] Component rendering', {
     gamesCount: Array.isArray(games) ? games.length : 0,
@@ -495,8 +512,24 @@ const GameCollectionView = ({
   const { width } = useWindowDimensions();
   const navigation = useNavigation();
   const { user } = useAuth();
-  const { collections, getUserCollection } = useCollections();
+  const { collections, getUserCollection, updateGameInCollection, addGameToCollection } = useCollections();
   const userId = user?.uid || user?.id;
+  const getCurrentUserCollectionPlain = useCallback(
+    () => toPlainGame(getUserCollection ? getUserCollection(userId) : (collections[userId] || [])),
+    [userId, getUserCollection, collections]
+  );
+  // Refs so we pass stable callbacks to GameCardView (avoids bridge touching context closures with Symbol)
+  const collectionRef = useRef({
+    getCurrentUserCollectionPlain,
+    updateGameInCollection,
+    addGameToCollection,
+  });
+  collectionRef.current.getCurrentUserCollectionPlain = getCurrentUserCollectionPlain;
+  collectionRef.current.updateGameInCollection = updateGameInCollection;
+  collectionRef.current.addGameToCollection = addGameToCollection;
+  const stableGetCollection = useCallback(() => collectionRef.current.getCurrentUserCollectionPlain?.() ?? [], []);
+  const stableUpdateGame = useCallback((...args) => collectionRef.current.updateGameInCollection?.(...args), []);
+  const stableAddGame = useCallback((...args) => collectionRef.current.addGameToCollection?.(...args), []);
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
   const [browseAllMode, setBrowseAllMode] = useState(false);
@@ -505,8 +538,8 @@ const GameCollectionView = ({
   const filtersAnimation = useRef(new Animated.Value(0)).current; // 0 = collapsed, 1 = expanded
   const scrollViewRef = useRef(null);
   
-  // Lazy loading: Track which games should load images
-  const [loadedImageIds, setLoadedImageIds] = useState(new Set());
+  // Lazy loading: Track which games should load images (array to avoid Set serialization over bridge)
+  const [loadedImageIds, setLoadedImageIds] = useState([]);
   const INITIAL_LOAD_COUNT = 20; // Load first 20 images immediately
   const flatListRef = useRef(null);
   const resultsContainerRef = useRef(null);
@@ -537,22 +570,6 @@ const GameCollectionView = ({
   const [maxComplexity, setMaxComplexity] = useState(5); // Maximum complexity/weight (0-5)
   const [favoritesOnly, setFavoritesOnly] = useState(false); // Show only favorited games
 
-  // Use deferred values for filter inputs to prevent blocking UI during filtering
-  const deferredSearchQuery = useDeferredValue(searchQuery);
-  const deferredSelectedCategories = useDeferredValue(selectedCategories);
-  const deferredSelectedOwners = useDeferredValue(selectedOwners);
-  const deferredMinPlayers = useDeferredValue(minPlayers);
-  const deferredMaxPlayers = useDeferredValue(maxPlayers);
-  const deferredMinBggRating = useDeferredValue(minBggRating);
-  const deferredMinMatchRating = useDeferredValue(minMatchRating);
-  const deferredMinPlayTime = useDeferredValue(minPlayTime);
-  const deferredMaxPlayTime = useDeferredValue(maxPlayTime);
-  const deferredMinComplexity = useDeferredValue(minComplexity);
-  const deferredMaxComplexity = useDeferredValue(maxComplexity);
-  const deferredFavoritesOnly = useDeferredValue(favoritesOnly);
-  const deferredBrowseAllMode = useDeferredValue(browseAllMode);
-  const [isPending, startTransition] = useTransition();
-
   // Get unique owners from games
   const uniqueOwners = useMemo(() => {
     if (!showOwners || !Array.isArray(games) || games.length === 0) return [];
@@ -577,6 +594,7 @@ const GameCollectionView = ({
     }
     
     const enriched = games.map(game => {
+      const plainGame = toPlainGameViaJSON(game);
       // Helper to get ALL categories from rank fields
       const getCategoriesFromRanks = (data) => {
         if (!data) return ['Other'];
@@ -592,20 +610,20 @@ const GameCollectionView = ({
         return categories.length > 0 ? categories : ['Other'];
       };
       
-      const hasCategoryRanks = game.strategyGamesRank !== undefined || game.familyGamesRank !== undefined || game.partyGamesRank !== undefined;
-      const effectiveBggData = hasCategoryRanks ? game : null;
+      const hasCategoryRanks = plainGame.strategyGamesRank !== undefined || plainGame.familyGamesRank !== undefined || plainGame.partyGamesRank !== undefined;
+      const effectiveBggData = hasCategoryRanks ? plainGame : null;
       
       if (effectiveBggData) {
         const categories = getCategoriesFromRanks(effectiveBggData);
         
         return {
-          ...game,
+          ...plainGame,
           _categories: categories,
         };
       }
       
       return {
-        ...game,
+        ...plainGame,
         _categories: ['Other'],
       };
     });
@@ -618,21 +636,21 @@ const GameCollectionView = ({
     return enriched;
   }, [games]);
 
-  // Filter games based on all filters (using deferred values to prevent blocking)
+  // Filter games based on all filters
   const filteredGames = useMemo(() => {
     const startTime = performance.now();
     console.log('[GameCollectionView] filteredGames useMemo running', {
       enrichedGamesCount: Array.isArray(enrichedGames) ? enrichedGames.length : 0,
-      searchQuery: deferredSearchQuery,
-      selectedCategoriesCount: deferredSelectedCategories.length,
-      selectedOwnersCount: deferredSelectedOwners.length,
-      minPlayers: deferredMinPlayers,
-      maxPlayers: deferredMaxPlayers,
-      minBggRating: deferredMinBggRating,
-      minMatchRating: deferredMinMatchRating,
-      minPlayTime: deferredMinPlayTime,
-      maxPlayTime: deferredMaxPlayTime,
-      browseAllMode: deferredBrowseAllMode,
+      searchQuery,
+      selectedCategoriesCount: selectedCategories.length,
+      selectedOwnersCount: selectedOwners.length,
+      minPlayers,
+      maxPlayers,
+      minBggRating,
+      minMatchRating,
+      minPlayTime,
+      maxPlayTime,
+      browseAllMode,
     });
     
     if (!Array.isArray(enrichedGames) || enrichedGames.length === 0) {
@@ -643,7 +661,7 @@ const GameCollectionView = ({
     let filtered = enrichedGames;
 
     // If in browse all mode, skip all filters and just sort by rank
-    if (deferredBrowseAllMode) {
+    if (browseAllMode) {
       // Use a more efficient sort - create a copy first to avoid mutating the original
       filtered = [...enrichedGames].sort((a, b) => {
         const rankA = parseInt(a.rank || '999999') || 999999;
@@ -659,7 +677,7 @@ const GameCollectionView = ({
     }
 
     // Search query filter - keyword search that omits common words
-    if (deferredSearchQuery.trim()) {
+    if (searchQuery.trim()) {
       // Common stop words to omit from search
       const stopWords = new Set([
         'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
@@ -673,7 +691,7 @@ const GameCollectionView = ({
       ]);
       
       // Split query into words, normalize, and filter out stop words
-      const queryWords = deferredSearchQuery
+      const queryWords = searchQuery
         .toLowerCase()
         .trim()
         .replace(/\s+/g, ' ')
@@ -681,7 +699,7 @@ const GameCollectionView = ({
         .filter(word => word.length > 0 && !stopWords.has(word));
       
       // If all words were stop words, use the original query
-      const searchKeywords = queryWords.length > 0 ? queryWords : [deferredSearchQuery.toLowerCase().trim()];
+      const searchKeywords = queryWords.length > 0 ? queryWords : [searchQuery.toLowerCase().trim()];
       
       filtered = filtered.filter(game => {
         // Get title from multiple possible fields
@@ -698,55 +716,55 @@ const GameCollectionView = ({
     }
 
     // Category filter - games must belong to ALL selected categories (AND logic)
-    if (deferredSelectedCategories.length > 0) {
+    if (selectedCategories.length > 0) {
       filtered = filtered.filter(game => {
         const gameCategories = game._categories || ['Other'];
         // Check that ALL selected categories are in the game's categories
-        return deferredSelectedCategories.every(selectedCat => gameCategories.includes(selectedCat));
+        return selectedCategories.every(selectedCat => gameCategories.includes(selectedCat));
       });
     }
 
     // Owner filter
-    if (deferredSelectedOwners.length > 0 && showOwners) {
+    if (selectedOwners.length > 0 && showOwners) {
       filtered = filtered.filter(game => {
         const gameId = String(game.bggId || game.id);
         const owners = ownersMap[gameId] || [];
-        return deferredSelectedOwners.some(owner => owners.includes(owner));
+        return selectedOwners.some(owner => owners.includes(owner));
       });
     }
 
     // Player count filter (range)
-    if (deferredMinPlayers > 1 || deferredMaxPlayers < 10) {
+    if (minPlayers > 1 || maxPlayers < 10) {
       filtered = filtered.filter(game => {
         const gameMinPlayers = game.minPlayers || 1;
         const gameMaxPlayers = game.maxPlayers || 999;
         // Check if game's player range overlaps with filter range
         // Game is included if its range overlaps with [minPlayers, maxPlayers]
         // For maxPlayers = 10 (10+), treat as 10+
-        const filterMax = deferredMaxPlayers >= 10 ? 999 : deferredMaxPlayers;
-        return gameMinPlayers <= filterMax && gameMaxPlayers >= deferredMinPlayers;
+        const filterMax = maxPlayers >= 10 ? 999 : maxPlayers;
+        return gameMinPlayers <= filterMax && gameMaxPlayers >= minPlayers;
       });
     }
 
     // BGG rating filter
-    if (deferredMinBggRating > 0) {
+    if (minBggRating > 0) {
       filtered = filtered.filter(game => {
         const rating = parseFloat(game.average || game.bggRating || 0);
-        return rating >= deferredMinBggRating;
+        return rating >= minBggRating;
       });
     }
 
     // Match rating filter
-    if (deferredMinMatchRating > 0 && showMatchScores) {
+    if (minMatchRating > 0 && showMatchScores) {
       filtered = filtered.filter(game => {
         const gameId = String(game.bggId || game.id);
         const matchScore = matchScores[gameId] || 0;
-        return matchScore >= deferredMinMatchRating;
+        return matchScore >= minMatchRating;
       });
     }
 
     // Play time filter (range with overlap check)
-    if (deferredMinPlayTime > 0 || deferredMaxPlayTime < 300) {
+    if (minPlayTime > 0 || maxPlayTime < 300) {
       filtered = filtered.filter(game => {
         // Get game's play time range (if available) or single value
         const gameMinTime = game.minPlayTime || game.playingTime || null;
@@ -759,23 +777,23 @@ const GameCollectionView = ({
         const gameMin = gameMinTime || 0;
         const gameMax = gameMaxTime || 300;
         
-        return gameMin <= deferredMaxPlayTime && gameMax >= deferredMinPlayTime;
+        return gameMin <= maxPlayTime && gameMax >= minPlayTime;
       });
     }
 
     // Complexity/weight filter
-    if (deferredMinComplexity > 0 || deferredMaxComplexity < 5) {
+    if (minComplexity > 0 || maxComplexity < 5) {
       filtered = filtered.filter(game => {
         const complexity = game.averageWeight || game.complexity || game.weight;
         if (!complexity) return true; // Include games without complexity data
         const complexityNum = typeof complexity === 'string' ? parseFloat(complexity) : complexity;
         if (isNaN(complexityNum)) return true;
-        return complexityNum >= deferredMinComplexity && complexityNum <= deferredMaxComplexity;
+        return complexityNum >= minComplexity && complexityNum <= maxComplexity;
       });
     }
 
     // Favorites only filter
-    if (deferredFavoritesOnly) {
+    if (favoritesOnly) {
       filtered = filtered.filter(game => game.isFavorite === true);
     }
 
@@ -783,61 +801,52 @@ const GameCollectionView = ({
     console.log('[GameCollectionView] filteredGames complete', { 
       originalCount: enrichedGames.length,
       filteredCount: filtered.length,
-      browseAllMode: deferredBrowseAllMode,
-      sortedByRank: deferredBrowseAllMode,
+      browseAllMode,
+      sortedByRank: browseAllMode,
       timeMs: filterTime.toFixed(2),
     });
     return filtered;
-  }, [enrichedGames, deferredSearchQuery, deferredSelectedCategories, deferredSelectedOwners, deferredMinPlayers, deferredMaxPlayers, deferredMinBggRating, deferredMinMatchRating, deferredMinPlayTime, deferredMaxPlayTime, deferredMinComplexity, deferredMaxComplexity, deferredFavoritesOnly, showOwners, ownersMap, showMatchScores, matchScores, deferredBrowseAllMode]);
+  }, [enrichedGames, searchQuery, selectedCategories, selectedOwners, minPlayers, maxPlayers, minBggRating, minMatchRating, minPlayTime, maxPlayTime, minComplexity, maxComplexity, favoritesOnly, browseAllMode, showOwners, ownersMap, showMatchScores, matchScores]);
 
 
-  // Toggle category selection (use transition for non-urgent updates)
+  // Toggle category selection
   const toggleCategory = useCallback((category) => {
-    startTransition(() => {
-      setSelectedCategories(prev => {
-        if (prev.includes(category)) {
-          return prev.filter(c => c !== category);
-        } else {
-          return [...prev, category];
-        }
-      });
+    setSelectedCategories(prev => {
+      if (prev.includes(category)) {
+        return prev.filter(c => c !== category);
+      }
+      return [...prev, category];
     });
-  }, [startTransition]);
+  }, []);
 
-  // Toggle owner selection (use transition for non-urgent updates)
+  // Toggle owner selection
   const toggleOwner = useCallback((owner) => {
-    startTransition(() => {
-      setSelectedOwners(prev => {
-        if (prev.includes(owner)) {
-          return prev.filter(o => o !== owner);
-        } else {
-          return [...prev, owner];
-        }
-      });
+    setSelectedOwners(prev => {
+      if (prev.includes(owner)) {
+        return prev.filter(o => o !== owner);
+      }
+      return [...prev, owner];
     });
-  }, [startTransition]);
+  }, []);
 
-
-  // Reset filters (use transition for non-urgent updates)
+  // Reset filters
   const resetFilters = useCallback(() => {
-    startTransition(() => {
-      setSelectedCategories([]);
-      setSelectedOwners([]);
-      setMinPlayers(1);
-      setMaxPlayers(10);
-      setMinBggRating(0);
-      setMinMatchRating(0);
-      setMinPlayTime(0);
-      setMaxPlayTime(300);
-      setMinComplexity(0);
-      setMaxComplexity(5);
-      setFavoritesOnly(false);
-      setBrowseAllMode(false);
-      setSearchQuery('');
-    });
+    setSelectedCategories([]);
+    setSelectedOwners([]);
+    setMinPlayers(1);
+    setMaxPlayers(10);
+    setMinBggRating(0);
+    setMinMatchRating(0);
+    setMinPlayTime(0);
+    setMaxPlayTime(300);
+    setMinComplexity(0);
+    setMaxComplexity(5);
+    setFavoritesOnly(false);
+    setBrowseAllMode(false);
+    setSearchQuery('');
     setShowResults(false);
-    setDisplayedGamesCount(50); // Reset pagination when filters reset
-  }, [startTransition]);
+    setDisplayedGamesCount(50);
+  }, []);
 
   // Toggle filters panel
   const toggleFilters = useCallback(() => {
@@ -856,59 +865,24 @@ const GameCollectionView = ({
     outputRange: [0, 3000], // Adjust based on content height
   });
 
-  // Handle browse all games (use transition for non-urgent updates)
+  // Handle browse all games
   const handleBrowseAll = useCallback(() => {
-    console.log('[GameCollectionView] handleBrowseAll called');
-    const startTime = performance.now();
-    
-    // Use requestIdleCallback or setTimeout to prevent blocking
-    if (typeof requestIdleCallback !== 'undefined') {
-      requestIdleCallback(() => {
-        startTransition(() => {
-          setSearchQuery('');
-          setSelectedCategories([]);
-          setSelectedOwners([]);
-          setMinPlayers(1);
-          setMaxPlayers(10);
-          setMinBggRating(0);
-          setMinMatchRating(0);
-          setMinPlayTime(0);
-          setMaxPlayTime(300);
-          setMinComplexity(0);
-          setMaxComplexity(5);
-          setFavoritesOnly(false);
-          setBrowseAllMode(true);
-        });
-        setShowResults(true);
-        setDisplayedGamesCount(50); // Reset pagination when browsing all
-        const time = performance.now() - startTime;
-        console.log('[GameCollectionView] handleBrowseAll completed', { timeMs: time.toFixed(2) });
-      }, { timeout: 100 });
-    } else {
-      // Fallback for environments without requestIdleCallback
-      setTimeout(() => {
-        startTransition(() => {
-          setSearchQuery('');
-          setSelectedCategories([]);
-          setSelectedOwners([]);
-          setMinPlayers(1);
-          setMaxPlayers(10);
-          setMinBggRating(0);
-          setMinMatchRating(0);
-          setMinPlayTime(0);
-          setMaxPlayTime(300);
-          setMinComplexity(0);
-          setMaxComplexity(5);
-          setFavoritesOnly(false);
-          setBrowseAllMode(true);
-        });
-        setShowResults(true);
-        setDisplayedGamesCount(50); // Reset pagination when browsing all
-        const time = performance.now() - startTime;
-        console.log('[GameCollectionView] handleBrowseAll completed', { timeMs: time.toFixed(2) });
-      }, 0);
-    }
-  }, [startTransition]);
+    setSearchQuery('');
+    setSelectedCategories([]);
+    setSelectedOwners([]);
+    setMinPlayers(1);
+    setMaxPlayers(10);
+    setMinBggRating(0);
+    setMinMatchRating(0);
+    setMinPlayTime(0);
+    setMaxPlayTime(300);
+    setMinComplexity(0);
+    setMaxComplexity(5);
+    setFavoritesOnly(false);
+    setBrowseAllMode(true);
+    setShowResults(true);
+    setDisplayedGamesCount(50);
+  }, []);
   
   // Scroll to results when browseAllMode is activated
   useEffect(() => {
@@ -935,24 +909,24 @@ const GameCollectionView = ({
     setShowBackToTop(scrollY > 300);
     
     // Lazy loading: Load images for items near viewport
-    if (paginatedGames.length > 0 && loadedImageIds.size < paginatedGames.length) {
+    if (paginatedGames.length > 0 && loadedImageIds.length < paginatedGames.length) {
       const itemHeight = 200; // Approximate height of a game card
       const buffer = itemHeight * 2; // Load 2 rows before and after viewport
       
       const startIndex = Math.max(0, Math.floor((scrollY - buffer) / itemHeight));
       const endIndex = Math.min(paginatedGames.length - 1, Math.ceil((scrollY + scrollViewHeight + buffer) / itemHeight));
       
-      // Load images for visible items
-      const newLoadedIds = new Set(loadedImageIds);
+      const newLoadedIds = [...loadedImageIds];
+      let changed = false;
       for (let i = startIndex; i <= endIndex && i < paginatedGames.length; i++) {
         const game = paginatedGames[i];
         const gameId = game.bggId || game.id;
-        if (gameId) {
-          newLoadedIds.add(gameId);
+        if (gameId && !newLoadedIds.includes(gameId)) {
+          newLoadedIds.push(gameId);
+          changed = true;
         }
       }
-      
-      if (newLoadedIds.size > loadedImageIds.size) {
+      if (changed) {
         setLoadedImageIds(newLoadedIds);
       }
     }
@@ -981,7 +955,27 @@ const GameCollectionView = ({
   const paginatedGames = useMemo(() => {
     return filteredGames.slice(0, displayedGamesCount);
   }, [filteredGames, displayedGamesCount]);
-  
+
+  // Map gameId -> plainGame for stable onPress lookup (same reference when paginatedGames unchanged)
+  const gamesByIdMap = useMemo(() => {
+    const m = new Map();
+    paginatedGames.forEach((g) => {
+      const { plainGame } = buildGridGamePayloads(g);
+      const id = plainGame?.bggId ?? plainGame?.id;
+      if (id != null) m.set(String(id), plainGame);
+    });
+    return m;
+  }, [paginatedGames]);
+
+  // Stable callback so GameCardView memo sees same onPress reference and can skip re-render
+  const handleGamePress = useCallback(
+    (gameId) => {
+      const game = gamesByIdMap.get(String(gameId));
+      if (game && typeof onGamePress === 'function') onGamePress(game);
+    },
+    [onGamePress, gamesByIdMap]
+  );
+
   // Check if there are more games to load
   const hasMoreGames = filteredGames.length > displayedGamesCount;
   
@@ -990,12 +984,12 @@ const GameCollectionView = ({
     setDisplayedGamesCount(prev => prev + GAMES_PER_PAGE);
   }, []);
   
-  // Reset pagination when filters change or results are shown
+  // Reset pagination when filter values change (not in browseAllMode — handleBrowseAll already sets count)
   useEffect(() => {
-    if (showResults) {
-      setDisplayedGamesCount(50); // Reset to first page when showing results
+    if (!browseAllMode) {
+      setDisplayedGamesCount(50);
     }
-  }, [showResults, searchQuery, selectedCategories, selectedOwners, minPlayers, maxPlayers, minBggRating, minMatchRating, minPlayTime, maxPlayTime, minComplexity, maxComplexity, favoritesOnly, browseAllMode]);
+  }, [browseAllMode, searchQuery, selectedCategories, selectedOwners, minPlayers, maxPlayers, minBggRating, minMatchRating, minPlayTime, maxPlayTime, minComplexity, maxComplexity, favoritesOnly]);
 
   // Render filter chip/pill
   const renderChip = useCallback((label, isSelected, onPress, count = null) => {
@@ -1018,7 +1012,7 @@ const GameCollectionView = ({
     const matchScore = showMatchScores ? matchScores[gameId] : undefined;
     
     // Lazy loading: Load first 20 images immediately, others when visible
-    const shouldLoadImage = index < INITIAL_LOAD_COUNT || loadedImageIds.has(gameId);
+    const shouldLoadImage = index < INITIAL_LOAD_COUNT || loadedImageIds.includes(gameId);
     
     // Calculate card width for grid
     const numColumns = 3;
@@ -1030,23 +1024,19 @@ const GameCollectionView = ({
     const availableWidth = width - totalPadding - totalGaps;
     const cardWidthPixels = availableWidth / numColumns;
     
-    // Use _bggData if available, otherwise use the game object itself since enriched games
-    // have all BGG data merged directly into them
-    const preloadedBggData = game._bggData || game;
-    
+    const { gamePayload, preloadedBggDataPayload: preloadedPayload, plainGame } = buildGridGamePayloads(game);
+    const listKey = String(gameId ?? `game-${index}`);
     return (
-      <View key={gameId || `game-${index}`} style={styles.gameCardWrapper}>
+      <View key={listKey} style={styles.gameCardWrapper}>
         <View style={{ width: cardWidthPixels }}>
-          <Pressable onPress={() => onGamePress?.(game)}>
-            <GameCard 
-              game={game} 
-              onDelete={onGameDelete}
-              preloadedBggData={preloadedBggData}
-              inGrid={true}
-              disableModal={!!onGamePress}
-              shouldLoadImage={shouldLoadImage}
-            />
-          </Pressable>
+          <GridGameCard
+            gamePayload={gamePayload}
+            preloadedBggDataPayload={preloadedPayload}
+            gameId={gameId}
+            onPress={onGamePress ? handleGamePress : undefined}
+            shouldLoadImage={shouldLoadImage}
+            userId={userId ?? undefined}
+          />
         </View>
         {showMatchScores && matchScore !== undefined && matchScore !== null && (
           <View style={styles.matchScoreBadge}>
@@ -1058,40 +1048,17 @@ const GameCollectionView = ({
         )}
       </View>
     );
-  }, [showMatchScores, matchScores, onGameDelete, onGamePress, width, loadedImageIds]);
+  }, [showMatchScores, matchScores, onGamePress, handleGamePress, width, loadedImageIds, userId]);
 
-  // Initialize lazy loading for first batch of games
-  useEffect(() => {
-    if (paginatedGames.length > 0) {
-      const initialIds = new Set();
-      for (let i = 0; i < Math.min(INITIAL_LOAD_COUNT, paginatedGames.length); i++) {
-        const game = paginatedGames[i];
-        const gameId = game.bggId || game.id;
-        if (gameId) {
-          initialIds.add(gameId);
-        }
-      }
-      setLoadedImageIds(initialIds);
-    }
-  }, [paginatedGames.length]); // Only re-run when count changes, not on every game change
+  // No effect for initial batch — first INITIAL_LOAD_COUNT load by index (shouldLoadImage below).
+  // Setting loadedImageIds in an effect here caused a state update after first render with cards → second render → Fabric crash.
 
-  // Memoize the games grid to prevent unnecessary re-renders
-  const gamesGridElement = useMemo(() => {
-    const startTime = performance.now();
-    const result = (
-      <View style={styles.gamesGrid}>
-        {paginatedGames.map((game, index) => renderGameCard(game, index))}
-      </View>
-    );
-    const renderTime = performance.now() - startTime;
-    if (renderTime > 50) {
-      console.warn('[GameCollectionView] Slow paginated games render', {
-        gamesCount: paginatedGames.length,
-        timeMs: renderTime.toFixed(2),
-      });
-    }
-    return result;
-  }, [paginatedGames, renderGameCard]);
+  // Inline grid so React sees the same parent <View> across renders and reconciles children by key (no remounts).
+  const gamesGridElement = (
+    <View style={styles.gamesGrid}>
+      {paginatedGames.map((game, index) => renderGameCard(game, index))}
+    </View>
+  );
 
   // Render games grid - memoized to prevent unnecessary re-renders
   const renderGamesGrid = useCallback((gamesToRender) => {
@@ -1125,27 +1092,24 @@ const GameCollectionView = ({
     const availableWidth = width - totalPadding - totalGaps;
     const cardWidthPixels = availableWidth / numColumns;
     
-    // Use _bggData if available, otherwise use the game object itself since enriched games
-    // have all BGG data merged directly into them
-    const preloadedBggData = item._bggData || item;
-    
+    const { gamePayload, preloadedBggDataPayload: preloadedPayload, plainGame } = buildGridGamePayloads(item);
     return (
-      <Pressable onPress={() => onGamePress?.(item)} style={{ width: cardWidthPixels }}>
-        <GameCard 
-          game={item} 
-          onDelete={onGameDelete}
-          preloadedBggData={preloadedBggData}
-          inGrid={true}
+      <View style={{ width: cardWidthPixels }}>
+        <GridGameCard
+          gamePayload={gamePayload}
+          preloadedBggDataPayload={preloadedPayload}
+          gameId={gameId}
+          onPress={onGamePress ? handleGamePress : undefined}
+          userId={userId ?? undefined}
         />
-      </Pressable>
+      </View>
     );
-  }, [showMatchScores, matchScores, onGameDelete, onGamePress, width]);
+  }, [showMatchScores, matchScores, onGamePress, handleGamePress, width, userId]);
 
   console.log('[GameCollectionView] About to render', {
     showResults,
     filteredGamesCount: filteredGames.length,
     hasHeaderComponent: !!headerComponent,
-    isPending,
   });
 
   useEffect(() => {

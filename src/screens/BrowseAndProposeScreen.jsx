@@ -1955,7 +1955,7 @@ const BrowseAndProposeScreen = () => {
               games={enrichedGames}
               userCollection={collections[userId] || []}
               onProposeGame={handleProposeGame}
-              userProposals={userProposals}
+              userProposals={Array.from(userProposals)}
               eventId={eventId}
             />
           )}
@@ -2008,7 +2008,7 @@ const BrowseAndProposeScreen = () => {
           owners={selectedGame._owners || []}
           eventId={eventId}
           onProposeGame={handleProposeGame}
-          userProposals={userProposals}
+          userProposals={Array.from(userProposals)}
           userProposalLimit={userProposalLimit}
           proposalId={selectedProposalId}
           selectedDate={selectedDate}

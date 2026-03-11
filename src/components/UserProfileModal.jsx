@@ -315,7 +315,7 @@ const UserProfileModal = ({
                   <View style={styles.gamesGrid}>
                     {games.map((game) => (
                       <GameCard
-                        key={game.id}
+                        key={String(game.bggId ?? game.id ?? '')}
                         game={game}
                         disableModal={false}
                       />

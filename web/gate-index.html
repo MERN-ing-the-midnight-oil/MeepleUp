@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeepleUp</title>
+  <script>
+    (function() {
+      var ua = navigator.userAgent || navigator.vendor || '';
+      var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIOS) {
+        window.location.replace('/app.html');
+      } else {
+        window.location.replace('/maintenance/');
+      }
+    })();
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0;url=/maintenance/">
+  </noscript>
+  <style>body{font-family:system-ui;text-align:center;padding:2rem;color:#333;} a{color:#4a90e2;}</style>
+</head>
+<body>
+  <p>Redirecting…</p>
+  <p>If you are not redirected, <a href="/app.html">open the app</a> or <a href="/maintenance/">view the maintenance page</a>.</p>
+</body>
+</html>

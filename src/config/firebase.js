@@ -116,20 +116,38 @@ let storageInstance = null;
 
 if (!firebaseInitError && firebase.apps.length > 0) {
   try {
-    authInstance = firebase.auth();
+    // On React Native, auth must be initialized with getReactNativePersistence(AsyncStorage)
+    // so that login state survives app close/restart. Without this, Firebase Auth uses
+    // in-memory persistence and users are logged out when the app is closed.
+    if (Platform.OS !== 'web') {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const { getApp } = require('firebase/app');
+        const { initializeAuth, getReactNativePersistence } = require('firebase/auth/react-native');
+        const app = getApp();
+        authInstance = initializeAuth(app, {
+          persistence: getReactNativePersistence(AsyncStorage),
+        });
+      } catch (rnAuthError) {
+        logger.warn('Firebase React Native auth persistence failed, falling back to default:', rnAuthError);
+        authInstance = firebase.auth();
+      }
+    } else {
+      authInstance = firebase.auth();
+    }
+
+    if (!authInstance) {
+      authInstance = firebase.auth();
+    }
+
     dbInstance = firebase.firestore();
     storageInstance = firebase.storage();
-    
+
     // Explicitly set persistence for web (local = persists across browser sessions)
-    // React Native/Expo automatically uses AsyncStorage, so no configuration needed
     if (Platform.OS === 'web' && authInstance && authInstance.setPersistence) {
-      // For web, explicitly set to 'local' persistence (default, but being explicit)
-      // This ensures users stay logged in across page refreshes and server restarts
-      // Note: 'local' is the default, but we're being explicit for clarity
       authInstance.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
         console.warn('Error setting auth persistence:', error);
         logger.warn('Error setting auth persistence:', error);
-        // Continue anyway - default behavior should still work
       });
     }
   } catch (error) {
@@ -143,10 +161,10 @@ export const auth = authInstance;
 export const db = dbInstance;
 export const storage = storageInstance;
 
-// Note: 
-// - Web: Uses localStorage (persists across browser sessions)
-// - React Native/Expo: Automatically uses AsyncStorage (persists across app restarts)
-// Users will remain logged in across app restarts in both environments.
+// Note:
+// - Web: setPersistence(LOCAL) uses localStorage (persists across browser sessions)
+// - React Native: initializeAuth(..., getReactNativePersistence(AsyncStorage)) so auth
+//   survives app close/restart. Without this, Firebase Auth would not persist on native.
 
 // Initialize Firebase Functions (if available)
 let functionsInstance = null;

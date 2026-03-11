@@ -25,7 +25,9 @@
       "distribution": "store",
       "ios": {
         "buildConfiguration": "Release",
-        "simulator": false
+        "simulator": false,
+        "cache": { "key": "pods-2025-02" },
+        "cocoapods": "1.16.2"
       },
       "android": {
         "buildType": "app-bundle",

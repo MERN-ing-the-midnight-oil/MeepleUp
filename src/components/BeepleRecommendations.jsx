@@ -23,9 +23,10 @@ const DEFAULT_WEIGHTS = {
   favorite: 2,
 };
 
-const BeepleRecommendations = ({ games, userCollection, onProposeGame, userProposals = new Set(), eventId = null, userProposalLimit = 5 }) => {
+const BeepleRecommendations = ({ games, userCollection, onProposeGame, userProposals = [], eventId = null, userProposalLimit = 5 }) => {
   const { width } = useWindowDimensions();
   const navigation = useNavigation();
+  const userProposalsList = Array.isArray(userProposals) ? userProposals : Array.from(userProposals || []);
   const { user, updateUser } = useAuth();
   const { collections, updateGameInCollection, addGameToCollection, getUserCollection } = useCollections();
   const userId = user?.uid || user?.id;
@@ -1349,7 +1350,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                   inGrid={true}
                   onFavorite={handleFavoriteToggle}
                   onProposeGame={onProposeGame}
-                  userProposals={userProposals}
+                  userProposals={userProposalsList}
                   eventId={eventId}
                 />
               </View>
@@ -1372,8 +1373,8 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                 <View style={styles.proposeButtonContainer}>
                   {(() => {
                     const gameId = String(currentRecommendation.game.bggId || currentRecommendation.game.id);
-                    const isProposed = userProposals.has(gameId);
-                    const canPropose = userProposals.size < userProposalLimit || isProposed;
+                    const isProposed = userProposalsList.includes(gameId);
+                    const canPropose = userProposalsList.length < userProposalLimit || isProposed;
                     
                     if (!isProposed && canPropose) {
                       return (

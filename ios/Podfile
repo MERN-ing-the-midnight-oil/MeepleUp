@@ -23,6 +23,9 @@ prepare_react_native_project!
 target 'MeepleUp' do
   use_expo_modules!
 
+  # Resolve SDWebImageWebPCoder conflict: expo-image requires ~> 0.14.6, expo-image-manipulator has no constraint
+  pod 'SDWebImageWebPCoder', '~> 0.14.6'
+
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
   else

@@ -88,3 +88,29 @@ export const getUserLocation = async () => {
   }
 };
 
+/**
+ * Ensure a value is safe to use as a game id for React Native (no Symbols).
+ * React Native bridge cannot serialize Symbols; use for keys, recyclingKey, etc.
+ * @param {*} id - Raw id (string, number, or unexpected type)
+ * @returns {string|number|null} Serializable id
+ */
+export function ensureSerializableId(id) {
+  if (id == null) return null;
+  if (typeof id === 'symbol') return String(id);
+  if (typeof id === 'string' || typeof id === 'number') return id;
+  return String(id);
+}
+
+/**
+ * Ensure a value is a non-empty string or null (for thumbnail/image URLs).
+ * Prevents Symbols or other non-serializable values from reaching native Image components.
+ * @param {*} value - Raw value from API/Firestore
+ * @returns {string|null}
+ */
+export function ensureStringOrNull(value) {
+  if (value == null) return null;
+  if (typeof value === 'symbol') return null;
+  if (typeof value === 'string' && value.length > 0) return value;
+  return null;
+}
+
