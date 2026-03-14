@@ -3,232 +3,96 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="MeepleUp is temporarily closed for emergency maintenance. Leave your email and we'll notify you when we're back.">
-  <title>MeepleUp - Emergency Maintenance</title>
+  <meta name="description" content="MeepleUp - Coming Soon">
+  <title>MeepleUp - Coming Soon</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    .maintenance-page {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1.5rem;
-      text-align: center;
-      max-width: 440px;
-      margin: 0 auto;
-    }
-    .maintenance-page .app-icon {
-      width: 100px;
-      height: 100px;
-      margin-bottom: 1rem;
-    }
-    @media (min-width: 768px) {
-      .maintenance-page .app-icon {
-        width: 140px;
-        height: 140px;
-      }
-    }
-    .maintenance-page h1 {
-      font-size: 1.75rem;
-      color: #d45d5d;
-      margin: 0 0 1rem;
-      font-weight: 700;
-    }
-    @media (min-width: 768px) {
-      .maintenance-page h1 {
-        font-size: 2.5rem;
-      }
-    }
-    .maintenance-page .message {
-      font-size: 1rem;
-      color: #2b2b2b;
-      line-height: 1.5;
-      margin: 0 0 1.25rem;
-    }
-    @media (min-width: 768px) {
-      .maintenance-page .message {
-        font-size: 1.25rem;
-      }
-    }
-    .maintenance-page .question {
-      font-size: 0.95rem;
-      color: #6f6f6f;
-      line-height: 1.5;
-      margin: 0 0 1.5rem;
-    }
-    @media (min-width: 768px) {
-      .maintenance-page .question {
-        font-size: 1.125rem;
-      }
-    }
-    .maintenance-page .form-wrap {
-      width: 100%;
-      max-width: 320px;
-      margin: 0 auto;
-    }
-    .maintenance-page input[type="email"] {
-      width: 100%;
-      padding: 12px 16px;
-      font-size: 1rem;
-      border: 1px solid #c9b79c;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      box-sizing: border-box;
-      font-family: inherit;
-    }
-    .maintenance-page input[type="email"]:focus {
-      outline: none;
-      border-color: #d45d5d;
-      box-shadow: 0 0 0 2px rgba(212, 93, 93, 0.2);
-    }
-    .maintenance-page button {
-      width: 100%;
-      padding: 12px 24px;
-      font-size: 1rem;
-      font-weight: 600;
-      color: #fff;
-      background-color: #d45d5d;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background-color 0.2s, opacity 0.2s;
-    }
-    .maintenance-page button:hover:not(:disabled) {
-      background-color: #c04d4d;
-    }
-    .maintenance-page button:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-    }
-    .maintenance-page .error {
-      color: #c0392b;
-      font-size: 0.875rem;
-      margin-bottom: 12px;
-    }
-    .maintenance-page .success-box {
-      margin-top: 1.5rem;
-      padding: 1rem;
-      background-color: #e8f5e9;
-      border-radius: 8px;
-      width: 100%;
-      max-width: 320px;
-      margin-left: auto;
-      margin-right: auto;
-    }
-    .maintenance-page .success-box p {
-      margin: 0;
-      font-size: 1rem;
-      color: #2e7d32;
-      text-align: center;
-    }
-    .maintenance-page .legal {
-      margin-top: 2.5rem;
-      font-size: 0.875rem;
-      color: #6f6f6f;
-    }
-    .maintenance-page .legal a {
-      color: #4a90e2;
-      text-decoration: none;
-    }
-    .maintenance-page .legal a:hover {
-      text-decoration: underline;
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-  <main class="maintenance-page">
-    <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" onerror="this.style.display='none'">
-    <h1>MeepleUp</h1>
-    <p class="message">MeepleUp is closed for emergency maintenance.</p>
-    <p class="question">Can I send you an email when MeepleUp is feeling better?</p>
+  <main class="main-container">
+    <div class="content-wrapper">
+      <!-- Left Side: Logo Section -->
+      <aside class="logo-section" id="logoSection">
+        <figure class="app-icon-container" id="appIconContainer">
+          <img src="images/app-icon.png" alt="MeepleUp" class="app-icon" id="appIcon" onerror="this.style.display='none'">
+        </figure>
+        <figure class="bgg-badge" id="bggBadge">
+          <img src="images/bgg-logo-color.png" alt="BoardGameGeek" class="bgg-logo" id="bggLogo" onerror="this.style.display='none'">
+        </figure>
+      </aside>
 
-    <div id="formSection" class="form-wrap">
-      <p id="errorMsg" class="error" style="display: none;"></p>
-      <input type="email" id="emailInput" placeholder="Your email" autocomplete="email" required>
-      <button type="button" id="submitBtn">Notify me</button>
+      <!-- Right Side: Content Section -->
+      <section class="content-section">
+        <header>
+          <h1 class="brand-name">MeepleUp</h1>
+          <p class="tagline">Plan Apart, Play Together.</p>
+        </header>
+
+        <p class="description">
+          MeepleUp is event management built specifically for tabletop gamers. Whether you're already hosting regular game nights or thinking about starting one, MeepleUp makes it effortless.
+        </p>
+
+        <section class="features-section">
+          <h2 class="features-heading">Everything you need in one app:</h2>
+          <ul class="features-list">
+            <li class="feature-item">Calendar and RSVP management</li>
+            <li class="feature-item">AI-powered board game cataloging (just snap a photo of your physical collection!)</li>
+            <li class="feature-item">Browse your group's collections to plan the perfect game night</li>
+            <li class="feature-item">Built-in discussion boards (no separate chat app required)</li>
+          </ul>
+        </section>
+
+        <p class="value-prop">
+          All the features of premium event platforms, tailored for tabletop gaming—at a fraction of the cost.
+        </p>
+
+        <!-- Web App Link -->
+        <section class="web-app-container">
+          <a href="/app/" class="web-app-button">
+            Try MeepleUp Web App
+          </a>
+        </section>
+
+        <!-- How It Works Link -->
+        <section class="web-app-container">
+          <a href="how-it-works.html" class="contact-button">
+            How It Works
+          </a>
+        </section>
+
+        <!-- App Store Badges -->
+        <section class="badges-container">
+          <span class="coming-soon-label">COMING SOON:</span>
+          <div class="badges-row">
+            <a href="#" class="badge-link" aria-label="Download on the App Store">
+              <img src="images/app-store-badge.svg" alt="Download on the App Store" class="app-badge">
+            </a>
+            <a href="#" class="badge-link" aria-label="Get it on Google Play">
+              <img src="images/google-play-badge.png" alt="Get it on Google Play" class="app-badge">
+            </a>
+          </div>
+        </section>
+
+        <!-- Contact Email -->
+        <address>
+          <a href="mailto:contact@meepleup.com" class="contact-button">
+            contact@meepleup.com
+          </a>
+        </address>
+      </section>
     </div>
-
-    <div id="successSection" class="success-box" style="display: none;">
-      <p>Thanks! We'll email you when we're back.</p>
-    </div>
-
-    <nav class="legal">
-      <a href="privacy-policy.html">Privacy Policy</a>
-      <span> · </span>
-      <a href="terms-of-service.html">Terms of Service</a>
-    </nav>
+    
+    <!-- Legal Links Footer -->
+    <footer class="legal-links-footer">
+      <nav class="legal-links-nav">
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <span class="legal-links-separator">•</span>
+        <a href="terms-of-service.html">Terms of Service</a>
+      </nav>
+    </footer>
   </main>
-
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyAjVgWb8wApwT1n0hSe_63nI5S3NgROAbI",
-      authDomain: "meepleup-951a1.firebaseapp.com",
-      projectId: "meepleup-951a1",
-      storageBucket: "meepleup-951a1.firebasestorage.app",
-      messagingSenderId: "177622732549",
-      appId: "1:177622732549:ios:8f4e2f8d53a6060e42716c"
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-
-    const emailInput = document.getElementById('emailInput');
-    const submitBtn = document.getElementById('submitBtn');
-    const errorMsg = document.getElementById('errorMsg');
-    const formSection = document.getElementById('formSection');
-    const successSection = document.getElementById('successSection');
-
-    function showError(msg) {
-      errorMsg.textContent = msg;
-      errorMsg.style.display = 'block';
-    }
-    function hideError() {
-      errorMsg.textContent = '';
-      errorMsg.style.display = 'none';
-    }
-
-    submitBtn.addEventListener('click', async function() {
-      hideError();
-      var trimmed = (emailInput.value || '').trim();
-      if (!trimmed) {
-        showError('Please enter your email');
-        return;
-      }
-      var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(trimmed)) {
-        showError('Please enter a valid email address');
-        return;
-      }
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Please wait...';
-
-      try {
-        await db.collection('maintenanceNotify').add({
-          email: trimmed.toLowerCase(),
-          createdAt: new Date()
-        });
-        formSection.style.display = 'none';
-        successSection.style.display = 'block';
-      } catch (err) {
-        console.error('Maintenance signup error:', err);
-        showError(err.message || 'Something went wrong. Please try again.');
-      } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Notify me';
-      }
-    });
-
-    emailInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') submitBtn.click();
-    });
-  </script>
+  <script src="script.js"></script>
 </body>
 </html>
