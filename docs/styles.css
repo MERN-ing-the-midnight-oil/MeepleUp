@@ -115,6 +115,13 @@ body {
   object-fit: contain;
 }
 
+.sidebar-how-it-works {
+  width: 100%;
+  max-width: 200px;
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
 /* Sidebar Legal Links */
 .sidebar-legal-links {
   display: flex;
@@ -744,6 +751,11 @@ body {
   max-width: 180px;
 }
 
+.badge-link-google .app-badge {
+  height: 73px;
+  max-width: 262px;
+}
+
 /* Contact Button */
 .contact-button {
   display: inline-block;
@@ -758,6 +770,9 @@ body {
   background-color: transparent;
   text-align: center;
   margin-top: 0.5rem;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
 }
 
 .contact-button:hover {
@@ -765,6 +780,39 @@ body {
   color: var(--text-light);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+
+/* Contact + Legal (inline at bottom) */
+.contact-and-legal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.legal-links-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legal-links-inline a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.legal-links-inline a:hover {
+  color: var(--primary-color);
+}
+
+.legal-links-inline .legal-links-separator {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  user-select: none;
 }
 
 /* Back Link */
