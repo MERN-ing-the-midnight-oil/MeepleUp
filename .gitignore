@@ -48,3 +48,6 @@ android/app/google-services.json
 # Fastlane sensitive files
 fastlane/AuthKey*.p8
 fastlane/report.xml
+
+# Local notes (not tracked)
+/notes
