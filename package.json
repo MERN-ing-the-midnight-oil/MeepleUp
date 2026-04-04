@@ -1,6 +1,6 @@
 {
   "name": "MeepleUp",
-  "version": "1.0.6",
+  "version": "1.0.9",
   "description": "A platform for managing board game events and collections.",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {

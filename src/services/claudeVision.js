@@ -1,5 +1,269 @@
+import { getApp } from 'firebase/app';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { API_CONFIG } from '../config/api';
-import { functions } from '../config/firebase';
+import firebase, { auth } from '../config/firebase';
+
+/** Matches Firebase callable HTTP timeout (see @firebase/functions). */
+const CALLABLE_FETCH_TIMEOUT_MS = 70000;
+
+/** True if Firebase failed the token grant/refresh call (API key restrictions). */
+const isGrantTokenBlockedError = (e) => {
+  const msg = String(e?.message || '');
+  const code = String(e?.code || '');
+  return (
+    msg.includes('granttoken-are-blocked') ||
+    msg.includes('securetoken.googleapis.com') ||
+    code.includes('granttoken')
+  );
+};
+
+/** Read Firebase ID token `exp` (ms). No signature verification — enough to detect expiry. */
+const getJwtExpMs = (idToken) => {
+  if (!idToken || typeof idToken !== 'string') {
+    return null;
+  }
+  const parts = idToken.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+    const payload = JSON.parse(atob(b64 + pad));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+};
+
+/** True if token is expired or expires within 1 minute (clock skew). */
+const isJwtExpired = (idToken) => {
+  const expMs = getJwtExpMs(idToken);
+  if (!expMs) {
+    return false;
+  }
+  return Date.now() > expMs - 60000;
+};
+
+const TOKEN_EXPIRED_GRANT_BLOCKED_MSG =
+  'Your sign-in token expired and cannot be refreshed: Google is blocking the Secure Token (grant) API for the API key in this build. Fix: Google Cloud → APIs & Services → Credentials → open the key that matches EXPO_PUBLIC_FIREBASE_API_KEY in your .env → set API restrictions to "Don\'t restrict key" (or enable Token Service API + Identity Toolkit API on that exact key). Save, wait 1–2 minutes, restart the app, then sign out and sign in again.';
+
+/**
+ * Prefer a fresh ID token for the callable; if Secure Token API is blocked on the API key,
+ * fall back to the cached token. Returns grantBlocked so callers can fail fast if token is expired.
+ */
+const getIdTokenForCallable = async () => {
+  try {
+    const token = await auth.currentUser.getIdToken(true);
+    return { token, grantBlocked: false };
+  } catch (e) {
+    if (!isGrantTokenBlockedError(e)) {
+      throw e;
+    }
+    if (__DEV__) {
+      console.warn(
+        '[Claude API] getIdToken(true) blocked (API key / Secure Token). Using cached token if still valid.',
+      );
+    }
+    const token = await auth.currentUser.getIdToken(false);
+    return { token, grantBlocked: true };
+  }
+};
+
+const postCallableWithToken = async (url, dataPayload, idToken) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CALLABLE_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ data: dataPayload }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const invokeCallableWithBearer = async (app, functionName, dataPayload, idTokenOptional) => {
+  const functionsInstance = getFunctions(app);
+  const url = functionsInstance._url(functionName);
+  if (__DEV__) {
+    console.log('[Claude API] Callable URL:', url);
+  }
+
+  let idToken =
+    typeof idTokenOptional === 'string'
+      ? idTokenOptional
+      : (await getIdTokenForCallable()).token;
+  let response = await postCallableWithToken(url, dataPayload, idToken);
+
+  // Retry once if edge returned 401 (only when we fetched token here; avoid duplicate spam when parent passed token).
+  const rawTextFirst = await response.clone().text();
+  if (
+    !idTokenOptional &&
+    response.status === 401 &&
+    rawTextFirst.includes('<html')
+  ) {
+    if (__DEV__) {
+      console.warn('[Claude API] Callable returned 401 HTML; retrying with refreshed token once.');
+    }
+    idToken = (await getIdTokenForCallable()).token;
+    response = await postCallableWithToken(url, dataPayload, idToken);
+  }
+
+  const rawText = await response.text();
+  if (!rawText || !rawText.trim()) {
+    const msg = `Game recognition returned HTTP ${response.status} with an empty body. Is callClaude deployed?`;
+    if (__DEV__) {
+      console.error('[Claude API] Callable URL:', url, 'status:', response.status);
+    }
+    throw Object.assign(new Error(msg), { code: 'functions/internal' });
+  }
+
+  let json;
+  try {
+    json = JSON.parse(rawText);
+  } catch (parseErr) {
+    if (__DEV__) {
+      console.error(
+        '[Claude API] Non-JSON callable response. status=',
+        response.status,
+        'content-type=',
+        response.headers?.get?.('content-type'),
+        'body preview:',
+        rawText.substring(0, 800),
+      );
+    }
+    if (response.status === 401 && rawText.includes('<html')) {
+      const looksLikeIamInvoker =
+        /does not have permission|permission to the requested URL/i.test(rawText);
+      if (looksLikeIamInvoker) {
+        throw new Error(
+          'Game recognition was denied (HTTP 401). The HTML error usually means Cloud Functions Invoker is not allowed for callClaude (not your Firebase API key list). In Google Cloud Console → Cloud Functions → open callClaude (us-central1) → Permissions → Grant access: principal allUsers, role Cloud Functions Invoker. Or run: gcloud functions add-iam-policy-binding callClaude --region=us-central1 --project=meepleup-951a1 --member=allUsers --role=roles/cloudfunctions.invoker',
+        );
+      }
+      throw new Error(
+        'Game recognition was denied (HTTP 401). Your ID token may be expired or token refresh may be blocked by API key restrictions — Google Cloud → Credentials → your Firebase API key → add Token Service API or use Don’t restrict key; then sign out and sign in.',
+      );
+    }
+    throw Object.assign(
+      new Error(
+        `Game recognition returned HTTP ${response.status} (not JSON). Check Cloud Functions deployment and logs.`,
+      ),
+      { code: 'functions/internal' },
+    );
+  }
+
+  if (json.error) {
+    const e = json.error;
+    const statusStr = typeof e.status === 'string' ? e.status : 'INTERNAL';
+    const code = `functions/${statusStr.toLowerCase().replace(/_/g, '-')}`;
+    const err = new Error(e.message || statusStr);
+    err.code = code;
+    throw err;
+  }
+
+  const result = json.result !== undefined ? json.result : json.data;
+  return { data: result };
+};
+
+const isUnauthenticatedCallableError = (e) => {
+  const code = e?.code || '';
+  const msg = String(e?.message || '').toLowerCase();
+  return (
+    code === 'functions/unauthenticated' ||
+    (typeof code === 'string' && code.endsWith('/unauthenticated')) ||
+    msg === 'unauthenticated'
+  );
+};
+
+/**
+ * Prefer Firebase httpsCallable (correct protocol + headers). If the SDK omits auth on RN,
+ * fall back to explicit Bearer fetch using the same ID token string (no second refresh spam).
+ */
+const callClaudeCallableWithFallback = async (app, payload) => {
+  const { token, grantBlocked } = await getIdTokenForCallable();
+
+  if (grantBlocked && isJwtExpired(token)) {
+    throw new Error(TOKEN_EXPIRED_GRANT_BLOCKED_MSG);
+  }
+
+  const callClaude = httpsCallable(getFunctions(app), 'callClaude');
+  try {
+    return await callClaude(payload);
+  } catch (e) {
+    if (!isUnauthenticatedCallableError(e)) {
+      throw e;
+    }
+    if (__DEV__) {
+      console.warn(
+        '[Claude API] httpsCallable unauthenticated; retrying with explicit Bearer fetch.',
+      );
+    }
+    return invokeCallableWithBearer(app, 'callClaude', payload, token);
+  }
+};
+
+/**
+ * __DEV__ only: logs whether modular auth (initializeAuth on RN) matches compat firebase.auth().
+ * If they differ, compat httpsCallable may send no token while the app still shows a logged-in user.
+ */
+const logCallableAuthDiagnostics = (logPrefix) => {
+  if (!__DEV__) {
+    return;
+  }
+  try {
+    const compatAuth = typeof firebase?.auth === 'function' ? firebase.auth() : null;
+    const modularUid = auth?.currentUser?.uid ?? null;
+    const compatUid = compatAuth?.currentUser?.uid ?? null;
+    const mismatch = modularUid !== compatUid;
+    const pathLabel = 'explicit-bearer-fetch';
+    console.log(`${logPrefix} [auth diag]`, {
+      callablePath: pathLabel,
+      modularUid,
+      compatFirebaseAuthUid: compatUid,
+      modularAndCompatAuthMatch: !mismatch,
+      hint: mismatch
+        ? 'UID mismatch: compat Functions likely attach a different/no session than modular auth.'
+        : 'Same UID on both auth objects.',
+    });
+  } catch (e) {
+    console.warn(`${logPrefix} [auth diag] failed`, e);
+  }
+};
+
+/** Map Firebase callable errors to user-facing text (avoids raw "unauthenticated"). */
+const messageFromCallableError = (error) => {
+  const code = error?.code;
+  const raw =
+    error?.message ||
+    (error?.details && typeof error.details === 'string' ? error.details : null) ||
+    '';
+  const lower = String(raw).toLowerCase();
+  const grantBlocked =
+    lower.includes('granttoken-are-blocked') ||
+    lower.includes('securetoken.googleapis.com') ||
+    (typeof code === 'string' && code.includes('granttoken'));
+  if (grantBlocked) {
+    return (
+      'Could not refresh your sign-in token (Secure Token API blocked for this API key). ' +
+      'In Google Cloud → APIs & Services → Credentials → your app’s API key: set API restrictions ' +
+      'to include Token Service API and Identity Toolkit API, or use “Don’t restrict key” for testing.'
+    );
+  }
+  const isUnauth =
+    code === 'functions/unauthenticated' ||
+    (typeof code === 'string' && code.endsWith('/unauthenticated')) ||
+    lower === 'unauthenticated';
+  if (isUnauth) {
+    return 'You must be signed in to use game recognition. If you are signed in, sign out and sign in again, then try once more.';
+  }
+  return raw || 'Unknown error';
+};
 
 const DEFAULT_PROMPT_INTRO = `
 You are a font expert and graphic design expert analyzing board game spines. You are looking at the sides of board game boxes that are usually stacked vertically on a shelf.
@@ -350,11 +614,21 @@ const callClaudeAPI = async (userContent, options = {}) => {
     logPrefix = '[Claude API]',
   } = options;
 
-  if (!functions) {
+  let app;
+  try {
+    app = getApp();
+  } catch {
     throw new Error('Firebase is not available. Sign in and try again.');
   }
 
-  const callClaude = functions.httpsCallable('callClaude');
+  if (!auth?.currentUser) {
+    throw new Error(
+      'You must be signed in to use game recognition. Please sign in and try again.',
+    );
+  }
+
+  logCallableAuthDiagnostics(logPrefix);
+
   const payload = {
     model: API_CONFIG.ANTHROPIC_DEFAULT_MODEL,
     max_tokens: maxTokens,
@@ -383,7 +657,7 @@ const callClaudeAPI = async (userContent, options = {}) => {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
 
-      const { data: responseData } = await callClaude(payload);
+      const { data: responseData } = await callClaudeCallableWithFallback(app, payload);
 
       if (__DEV__) {
         console.log(`${logPrefix} Full response structure:`, JSON.stringify(responseData, null, 2).substring(0, 1000));
@@ -413,8 +687,7 @@ const callClaudeAPI = async (userContent, options = {}) => {
         }
       }
 
-      const errorMessage =
-        error.message || (error.details && typeof error.details === 'string' ? error.details : null) || 'Unknown error';
+      const errorMessage = messageFromCallableError(error);
 
       // If it's an "Overloaded" error and we have retries left, retry
       if (errorMessage.toLowerCase().includes('overloaded') && attempt < maxRetries) {
