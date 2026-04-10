@@ -14,6 +14,7 @@ import { preCalculateAllMatches, calculateGameScore, getRecommendationText } fro
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import storage from '../utils/storage';
+import logger from '../utils/logger';
 
 const DEFAULT_WEIGHTS = {
   publisher: 3,
@@ -60,7 +61,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     const userCollectionLengthChanged = userCollectionLength !== prev.userCollectionLength;
     
     if (gamesRefChanged || userCollectionRefChanged || gamesLengthChanged || userCollectionLengthChanged) {
-      console.log('[BeepleRecommendations] Props changed:', {
+      logger.debug('[BeepleRecommendations] Props changed:', {
         timestamp: new Date().toISOString(),
         gamesLength,
         prevGamesLength: prev.gamesLength,
@@ -225,7 +226,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     
     // Log every time the effect runs to track frequency
     const prevState = lastCalculatedRef.current;
-    console.log('[BeepleRecommendations] useEffect triggered:', {
+    logger.debug('[BeepleRecommendations] useEffect triggered:', {
       timestamp: new Date().toISOString(),
       gamesLength,
       collectionLength,
@@ -245,12 +246,12 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       lastCalculatedRef.current.collectionHash === collectionHash
     ) {
       const skipTime = performance.now() - effectStartTime;
-      console.log('[BeepleRecommendations] Skipping recalculation - no changes detected:', {
+      logger.debug('[BeepleRecommendations] Skipping recalculation - no changes detected:', {
         skipTimeMs: skipTime.toFixed(2),
       });
       // If we're skipping but isCalculating is true, reset it (calculation was aborted)
       if (isCalculating) {
-        console.log('[BeepleRecommendations] Resetting isCalculating=false (skipped calculation)');
+        logger.debug('[BeepleRecommendations] Resetting isCalculating=false (skipped calculation)');
         setIsCalculating(false);
       }
       return; // No actual changes, skip recalculation
@@ -265,7 +266,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
 
     // Only log once per actual change, not on every render
     const effectTime = performance.now() - effectStartTime;
-    console.log('[BeepleRecommendations] Recalculating recommendations:', {
+    logger.debug('[BeepleRecommendations] Recalculating recommendations:', {
       gamesCount: gamesLength,
       collectionCount: collectionLength,
       favoritedCount: favoritedGamesCount,
@@ -288,7 +289,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
 
     // Check if a calculation is already in progress
     if (currentCalculationIdRef.current !== null) {
-      console.log('[BeepleRecommendations] Calculation already in progress, skipping new calculation:', {
+      logger.debug('[BeepleRecommendations] Calculation already in progress, skipping new calculation:', {
         currentCalculationId: currentCalculationIdRef.current,
         isCalculating,
       });
@@ -305,7 +306,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     const beforeSetIsCalculating = performance.now();
     setIsCalculating(true);
     const afterSetIsCalculating = performance.now();
-    console.log('[BeepleRecommendations] Set isCalculating=true:', {
+    logger.debug('[BeepleRecommendations] Set isCalculating=true:', {
       timeMs: (afterSetIsCalculating - beforeSetIsCalculating).toFixed(2),
       calculationId,
     });
@@ -314,7 +315,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     const timer = setTimeout(async () => {
       // Check if this calculation was aborted by a newer one
       if (currentCalculationIdRef.current !== calculationId) {
-        console.log('[BeepleRecommendations] Timer callback aborted - newer calculation started:', {
+        logger.debug('[BeepleRecommendations] Timer callback aborted - newer calculation started:', {
           thisCalculationId: calculationId,
           currentCalculationId: currentCalculationIdRef.current,
         });
@@ -322,7 +323,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       }
       
       const timerStartTime = performance.now();
-      console.log('[BeepleRecommendations] Timer callback started:', {
+      logger.debug('[BeepleRecommendations] Timer callback started:', {
         delayMs: (timerStartTime - afterSetIsCalculating).toFixed(2),
         calculationId,
       });
@@ -333,11 +334,11 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       const calculationStartTime = performance.now();
       
       try {
-        console.log('[BeepleRecommendations] ========== STARTING PRE-CALCULATION ==========');
-        console.log('[BeepleRecommendations] Starting pre-calculation...', {
+        logger.debug('[BeepleRecommendations] ========== STARTING PRE-CALCULATION ==========');
+        logger.debug('[BeepleRecommendations] Starting pre-calculation...', {
           timestamp: new Date().toISOString(),
         });
-        console.log('[BeepleRecommendations] Initial collection state:', {
+        logger.debug('[BeepleRecommendations] Initial collection state:', {
           totalGames: enrichedUserCollection.length,
           favoritedGames: enrichedUserCollection.filter(g => g.isFavorite === true).length,
           sampleFavoritedGame: enrichedUserCollection.find(g => g.isFavorite === true) ? {
@@ -368,14 +369,14 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           return !hasPublisher && !hasMechanics && !hasCategories && !hasComplexity;
         });
         
-        console.log('[BeepleRecommendations] Enrichment check:', {
+        logger.debug('[BeepleRecommendations] Enrichment check:', {
           needsEnrichment,
           timeMs: (performance.now() - enrichmentStartTime).toFixed(2),
         });
         
         if (needsEnrichment) {
           const enrichmentFetchStartTime = performance.now();
-          console.log('[BeepleRecommendations] Starting enrichment process...');
+          logger.debug('[BeepleRecommendations] Starting enrichment process...');
           try {
             const { batchGetGamesById } = await import('../services/gameDatabase');
             
@@ -406,14 +407,14 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             
             if (bggIds.length > 0) {
               if (__DEV__) {
-                console.log(`[BeepleRecommendations] Enriching ${bggIds.length} games (${gamesToEnrich.filter(g => g.isFavorite).length} favorited)`);
+                logger.debug(`[BeepleRecommendations] Enriching ${bggIds.length} games (${gamesToEnrich.filter(g => g.isFavorite).length} favorited)`);
               }
               
               const enrichmentFetchTime = performance.now();
-              console.log('[BeepleRecommendations] Fetching enrichment data for', bggIds.length, 'games...');
+              logger.debug('[BeepleRecommendations] Fetching enrichment data for', bggIds.length, 'games...');
               const gameDataMap = await batchGetGamesById(bggIds);
               const enrichmentFetchDuration = performance.now() - enrichmentFetchTime;
-              console.log('[BeepleRecommendations] Enrichment fetch completed:', {
+              logger.debug('[BeepleRecommendations] Enrichment fetch completed:', {
                 requestedGames: bggIds.length,
                 foundGames: gameDataMap.size,
                 missingGames: bggIds.length - gameDataMap.size,
@@ -472,7 +473,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                 
                 if (sampleEnriched.length > 0) {
                   const sample = sampleEnriched[0];
-                  console.log('[BeepleRecommendations] Sample enriched favorite game data:', {
+                  logger.debug('[BeepleRecommendations] Sample enriched favorite game data:', {
                     title: sample.title || sample.name,
                     bggId: sample.bggId,
                     hasMechanics: !!(sample.mechanics || (sample._bggData && sample._bggData.mechanics)),
@@ -488,7 +489,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
                   });
                 }
                 
-                console.log('[BeepleRecommendations] Enriched collection:', {
+                logger.debug('[BeepleRecommendations] Enriched collection:', {
                   original: enrichedUserCollection.length,
                   enriched: collectionToUse.length,
                   gamesFound: gameDataMap.size,
@@ -506,14 +507,14 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         }
         
         const enrichmentTotalTime = performance.now() - enrichmentStartTime;
-        console.log('[BeepleRecommendations] Enrichment phase complete:', {
+        logger.debug('[BeepleRecommendations] Enrichment phase complete:', {
           totalTimeMs: enrichmentTotalTime.toFixed(2),
           needsEnrichment,
         });
         
         // Check if calculation was aborted
         if (calculationAbortRef.current || currentCalculationIdRef.current !== calculationId) {
-          console.log('[BeepleRecommendations] Calculation aborted:', {
+          logger.debug('[BeepleRecommendations] Calculation aborted:', {
             calculationAborted: calculationAbortRef.current,
             calculationIdMismatch: currentCalculationIdRef.current !== calculationId,
             thisCalculationId: calculationId,
@@ -528,14 +529,14 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         const validCollection = collectionToUse.filter(game => !isDisplayOnlyGame(game));
         
         if (__DEV__ && validGames.length < games.length) {
-          console.log(`[BeepleRecommendations] Filtered out ${games.length - validGames.length} display-only games from recommendations pool`);
+          logger.debug(`[BeepleRecommendations] Filtered out ${games.length - validGames.length} display-only games from recommendations pool`);
         }
         if (__DEV__ && validCollection.length < collectionToUse.length) {
-          console.log(`[BeepleRecommendations] Filtered out ${collectionToUse.length - validCollection.length} display-only games from user collection`);
+          logger.debug(`[BeepleRecommendations] Filtered out ${collectionToUse.length - validCollection.length} display-only games from user collection`);
         }
         
         const preCalcStartTime = performance.now();
-        console.log('[BeepleRecommendations] About to pre-calculate matches:', {
+        logger.debug('[BeepleRecommendations] About to pre-calculate matches:', {
           validGamesCount: validGames.length,
           validCollectionCount: validCollection.length,
           favoritedInCollection: validCollection.filter(g => g.isFavorite === true).length,
@@ -546,7 +547,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         let lastProgressLog = 0;
         const progressInterval = setInterval(() => {
           const elapsed = performance.now() - preCalcStartTime;
-          console.log('[BeepleRecommendations] Pre-calculation still running...', {
+          logger.debug('[BeepleRecommendations] Pre-calculation still running...', {
             elapsedSeconds: (elapsed / 1000).toFixed(1),
             validGamesCount: validGames.length,
             validCollectionCount: validCollection.length,
@@ -569,7 +570,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             const remaining = total - processed;
             const estimatedSecondsRemaining = rate > 0 ? remaining / rate : null;
             
-            console.log('[BeepleRecommendations] Pre-calculation progress:', {
+            logger.debug('[BeepleRecommendations] Pre-calculation progress:', {
               processed,
               total,
               progressPercent: `${progressPercent}%`,
@@ -586,7 +587,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         
         // Check if calculation was aborted after completion
         if (calculationAbortRef.current || currentCalculationIdRef.current !== calculationId) {
-          console.log('[BeepleRecommendations] Calculation aborted after completion:', {
+          logger.debug('[BeepleRecommendations] Calculation aborted after completion:', {
             calculationAborted: calculationAbortRef.current,
             calculationIdMismatch: currentCalculationIdRef.current !== calculationId,
             thisCalculationId: calculationId,
@@ -596,7 +597,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         }
         
         const totalCalculationTime = performance.now() - calculationStartTime;
-        console.log('[BeepleRecommendations] Pre-calculation complete:', {
+        logger.debug('[BeepleRecommendations] Pre-calculation complete:', {
           totalMatchesMapSize: preCalculated.size,
           preCalcTimeMs: preCalcDuration.toFixed(2),
           preCalcTimeSeconds: (preCalcDuration / 1000).toFixed(2),
@@ -610,7 +611,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
             complexity: m.complexity.length,
           })),
         });
-        console.log('[BeepleRecommendations] ========== PRE-CALCULATION COMPLETE ==========');
+        logger.debug('[BeepleRecommendations] ========== PRE-CALCULATION COMPLETE ==========');
         
         // Use startTransition to mark this as non-urgent update
         startTransition(() => {
@@ -630,7 +631,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         if (currentCalculationIdRef.current === calculationId) {
           const finalTime = performance.now() - calculationStartTime;
           const beforeSetIsCalculatingFalse = performance.now();
-          console.log('[BeepleRecommendations] Calculation finished (finally block):', {
+          logger.debug('[BeepleRecommendations] Calculation finished (finally block):', {
             totalTimeMs: finalTime.toFixed(2),
             totalTimeSeconds: (finalTime / 1000).toFixed(2),
             calculationId,
@@ -639,13 +640,13 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           // Reset calculation ID when done
           currentCalculationIdRef.current = null;
           const afterSetIsCalculatingFalse = performance.now();
-          console.log('[BeepleRecommendations] Set isCalculating=false:', {
+          logger.debug('[BeepleRecommendations] Set isCalculating=false:', {
             timeMs: (afterSetIsCalculatingFalse - beforeSetIsCalculatingFalse).toFixed(2),
             totalCalculationTimeMs: (afterSetIsCalculatingFalse - calculationStartTime).toFixed(2),
             calculationId,
           });
         } else {
-          console.log('[BeepleRecommendations] Skipping state update - calculation was superseded:', {
+          logger.debug('[BeepleRecommendations] Skipping state update - calculation was superseded:', {
             thisCalculationId: calculationId,
             currentCalculationId: currentCalculationIdRef.current,
           });
@@ -656,7 +657,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
     return () => {
       // Only clear timeout and abort if this is still the current calculation
       if (currentCalculationIdRef.current === calculationId) {
-        console.log('[BeepleRecommendations] Cleanup: clearing timer and aborting calculation:', {
+        logger.debug('[BeepleRecommendations] Cleanup: clearing timer and aborting calculation:', {
           calculationId,
         });
         clearTimeout(timer);
@@ -664,7 +665,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
         // Reset calculation ID if we're aborting
         currentCalculationIdRef.current = null;
       } else {
-        console.log('[BeepleRecommendations] Cleanup: skipping (newer calculation in progress):', {
+        logger.debug('[BeepleRecommendations] Cleanup: skipping (newer calculation in progress):', {
           thisCalculationId: calculationId,
           currentCalculationId: currentCalculationIdRef.current,
         });
@@ -717,7 +718,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
   // Calculate scores for all games with deferred weights to prevent blocking
   const scoredGames = useMemo(() => {
     if (!preCalculatedMatches || !games || games.length === 0) {
-      console.log('[BeepleRecommendations] ScoredGames: No pre-calculated matches or games:', {
+      logger.debug('[BeepleRecommendations] ScoredGames: No pre-calculated matches or games:', {
         hasMatches: !!preCalculatedMatches,
         hasGames: !!(games && games.length > 0),
       });
@@ -756,7 +757,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
           gamesWithNoMatches++;
           // Log first few missing matches to debug
           if (gamesWithNoMatches <= 3) {
-            console.log(`[BeepleRecommendations] Game ${gameId} not found in preCalculatedMatches:`, {
+            logger.debug(`[BeepleRecommendations] Game ${gameId} not found in preCalculatedMatches:`, {
               gameId,
               bggId: game.bggId,
               id: game.id,
@@ -796,7 +797,7 @@ const BeepleRecommendations = ({ games, userCollection, onProposeGame, userPropo
       .filter(item => item !== null && item.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    console.log('[BeepleRecommendations] Scored games summary:', {
+    logger.debug('[BeepleRecommendations] Scored games summary:', {
       totalGames: games.length,
       validGames: validGames.length,
       filteredOutOwned,

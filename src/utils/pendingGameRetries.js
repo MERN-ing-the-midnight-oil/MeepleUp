@@ -5,6 +5,7 @@
  */
 
 import storage from './storage';
+import logger from './logger';
 
 const STORAGE_KEY = 'pending_game_retries';
 const METADATA_KEY = 'pending_game_retries_metadata';
@@ -44,7 +45,7 @@ export const getPendingRetries = async () => {
     const retries = JSON.parse(data);
     // Only log when there are actually pending retries to avoid noise
     if (__DEV__ && retries.length > 0) {
-      console.log('[PendingGameRetries] Retrieved pending retries:', retries.length, 'titles');
+      logger.debug('[PendingGameRetries] Retrieved pending retries:', retries.length, 'titles');
     }
     return Array.isArray(retries) ? retries : [];
   } catch (error) {
@@ -148,7 +149,7 @@ export const getGamesReadyForRetry = async () => {
     }
 
     if (__DEV__ && readyGames.length > 0) {
-      console.log('[PendingGameRetries] Games ready for retry:', readyGames.length, 'of', pendingTitles.length);
+      logger.debug('[PendingGameRetries] Games ready for retry:', readyGames.length, 'of', pendingTitles.length);
     }
 
     return readyGames;
@@ -183,11 +184,11 @@ export const addPendingRetry = async (gameTitle) => {
       
       if (__DEV__) {
         const delaySec = getRetryDelay(0) / 1000;
-        console.log('[PendingGameRetries] Added pending retry:', gameTitle, 'Total pending:', updated.length, `(first retry in ${delaySec}s)`);
+        logger.debug('[PendingGameRetries] Added pending retry:', gameTitle, 'Total pending:', updated.length, `(first retry in ${delaySec}s)`);
       }
     } else {
       if (__DEV__) {
-        console.log('[PendingGameRetries] Game already in pending retries:', gameTitle);
+        logger.debug('[PendingGameRetries] Game already in pending retries:', gameTitle);
       }
     }
   } catch (error) {
@@ -215,7 +216,7 @@ export const markGameRetried = async (gameTitle) => {
     
     if (__DEV__) {
       const nextDelaySec = getRetryDelay(metadata[gameTitle].attemptCount) / 1000;
-      console.log('[PendingGameRetries] Marked as retried:', gameTitle, `(attempt ${metadata[gameTitle].attemptCount}, next retry in ${nextDelaySec}s)`);
+      logger.debug('[PendingGameRetries] Marked as retried:', gameTitle, `(attempt ${metadata[gameTitle].attemptCount}, next retry in ${nextDelaySec}s)`);
     }
   } catch (error) {
     console.error('[PendingGameRetries] Error marking game as retried:', error);
@@ -241,7 +242,7 @@ export const removePendingRetries = async (gameTitles) => {
     await setRetryMetadata(metadata);
     
     if (__DEV__) {
-      console.log('[PendingGameRetries] Removed pending retries:', gameTitles.length, 'Remaining:', updated.length);
+      logger.debug('[PendingGameRetries] Removed pending retries:', gameTitles.length, 'Remaining:', updated.length);
     }
   } catch (error) {
     console.error('[PendingGameRetries] Error removing pending retries:', error);
@@ -256,7 +257,7 @@ export const clearAllPendingRetries = async () => {
   try {
     await storage.removeItem(STORAGE_KEY);
     if (__DEV__) {
-      console.log('[PendingGameRetries] Cleared all pending retries');
+      logger.debug('[PendingGameRetries] Cleared all pending retries');
     }
   } catch (error) {
     console.error('[PendingGameRetries] Error clearing pending retries:', error);

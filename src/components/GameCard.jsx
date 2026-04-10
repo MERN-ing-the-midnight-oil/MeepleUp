@@ -12,6 +12,7 @@ import { useCollections } from '../context/CollectionsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { buildGridGamePayloads } from '../utils/bridgeSafeGame';
+import logger from '../utils/logger';
 
 /**
  * Presentational game card - no context. Use this when passing userId and collection helpers
@@ -148,17 +149,17 @@ const GameCardViewInner = (props) => {
   useEffect(() => {
     // Skip if already initialized for this exact combination
     if (initializationKeyRef.current === currentKey) {
-      console.log('[GameCard] Already initialized for key:', currentKey);
+      logger.debug('[GameCard] Already initialized for key:', currentKey);
       return;
     }
 
     // Skip if no preloaded data
     if (!preloadedBggData) {
-      console.log('[GameCard] No preloaded data for:', game.title);
+      logger.debug('[GameCard] No preloaded data for:', game.title);
       return;
     }
 
-    console.log('[GameCard] Initializing for key:', currentKey);
+    logger.debug('[GameCard] Initializing for key:', currentKey);
     initializationKeyRef.current = currentKey;
 
     const gameBadges = getGameBadges(preloadedBggData);
@@ -175,7 +176,7 @@ const GameCardViewInner = (props) => {
       setBadges(gameBadges);
       if (thumbnail) setThumbnailUrl(thumbnail);
 
-      console.log('[GameCard] Initialization complete for:', game.title);
+      logger.debug('[GameCard] Initialization complete for:', game.title);
     });
   }, [currentKey, game.title, game.bggThumbnail, game.thumbnail, preloadedBggData]);
 
@@ -189,7 +190,7 @@ const GameCardViewInner = (props) => {
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
-      console.log('[GameCard] Cleanup: Component unmounting for game:', game.title || game.id);
+      logger.debug('[GameCard] Cleanup: Component unmounting for game:', game.title || game.id);
       isMountedRef.current = false;
     };
   }, [game.title, game.id]);
@@ -303,7 +304,7 @@ const GameCardViewInner = (props) => {
     if (game.bggThumbnail || game.thumbnail) {
       const result = asString(game.bggThumbnail) || asString(game.thumbnail);
       if (result && __DEV__) {
-        console.log('[GameCard] Using thumbnail from game object for:', game.title || game.id);
+        logger.debug('[GameCard] Using thumbnail from game object for:', game.title || game.id);
       }
       return result;
     }
@@ -311,7 +312,7 @@ const GameCardViewInner = (props) => {
     const fromPreloaded = asString(preloadedBggData?.thumbnail);
     if (fromPreloaded) {
       if (__DEV__) {
-        console.log('[GameCard] Using thumbnail from preloadedBggData for:', game.title || game.id);
+        logger.debug('[GameCard] Using thumbnail from preloadedBggData for:', game.title || game.id);
       }
       return fromPreloaded;
     }
@@ -319,12 +320,12 @@ const GameCardViewInner = (props) => {
     const fromUrl = asString(thumbnailUrl);
     if (fromUrl) {
       if (__DEV__) {
-        console.log('[GameCard] Using thumbnail from thumbnailUrl for:', game.title || game.id);
+        logger.debug('[GameCard] Using thumbnail from thumbnailUrl for:', game.title || game.id);
       }
       return fromUrl;
     }
     if (__DEV__) {
-      console.log('[GameCard] ⚠️ No thumbnail found for:', game.title || game.id, {
+      logger.debug('[GameCard] ⚠️ No thumbnail found for:', game.title || game.id, {
         hasBggThumbnail: !!game.bggThumbnail,
         hasThumbnail: !!game.thumbnail,
         hasPreloadedBggData: !!preloadedBggData,
@@ -740,13 +741,13 @@ function GameCard(props) {
 
   if (hasCollectionProps) {
     if (__DEV__) {
-      console.log('[GameCard] Using GameCardView with props (no context)');
+      logger.debug('[GameCard] Using GameCardView with props (no context)');
     }
     return <GameCardView {...safeProps} />;
   }
 
   if (__DEV__) {
-    console.log('[GameCard] Using context wrapper');
+    logger.debug('[GameCard] Using context wrapper');
   }
   return <GameCardWithContext {...props} safePropsForView={safeProps} />;
 }
@@ -1000,7 +1001,7 @@ export default React.memo(
     const shouldUpdate = gameChanged || bggDataChanged || deleteHandlerChanged || imageLoadChanged;
 
     if (shouldUpdate && __DEV__) {
-      console.log('[GameCard] Memo: Props changed, allowing re-render', {
+      logger.debug('[GameCard] Memo: Props changed, allowing re-render', {
         gameChanged,
         bggDataChanged,
         deleteHandlerChanged,

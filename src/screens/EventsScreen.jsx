@@ -23,6 +23,7 @@ import Button from '../components/common/Button';
 import Input from '../components/common/Input';
 import Modal from '../components/common/Modal';
 import JoinForm from '../components/JoinForm';
+import logger from '../utils/logger';
 import CreateEventForm from '../components/CreateEventForm';
 import EventCard from '../components/EventCard';
 import UserProfileModal from '../components/UserProfileModal';
@@ -78,15 +79,15 @@ const EventsScreen = () => {
   
   // DEBUG: Log user identifier and events retrieval
   if (__DEV__) {
-    console.log('[EventsScreen] 🔍 DEBUG START: User identifier:', userIdentifier);
-    console.log('[EventsScreen] 🔍 DEBUG: User object:', { uid: user?.uid, id: user?.id, email: user?.email });
-    console.log('[EventsScreen] 🔍 DEBUG: All events from context:', events?.length || 0);
+    logger.debug('[EventsScreen] 🔍 DEBUG START: User identifier:', userIdentifier);
+    logger.debug('[EventsScreen] 🔍 DEBUG: User object:', { uid: user?.uid, id: user?.id, email: user?.email });
+    logger.debug('[EventsScreen] 🔍 DEBUG: All events from context:', events?.length || 0);
   }
   
   // getUserEvents doesn't take parameters - it uses user from context
   const allUserEvents = getUserEvents();
   if (__DEV__) {
-    console.log('[EventsScreen] 🔍 DEBUG: All user events (before filtering):', {
+    logger.debug('[EventsScreen] 🔍 DEBUG: All user events (before filtering):', {
       count: allUserEvents.length,
       events: allUserEvents.map(e => ({ 
         id: e.id, 
@@ -104,7 +105,7 @@ const EventsScreen = () => {
   const bobsMeepleUp = allUserEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
   if (__DEV__) {
     if (bobsMeepleUp) {
-      console.log('[EventsScreen] 🔍 DEBUG: Found "Bobs MeepleUp":', {
+      logger.debug('[EventsScreen] 🔍 DEBUG: Found "Bobs MeepleUp":', {
         id: bobsMeepleUp.id,
         name: bobsMeepleUp.name,
         isActive: bobsMeepleUp.isActive,
@@ -113,13 +114,13 @@ const EventsScreen = () => {
         userIdentifier: userIdentifier
       });
     } else {
-      console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT FOUND in allUserEvents');
+      logger.debug('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT FOUND in allUserEvents');
     }
   }
   
   const archivedEvents = getUserArchivedEvents();
   if (__DEV__) {
-    console.log('[EventsScreen] 🔍 DEBUG: Archived events:', {
+    logger.debug('[EventsScreen] 🔍 DEBUG: Archived events:', {
       count: archivedEvents.length,
       events: archivedEvents.map(e => ({ id: e.id, name: e.name }))
     });
@@ -129,7 +130,7 @@ const EventsScreen = () => {
   const userEvents = allUserEvents.filter(event => {
     const isActive = event.isActive === true;
     if (__DEV__ && !isActive) {
-      console.log('[EventsScreen] 🔍 DEBUG: Filtering out event (not active):', {
+      logger.debug('[EventsScreen] 🔍 DEBUG: Filtering out event (not active):', {
         id: event.id,
         name: event.name,
         isActive: event.isActive,
@@ -141,7 +142,7 @@ const EventsScreen = () => {
   });
   
   if (__DEV__) {
-    console.log('[EventsScreen] 🔍 DEBUG: Filtered active events:', {
+    logger.debug('[EventsScreen] 🔍 DEBUG: Filtered active events:', {
       count: userEvents.length,
       events: userEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive }))
     });
@@ -149,9 +150,9 @@ const EventsScreen = () => {
     // Check if "Bobs MeepleUp" is in filtered list
     const bobsMeepleUpFiltered = userEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
     if (bobsMeepleUpFiltered) {
-      console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" IS in filtered active events');
+      logger.debug('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" IS in filtered active events');
     } else {
-      console.log('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT in filtered active events');
+      logger.debug('[EventsScreen] 🔍 DEBUG: "Bobs MeepleUp" NOT in filtered active events');
     }
   }
 

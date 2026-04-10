@@ -19,6 +19,7 @@ import SubscriptionScreen from './components/SubscriptionScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/common/Toast';
 import { TIMEOUTS } from './utils/constants';
+import logger from './utils/logger';
 
 // Wrapper to pass URL search params to Auth component as route params
 const AuthWrapper = () => {
@@ -69,13 +70,13 @@ const SmartEventsRedirect = () => {
   // Log when component mounts
   useEffect(() => {
     if (__DEV__) {
-      console.log('🚀 [SmartEventsRedirect] Component mounted/rendered');
+      logger.debug('🚀 [SmartEventsRedirect] Component mounted/rendered');
     }
   }, []);
 
   useEffect(() => {
     if (__DEV__) {
-      console.log('🔄 [SmartEventsRedirect] useEffect triggered', { 
+      logger.debug('🔄 [SmartEventsRedirect] useEffect triggered', { 
         hasRedirected, 
         loading, 
         hasUser: !!user, 
@@ -89,7 +90,7 @@ const SmartEventsRedirect = () => {
     // Don't check again if we've already redirected
     if (hasRedirected) {
       if (__DEV__) {
-        console.log('⏭️ [SmartEventsRedirect] Already redirected, skipping');
+        logger.debug('⏭️ [SmartEventsRedirect] Already redirected, skipping');
       }
       return;
     }
@@ -103,7 +104,7 @@ const SmartEventsRedirect = () => {
     // Wait for collections to initialize before checking
     if (!collectionsInitialised || collectionsLoading) {
       if (__DEV__) {
-        console.log('⏳ [SmartEventsRedirect] Still loading collections...');
+        logger.debug('⏳ [SmartEventsRedirect] Still loading collections...');
       }
       return;
     }
@@ -111,14 +112,14 @@ const SmartEventsRedirect = () => {
     // Wait for events to load and user to be available
     if (loading) {
       if (__DEV__) {
-        console.log('⏳ [SmartEventsRedirect] Still loading events...');
+        logger.debug('⏳ [SmartEventsRedirect] Still loading events...');
       }
       return;
     }
 
     if (!user) {
       if (__DEV__) {
-        console.log('❌ [SmartEventsRedirect] No user found');
+        logger.debug('❌ [SmartEventsRedirect] No user found');
       }
       setHasFinishedChecking(true);
       return;
@@ -127,7 +128,7 @@ const SmartEventsRedirect = () => {
     const userId = user.uid || user.id;
     if (!userId) {
       if (__DEV__) {
-        console.log('❌ [SmartEventsRedirect] No userId found');
+        logger.debug('❌ [SmartEventsRedirect] No userId found');
       }
       setHasFinishedChecking(true);
       return;
@@ -137,13 +138,13 @@ const SmartEventsRedirect = () => {
     const userCollection = getUserCollection(userId);
     const hasGames = userCollection && userCollection.length > 0;
     if (__DEV__) {
-      console.log('🎮 [SmartEventsRedirect] User collection:', userCollection?.length || 0, 'games');
+      logger.debug('🎮 [SmartEventsRedirect] User collection:', userCollection?.length || 0, 'games');
     }
 
     // If user has no games, redirect to collection screen
     if (!hasGames) {
       if (__DEV__) {
-        console.log('📚 [SmartEventsRedirect] User has no games, redirecting to collection');
+        logger.debug('📚 [SmartEventsRedirect] User has no games, redirecting to collection');
       }
       setHasRedirected(true);
       setHasFinishedChecking(true);
@@ -154,20 +155,20 @@ const SmartEventsRedirect = () => {
     // Get all events where user is a member
     const userEvents = getUserEvents();
     if (__DEV__) {
-      console.log('📊 [SmartEventsRedirect] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
+      logger.debug('📊 [SmartEventsRedirect] Checking redirect - userEvents:', userEvents.length, 'all events:', events.length);
     }
     
     // Filter to only active events (not archived) - explicitly check for isActive === true
     const activeEvents = userEvents.filter(event => event.isActive === true);
     if (__DEV__) {
-      console.log('[SmartEventsRedirect] Active events:', activeEvents.length, 'of', userEvents.length, 'total user events');
+      logger.debug('[SmartEventsRedirect] Active events:', activeEvents.length, 'of', userEvents.length, 'total user events');
     }
 
     // If user is a member of exactly one active meepleUp, redirect to its logistics tab
     if (activeEvents.length === 1) {
       const eventId = activeEvents[0].id;
       if (__DEV__) {
-        console.log('[SmartEventsRedirect] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
+        logger.debug('[SmartEventsRedirect] ✓ Redirecting to event:', eventId, 'from', activeEvents[0].name);
       }
       setHasRedirected(true);
       setHasFinishedChecking(true);
@@ -178,7 +179,7 @@ const SmartEventsRedirect = () => {
     // If we have events but not exactly one, we're done checking
     if (activeEvents.length !== 1 && (userEvents.length > 0 || events.length > 0)) {
       if (__DEV__) {
-        console.log('[SmartEventsRedirect] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+        logger.debug('[SmartEventsRedirect] ✗ Not redirecting - user has', activeEvents.length, 'active events');
       }
       setHasFinishedChecking(true);
       return;
@@ -187,26 +188,26 @@ const SmartEventsRedirect = () => {
     // If events haven't loaded yet, wait a bit for Firestore sync
     if (activeEvents.length === 0 && events.length === 0 && !loading) {
       if (__DEV__) {
-        console.log('[SmartEventsRedirect] Waiting for Firestore sync...');
+        logger.debug('[SmartEventsRedirect] Waiting for Firestore sync...');
       }
       checkTimeoutRef.current = setTimeout(() => {
         const delayedUserEvents = getUserEvents();
         const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive === true);
         if (__DEV__) {
-          console.log('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
+          logger.debug('[SmartEventsRedirect] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
         }
         
         if (delayedActiveEvents.length === 1) {
           const eventId = delayedActiveEvents[0].id;
           if (__DEV__) {
-            console.log('[SmartEventsRedirect] ✓ Redirecting to event after Firestore sync:', eventId);
+            logger.debug('[SmartEventsRedirect] ✓ Redirecting to event after Firestore sync:', eventId);
           }
           setHasRedirected(true);
           setHasFinishedChecking(true);
           navigate(`/event/${eventId}`, { replace: true });
         } else {
           if (__DEV__) {
-            console.log('[SmartEventsRedirect] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+            logger.debug('[SmartEventsRedirect] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
           }
           setHasFinishedChecking(true);
         }
@@ -225,7 +226,7 @@ const SmartEventsRedirect = () => {
   // Show loading spinner while loading events/collections or checking
   if (loading || collectionsLoading || !collectionsInitialised || (!hasFinishedChecking && !hasRedirected && user)) {
     if (__DEV__) {
-      console.log('⏳ [SmartEventsRedirect] Showing loading spinner');
+      logger.debug('⏳ [SmartEventsRedirect] Showing loading spinner');
     }
     return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
@@ -233,14 +234,14 @@ const SmartEventsRedirect = () => {
   // If we redirected, show a brief loading state while navigation happens
   if (hasRedirected) {
     if (__DEV__) {
-      console.log('✅ [SmartEventsRedirect] Redirected, showing loading spinner');
+      logger.debug('✅ [SmartEventsRedirect] Redirected, showing loading spinner');
     }
     return <main className="container" role="main" aria-live="polite"><div className="spinner" aria-label="Loading" /></main>;
   }
 
   // Otherwise, show the events screen
   if (__DEV__) {
-    console.log('📋 [SmartEventsRedirect] Showing EventsScreen (no redirect)');
+    logger.debug('📋 [SmartEventsRedirect] Showing EventsScreen (no redirect)');
   }
   return <EventsScreen />;
 };

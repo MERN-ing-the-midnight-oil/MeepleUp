@@ -21,6 +21,8 @@ import { titlesFromPhoto } from '../services/claudeVision';
 import { getGames, searchGamesByName } from '../utils/api';
 import { searchForAllGames as searchForAllGamesUtil } from '../utils/gameSearch';
 import { theme, commonStyles } from '../utils/theme';
+import logger from '../utils/logger';
+import { horizontalScrollViewProps } from '../utils/horizontalScrollViewProps';
 import { addPendingRetry } from '../utils/pendingGameRetries';
 import ShowGames from './ShowGames';
 
@@ -229,7 +231,7 @@ const ClaudeGameIdentifier = ({
     if (formattedGames.length > 0) {
       addDebugLog(`📊 formattedGames updated: ${formattedGames.length} game(s) ready for carousels`);
       if (__DEV__) {
-        console.log('[ClaudeGameIdentifier] formattedGames updated:', {
+        logger.debug('[ClaudeGameIdentifier] formattedGames updated:', {
           count: formattedGames.length,
           games: formattedGames,
         });
@@ -242,7 +244,7 @@ const ClaudeGameIdentifier = ({
 
   // Process new candidates for BGG lookup in useEffect (after render completes)
   useEffect(() => {
-    console.log('[ClaudeGameIdentifier] useEffect RUNNING, gameCandidates:', gameCandidates.length);
+    logger.debug('[ClaudeGameIdentifier] useEffect RUNNING, gameCandidates:', gameCandidates.length);
     
     // Find candidates that need BGG lookup and haven't been processed yet
     const candidatesToProcess = gameCandidates.filter(
@@ -254,11 +256,11 @@ const ClaudeGameIdentifier = ({
     );
 
     if (candidatesToProcess.length === 0) {
-      console.log('[ClaudeGameIdentifier] useEffect: No candidates to process');
+      logger.debug('[ClaudeGameIdentifier] useEffect: No candidates to process');
       return;
     }
 
-    console.log('[ClaudeGameIdentifier] useEffect: Processing', candidatesToProcess.length, 'candidates');
+    logger.debug('[ClaudeGameIdentifier] useEffect: Processing', candidatesToProcess.length, 'candidates');
 
     // Process candidates sequentially using promises instead of setTimeout
     // This avoids React Native timer issues
@@ -276,28 +278,28 @@ const ClaudeGameIdentifier = ({
         const candidateId = candidate.id;
         const title = candidate.claudeTitle;
 
-        console.log('[ClaudeGameIdentifier] useEffect: Processing candidate', title, 'delay:', delayMs, 'session:', currentSessionKey);
+        logger.debug('[ClaudeGameIdentifier] useEffect: Processing candidate', title, 'delay:', delayMs, 'session:', currentSessionKey);
 
         // Wait for the delay (if any)
         if (delayMs > 0) {
-          console.log('[ClaudeGameIdentifier] Waiting', delayMs, 'ms before processing', title);
+          logger.debug('[ClaudeGameIdentifier] Waiting', delayMs, 'ms before processing', title);
           await new Promise(resolve => setTimeout(resolve, delayMs));
         }
 
         // Check session is still active
         if (currentSessionKey !== activeSessionRef.current) {
-          console.log('[ClaudeGameIdentifier] Session changed, skipping BGG fetch for', title);
+          logger.debug('[ClaudeGameIdentifier] Session changed, skipping BGG fetch for', title);
           continue;
         }
 
         // Check candidate still exists and hasn't been processed
         const currentCandidate = gameCandidatesRef.current.find(c => c.id === candidateId);
         if (!currentCandidate || currentCandidate.bggStatus !== 'idle') {
-          console.log('[ClaudeGameIdentifier] Candidate already processed or removed, skipping', title);
+          logger.debug('[ClaudeGameIdentifier] Candidate already processed or removed, skipping', title);
           continue;
         }
 
-        console.log('[ClaudeGameIdentifier] 🔥🔥🔥 FETCHING BGG METADATA for', title);
+        logger.debug('[ClaudeGameIdentifier] 🔥🔥🔥 FETCHING BGG METADATA for', title);
 
         try {
           // Use ref to get the latest version of fetchBGGMetadata
@@ -314,7 +316,7 @@ const ClaudeGameIdentifier = ({
 
     // Cleanup function to clear timers if component unmounts or dependencies change
     return () => {
-      console.log('[ClaudeGameIdentifier] useEffect CLEANUP running');
+      logger.debug('[ClaudeGameIdentifier] useEffect CLEANUP running');
       // Don't clear timers here - let them complete
       // They'll be cleared by clearPendingFetchTimers if needed
     };
@@ -378,7 +380,7 @@ const ClaudeGameIdentifier = ({
 
   const clearPendingFetchTimers = useCallback(() => {
     if (__DEV__) {
-      console.log('[ClaudeGameIdentifier] clearPendingFetchTimers called, clearing', pendingFetchTimersRef.current.length, 'timers');
+      logger.debug('[ClaudeGameIdentifier] clearPendingFetchTimers called, clearing', pendingFetchTimersRef.current.length, 'timers');
     }
     pendingFetchTimersRef.current.forEach((timerId) => {
       clearTimeout(timerId);
@@ -495,7 +497,7 @@ const ClaudeGameIdentifier = ({
       });
 
       if (__DEV__) {
-        console.log('[ClaudeGameIdentifier] Fetching BGG metadata', {
+        logger.debug('[ClaudeGameIdentifier] Fetching BGG metadata', {
           candidateId,
           title: rawTitle,
         });
@@ -506,12 +508,12 @@ const ClaudeGameIdentifier = ({
         let searchResults = [];
         
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] About to call searchGamesByName for:', query, 'candidateId:', candidateId);
+          logger.debug('[ClaudeGameIdentifier] About to call searchGamesByName for:', query, 'candidateId:', candidateId);
         }
         
         try {
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Creating search promise for:', query);
+            logger.debug('[ClaudeGameIdentifier] Creating search promise for:', query);
           }
           
           // Use searchGamesByName with BGG fallback enabled
@@ -526,14 +528,14 @@ const ClaudeGameIdentifier = ({
           });
           
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Searching (Firestore -> BGG API with caching)...');
+            logger.debug('[ClaudeGameIdentifier] Searching (Firestore -> BGG API with caching)...');
           }
           
           try {
             searchResults = await Promise.race([searchPromise, timeoutPromise]);
             
             if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] Search completed, results:', searchResults.length);
+              logger.debug('[ClaudeGameIdentifier] Search completed, results:', searchResults.length);
             }
           } catch (raceError) {
             if (__DEV__) {
@@ -551,7 +553,7 @@ const ClaudeGameIdentifier = ({
           }
           
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Final search results:', searchResults.length);
+            logger.debug('[ClaudeGameIdentifier] Final search results:', searchResults.length);
           }
         } catch (searchError) {
           console.error('[ClaudeGameIdentifier] Error calling searchGamesByName:', searchError);
@@ -559,7 +561,7 @@ const ClaudeGameIdentifier = ({
         }
 
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] BGG search results', {
+          logger.debug('[ClaudeGameIdentifier] BGG search results', {
             candidateId,
             title: rawTitle,
             resultCount: searchResults.length,
@@ -603,7 +605,7 @@ const ClaudeGameIdentifier = ({
         // Safety check: ensure we're still in the right session
         if (sessionKey !== activeSessionRef.current) {
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Session changed, aborting update for:', candidateId);
+            logger.debug('[ClaudeGameIdentifier] Session changed, aborting update for:', candidateId);
           }
           clearTimeoutOnComplete();
           return;
@@ -611,14 +613,14 @@ const ClaudeGameIdentifier = ({
 
         if (!searchResults || searchResults.length === 0) {
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] No search results, updating to no_match state');
+            logger.debug('[ClaudeGameIdentifier] No search results, updating to no_match state');
           }
           clearTimeoutOnComplete();
           
           // Double-check session before updating
           if (sessionKey !== activeSessionRef.current) {
             if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] Session changed, aborting no_match update');
+              logger.debug('[ClaudeGameIdentifier] Session changed, aborting no_match update');
             }
             return;
           }
@@ -630,7 +632,7 @@ const ClaudeGameIdentifier = ({
             }
             
             if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] Updating candidate to no_match in requestAnimationFrame');
+              logger.debug('[ClaudeGameIdentifier] Updating candidate to no_match in requestAnimationFrame');
             }
             
             updateCandidate(candidateId, (candidate) => {
@@ -647,7 +649,7 @@ const ClaudeGameIdentifier = ({
                   updated.styling = { ...candidate.styling };
                 }
                 if (__DEV__) {
-                  console.log('[ClaudeGameIdentifier] Updated candidate to no_match:', candidateId);
+                  logger.debug('[ClaudeGameIdentifier] Updated candidate to no_match:', candidateId);
                 }
                 return updated;
               } catch (updateError) {
@@ -672,7 +674,7 @@ const ClaudeGameIdentifier = ({
         if (isHighOrMediumConfidence && searchResults.length > 0) {
           clearTimeoutOnComplete();
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] High/medium confidence, showing first result with More Titles option');
+            logger.debug('[ClaudeGameIdentifier] High/medium confidence, showing first result with More Titles option');
           }
           
           if (sessionKey === activeSessionRef.current) {
@@ -727,7 +729,7 @@ const ClaudeGameIdentifier = ({
               };
               
               if (__DEV__) {
-                console.log('[ClaudeGameIdentifier] Setting bggData with thumbnail:', {
+                logger.debug('[ClaudeGameIdentifier] Setting bggData with thumbnail:', {
                   hasThumbnail: !!bggData.thumbnail,
                   thumbnail: bggData.thumbnail ? bggData.thumbnail.substring(0, 50) + '...' : null,
                   hasImage: !!bggData.image,
@@ -751,7 +753,7 @@ const ClaudeGameIdentifier = ({
         if (searchResults.length > 1) {
           clearTimeoutOnComplete();
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Multiple results found:', searchResults.length);
+            logger.debug('[ClaudeGameIdentifier] Multiple results found:', searchResults.length);
           }
           
           if (sessionKey === activeSessionRef.current) {
@@ -848,7 +850,7 @@ const ClaudeGameIdentifier = ({
                     setGameCandidates((prev) => [...prev, ...newCandidates]);
                     
                     if (__DEV__) {
-                      console.log('[ClaudeGameIdentifier] Created', newCandidates.length, 'candidate cards using batch API (1 call instead of', gameIds.length, 'calls)');
+                      logger.debug('[ClaudeGameIdentifier] Created', newCandidates.length, 'candidate cards using batch API (1 call instead of', gameIds.length, 'calls)');
                     }
                   }
                 })
@@ -928,7 +930,7 @@ const ClaudeGameIdentifier = ({
         // Double-check session before updating
         if (sessionKey !== activeSessionRef.current) {
           if (__DEV__) {
-            console.log('[ClaudeGameIdentifier] Session changed before matched update, aborting:', candidateId);
+            logger.debug('[ClaudeGameIdentifier] Session changed before matched update, aborting:', candidateId);
           }
           return;
         }
@@ -974,7 +976,7 @@ const ClaudeGameIdentifier = ({
                 updatedCandidate.styling = { ...candidate.styling };
               }
               if (__DEV__) {
-                console.log('[ClaudeGameIdentifier] Updated candidate to matched:', candidateId, updatedCandidate.bggData.name);
+                logger.debug('[ClaudeGameIdentifier] Updated candidate to matched:', candidateId, updatedCandidate.bggData.name);
               }
               return updatedCandidate;
             } catch (updateError) {
@@ -1003,7 +1005,7 @@ const ClaudeGameIdentifier = ({
                 updated.styling = { ...candidate.styling };
               }
               if (__DEV__) {
-                console.log('[ClaudeGameIdentifier] Updated candidate to error state:', candidateId);
+                logger.debug('[ClaudeGameIdentifier] Updated candidate to error state:', candidateId);
               }
               return updated;
             } catch (updateError) {
@@ -1022,7 +1024,7 @@ const ClaudeGameIdentifier = ({
 
   const processBggQueue = useCallback(async () => {
     if (__DEV__) {
-      console.log('[ClaudeGameIdentifier] processBggQueue called', {
+      logger.debug('[ClaudeGameIdentifier] processBggQueue called', {
         isProcessing: isProcessingBggQueueRef.current,
         queueLength: bggFetchQueueRef.current.length,
         activeSession: activeSessionRef.current,
@@ -1031,7 +1033,7 @@ const ClaudeGameIdentifier = ({
     
     if (isProcessingBggQueueRef.current || bggFetchQueueRef.current.length === 0) {
       if (__DEV__) {
-        console.log('[ClaudeGameIdentifier] processBggQueue early return', {
+        logger.debug('[ClaudeGameIdentifier] processBggQueue early return', {
           isProcessing: isProcessingBggQueueRef.current,
           queueLength: bggFetchQueueRef.current.length,
         });
@@ -1043,7 +1045,7 @@ const ClaudeGameIdentifier = ({
     const item = bggFetchQueueRef.current.shift();
     
     if (__DEV__) {
-      console.log('[ClaudeGameIdentifier] Processing BGG queue item', {
+      logger.debug('[ClaudeGameIdentifier] Processing BGG queue item', {
         candidateId: item?.candidateId,
         title: item?.title,
         sessionKey: item?.sessionKey,
@@ -1070,7 +1072,7 @@ const ClaudeGameIdentifier = ({
     // Use ref to ensure we call the latest version
     if (bggFetchQueueRef.current.length > 0) {
       if (__DEV__) {
-        console.log('[ClaudeGameIdentifier] Scheduling next queue item, remaining:', bggFetchQueueRef.current.length);
+        logger.debug('[ClaudeGameIdentifier] Scheduling next queue item, remaining:', bggFetchQueueRef.current.length);
       }
       setTimeout(() => {
         if (processBggQueueRef.current) {
@@ -1086,7 +1088,7 @@ const ClaudeGameIdentifier = ({
   const scheduleBGGFetch = useCallback(
     (sessionKey, candidateId, title, delayMs = 0) => {
       if (__DEV__) {
-        console.log('[ClaudeGameIdentifier] scheduleBGGFetch called', {
+        logger.debug('[ClaudeGameIdentifier] scheduleBGGFetch called', {
           candidateId,
           title,
           delayMs,
@@ -1099,14 +1101,14 @@ const ClaudeGameIdentifier = ({
       
       if (delayMs > 0) {
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Scheduling BGG fetch with delay', delayMs, 'ms for', title);
-          console.log('[ClaudeGameIdentifier] processBggQueueRef.current:', !!processBggQueueRef.current, 'processBggQueue:', !!processBggQueue);
+          logger.debug('[ClaudeGameIdentifier] Scheduling BGG fetch with delay', delayMs, 'ms for', title);
+          logger.debug('[ClaudeGameIdentifier] processBggQueueRef.current:', !!processBggQueueRef.current, 'processBggQueue:', !!processBggQueue);
         }
         // Capture the function directly in the closure to ensure it's available
         // Also use the ref as backup
         const processFn = processBggQueueRef.current || processBggQueue;
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Creating timer with processFn available:', !!processFn);
+          logger.debug('[ClaudeGameIdentifier] Creating timer with processFn available:', !!processFn);
         }
         
         if (!processFn) {
@@ -1117,7 +1119,7 @@ const ClaudeGameIdentifier = ({
         const timerId = setTimeout(() => {
           try {
             if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] ⏰⏰⏰ BGG fetch timer FIRED for', title, 'at', Date.now());
+              logger.debug('[ClaudeGameIdentifier] ⏰⏰⏰ BGG fetch timer FIRED for', title, 'at', Date.now());
             }
             
             // Verify session is still active
@@ -1134,8 +1136,8 @@ const ClaudeGameIdentifier = ({
             pendingFetchTimersRef.current = pendingFetchTimersRef.current.filter((id) => id !== timerId);
             bggFetchQueueRef.current.push(queueItem);
             if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] Queue item added, queue length:', bggFetchQueueRef.current.length);
-              console.log('[ClaudeGameIdentifier] About to call processBggQueue, ref available:', !!processBggQueueRef.current, 'captured fn available:', !!processFn);
+              logger.debug('[ClaudeGameIdentifier] Queue item added, queue length:', bggFetchQueueRef.current.length);
+              logger.debug('[ClaudeGameIdentifier] About to call processBggQueue, ref available:', !!processBggQueueRef.current, 'captured fn available:', !!processFn);
             }
             
             // Try ref first, then captured function
@@ -1151,21 +1153,21 @@ const ClaudeGameIdentifier = ({
         }, delayMs);
         
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Timer created successfully, ID:', timerId, 'Total pending timers:', pendingFetchTimersRef.current.length);
+          logger.debug('[ClaudeGameIdentifier] Timer created successfully, ID:', timerId, 'Total pending timers:', pendingFetchTimersRef.current.length);
         }
         
         pendingFetchTimersRef.current.push(timerId);
         
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Timer added to pending list, total:', pendingFetchTimersRef.current.length);
+          logger.debug('[ClaudeGameIdentifier] Timer added to pending list, total:', pendingFetchTimersRef.current.length);
         }
       } else {
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Adding to queue immediately (no delay) for', title);
+          logger.debug('[ClaudeGameIdentifier] Adding to queue immediately (no delay) for', title);
         }
         bggFetchQueueRef.current.push(queueItem);
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Queue item added, queue length:', bggFetchQueueRef.current.length, 'calling processBggQueue directly');
+          logger.debug('[ClaudeGameIdentifier] Queue item added, queue length:', bggFetchQueueRef.current.length, 'calling processBggQueue directly');
         }
         // Call directly when no delay
         processBggQueue();
@@ -1208,7 +1210,7 @@ const ClaudeGameIdentifier = ({
       return newLogs.slice(-10);
     });
     if (__DEV__) {
-      console.log('[ClaudeGameIdentifier DEBUG]', logEntry);
+      logger.debug('[ClaudeGameIdentifier DEBUG]', logEntry);
     }
   }, []);
 
@@ -1270,7 +1272,7 @@ const ClaudeGameIdentifier = ({
         }
 
         if (__DEV__) {
-          console.log('Claude identified titles:', filteredGames.map((game) => game.title));
+          logger.debug('Claude identified titles:', filteredGames.map((game) => game.title));
         }
 
         if (!filteredGames.length) {
@@ -1326,9 +1328,9 @@ const ClaudeGameIdentifier = ({
         }
         
         if (__DEV__) {
-          console.log('[ClaudeGameIdentifier] Set formattedGames:', gameTitles.length, 'games');
-          console.log('[ClaudeGameIdentifier] ShowGames should now be visible:', gameTitles.length > 0);
-          console.log('[ClaudeGameIdentifier] showCameraModal:', showCameraModal, 'showResultsModal:', showResultsModal);
+          logger.debug('[ClaudeGameIdentifier] Set formattedGames:', gameTitles.length, 'games');
+          logger.debug('[ClaudeGameIdentifier] ShowGames should now be visible:', gameTitles.length > 0);
+          logger.debug('[ClaudeGameIdentifier] showCameraModal:', showCameraModal, 'showResultsModal:', showResultsModal);
         }
         
         // Start searching for all games (async, don't await - let it run in background)
@@ -1353,9 +1355,9 @@ const ClaudeGameIdentifier = ({
                 if (typeof game.styling === 'object' && game.styling !== null) {
                   styling = game.styling;
                   if (__DEV__) {
-                    console.log('[ClaudeGameIdentifier] Styling for', game.title, ':', JSON.stringify(styling, null, 2));
-                    console.log('[ClaudeGameIdentifier] Font family from Claude:', styling.fontFamily || 'NOT PROVIDED');
-                    console.log('[ClaudeGameIdentifier] Font reasoning:', game.fontReasoning || 'NOT PROVIDED');
+                    logger.debug('[ClaudeGameIdentifier] Styling for', game.title, ':', JSON.stringify(styling, null, 2));
+                    logger.debug('[ClaudeGameIdentifier] Font family from Claude:', styling.fontFamily || 'NOT PROVIDED');
+                    logger.debug('[ClaudeGameIdentifier] Font reasoning:', game.fontReasoning || 'NOT PROVIDED');
                   }
                 }
               } catch (stylingError) {
@@ -1363,7 +1365,7 @@ const ClaudeGameIdentifier = ({
                 styling = null;
               }
             } else if (__DEV__) {
-              console.log('[ClaudeGameIdentifier] No styling object for', game.title);
+              logger.debug('[ClaudeGameIdentifier] No styling object for', game.title);
             }
             
             // Store fontReasoning if provided
@@ -1439,7 +1441,7 @@ const ClaudeGameIdentifier = ({
     }
 
     if (__DEV__) {
-      console.log('[ClaudeGameIdentifier] Clearing pending fetch timers before capture:', pendingFetchTimersRef.current.length);
+      logger.debug('[ClaudeGameIdentifier] Clearing pending fetch timers before capture:', pendingFetchTimersRef.current.length);
     }
     clearPendingFetchTimers();
     addDebugLog('Starting photo capture...');
@@ -1589,7 +1591,7 @@ const ClaudeGameIdentifier = ({
       // Prevent opening modal if we're currently selecting a suggestion
       if (isSelectingSuggestionRef.current) {
         if (__DEV__) {
-          console.log('[Correction Modal] Currently selecting suggestion, ignoring request');
+          logger.debug('[Correction Modal] Currently selecting suggestion, ignoring request');
         }
         return;
       }
@@ -1601,7 +1603,7 @@ const ClaudeGameIdentifier = ({
 
       // Allow editing even if confirmed - user might want to correct a misidentified game
       if (__DEV__) {
-        console.log('[Correction Modal] Opening modal for candidate:', candidateId);
+        logger.debug('[Correction Modal] Opening modal for candidate:', candidateId);
       }
 
       // User is editing because the current title is wrong, so don't auto-search
@@ -1803,7 +1805,7 @@ const ClaudeGameIdentifier = ({
       }
 
       if (__DEV__) {
-        console.log('[Correction Modal] Searching for:', queryToSearch);
+        logger.debug('[Correction Modal] Searching for:', queryToSearch);
       }
 
       setIsCorrectionSearching(true);
@@ -1818,7 +1820,7 @@ const ClaudeGameIdentifier = ({
           : (searchResponse || []);
 
         if (__DEV__) {
-          console.log('[Correction Modal] Found matches:', matches.length);
+          logger.debug('[Correction Modal] Found matches:', matches.length);
         }
 
         if (!matches.length) {
@@ -1873,7 +1875,7 @@ const ClaudeGameIdentifier = ({
         );
 
         if (__DEV__) {
-          console.log('[Correction Modal] Enriched matches:', enrichedMatches.length);
+          logger.debug('[Correction Modal] Enriched matches:', enrichedMatches.length);
         }
 
         setCorrectionSuggestions(enrichedMatches);
@@ -1897,7 +1899,7 @@ const ClaudeGameIdentifier = ({
       // Prevent multiple selections
       if (isSelectingSuggestionRef.current) {
         if (__DEV__) {
-          console.log('[Correction Modal] Already selecting, ignoring');
+          logger.debug('[Correction Modal] Already selecting, ignoring');
         }
         return;
       }
@@ -1905,7 +1907,7 @@ const ClaudeGameIdentifier = ({
       isSelectingSuggestionRef.current = true;
 
       if (__DEV__) {
-        console.log('[Correction Modal] Selecting suggestion:', suggestion.name);
+        logger.debug('[Correction Modal] Selecting suggestion:', suggestion.name);
       }
 
       // Close modal immediately and stop any searches
@@ -2017,7 +2019,7 @@ const ClaudeGameIdentifier = ({
 
       try {
         if (__DEV__) {
-          console.log('[Inline Correction] Searching backend first for:', searchQuery);
+          logger.debug('[Inline Correction] Searching backend first for:', searchQuery);
         }
 
         // Check Firebase first, then BGG API if needed (searchGamesByName handles this)
@@ -2188,7 +2190,7 @@ const ClaudeGameIdentifier = ({
                 updatedCandidate.styling = { ...candidate.styling };
               }
               if (__DEV__) {
-                console.log('[ClaudeGameIdentifier] Updated candidate with selected result:', candidateId, updatedCandidate.bggData.name);
+                logger.debug('[ClaudeGameIdentifier] Updated candidate with selected result:', candidateId, updatedCandidate.bggData.name);
               }
               return updatedCandidate;
             } catch (updateError) {
@@ -2439,7 +2441,7 @@ const ClaudeGameIdentifier = ({
                         const query = candidate.claudeTitle || '';
                         if (query) {
                           if (__DEV__) {
-                            console.log('[ClaudeGameIdentifier] User wants more titles, searching (Firebase first, then BGG)...');
+                            logger.debug('[ClaudeGameIdentifier] User wants more titles, searching (Firebase first, then BGG)...');
                           }
                           try {
                             // searchGamesByName checks Firebase first, then BGG API if needed
@@ -2453,7 +2455,7 @@ const ClaudeGameIdentifier = ({
                               const newResults = additionalResults.filter(r => !existingIds.has(r.id));
                               resultsToShow = [...resultsToShow, ...newResults];
                               if (__DEV__) {
-                                console.log(`[ClaudeGameIdentifier] Added ${newResults.length} additional results (from Firebase or BGG)`);
+                                logger.debug(`[ClaudeGameIdentifier] Added ${newResults.length} additional results (from Firebase or BGG)`);
                               }
                             }
                           } catch (searchError) {
@@ -2772,7 +2774,7 @@ const ClaudeGameIdentifier = ({
                 <Text style={styles.modalLoadingText}>Loading game details…</Text>
               </View>
             ) : multipleResultsOptions.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll} {...horizontalScrollViewProps}>
                 {multipleResultsOptions.map((option) => {
                   const isSelected = selectedResultId === option.id;
                   return (
@@ -2940,7 +2942,7 @@ const ClaudeGameIdentifier = ({
   }, []);
 
   const handleReviseTitle = useCallback(async (oldTitle, newTitle) => {
-    console.log('[ClaudeGameIdentifier] User revised game title:', { oldTitle, newTitle });
+    logger.debug('[ClaudeGameIdentifier] User revised game title:', { oldTitle, newTitle });
     
     // Remove old title from all state and add new title
     setFormattedGames(prev => prev.map(title => title === oldTitle ? newTitle : title));
@@ -3055,7 +3057,7 @@ const ClaudeGameIdentifier = ({
           [newTitle]: bestMatch.id, // Only update the revised game
         }));
         
-        console.log(`[ClaudeGameIdentifier] Revised title search complete: "${newTitle}" - found ${finalResults.length} results, auto-selected "${bestMatch.name}"`);
+        logger.debug(`[ClaudeGameIdentifier] Revised title search complete: "${newTitle}" - found ${finalResults.length} results, auto-selected "${bestMatch.name}"`);
       } else {
         // No results - merge empty array
         setSearchResults(prev => ({
@@ -3067,7 +3069,7 @@ const ClaudeGameIdentifier = ({
         if (addPendingRetry) {
           try {
             await addPendingRetry(newTitle);
-            console.log(`[ClaudeGameIdentifier] Saved revised title "${newTitle}" to pending retries (no results found)`);
+            logger.debug(`[ClaudeGameIdentifier] Saved revised title "${newTitle}" to pending retries (no results found)`);
           } catch (retryError) {
             console.error(`[ClaudeGameIdentifier] Error saving revised title to pending retries:`, retryError);
           }
@@ -3091,7 +3093,7 @@ const ClaudeGameIdentifier = ({
   }, [addPendingRetry]);
 
   const handleSkipGame = useCallback(async (gameTitle) => {
-    console.log('[ClaudeGameIdentifier] User chose to keep trying for:', gameTitle);
+    logger.debug('[ClaudeGameIdentifier] User chose to keep trying for:', gameTitle);
     
     // Save to pending retries for background retry
     await addPendingRetry(gameTitle);
@@ -3323,7 +3325,7 @@ const ClaudeGameIdentifier = ({
                 </View>
               ) : null}
               {correctionSuggestions.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow} {...horizontalScrollViewProps}>
                   {correctionSuggestions.map((suggestion) => (
                     <CorrectionSuggestionCard
                       key={suggestion.id}
@@ -3385,7 +3387,7 @@ const ClaudeGameIdentifier = ({
               </View>
             ) : null}
             {correctionSuggestions.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow} {...horizontalScrollViewProps}>
                 {correctionSuggestions.map((suggestion) => (
                   <CorrectionSuggestionCard
                     key={suggestion.id}

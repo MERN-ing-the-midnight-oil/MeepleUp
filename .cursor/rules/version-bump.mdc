@@ -21,6 +21,10 @@ When incrementing the MeepleUp app version (e.g. for a new store release), updat
 - **ios/MeepleUp/Info.plist** — `CFBundleVersion`
 - **ios/MeepleUp.xcodeproj/project.pbxproj** — `CURRENT_PROJECT_VERSION` (Debug and Release)
 
+**EAS production builds:** `eas.json` enables `"autoIncrement": true` on the `production` profile with `cli.appVersionSource: local`. For each **EAS Build** with that profile, the CLI bumps iOS build number / Android `versionCode` and updates native files + `app.json` so you do not have to bump them by hand before every build. **Commit** the version files after a successful build so the repo stays the source of truth. For marketing version bumps (section 1), still update all listed files manually.
+
+**Optional (Expo-recommended):** set `cli.appVersionSource` to `remote` and use `eas build:version:set` / `eas build:version:sync` so build numbers live on EAS servers and you do not rely on committing after each build ([App version management](https://docs.expo.dev/build-reference/app-versions/)).
+
 ## 3. Android version code (integer, always increase)
 
 - **app.json** — `expo.android.versionCode`

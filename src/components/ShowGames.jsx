@@ -17,6 +17,8 @@ import InAppLogViewer from './InAppLogViewer';
 import { useCollections } from '../context/CollectionsContext';
 import { useAuth } from '../context/AuthContext';
 import { searchGamesByName } from '../utils/api';
+import logger from '../utils/logger';
+import { horizontalScrollViewProps } from '../utils/horizontalScrollViewProps';
 
 const ShowGames = ({
   visible,
@@ -249,7 +251,7 @@ const ShowGames = ({
             )}
             
             {/* Main results carousel */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll} {...horizontalScrollViewProps}>
               {results.map((result) => {
                 const isSelected = selectedBggId === result.id;
                 const isResultDuplicate = isGameInCollection(result.id);
@@ -304,7 +306,7 @@ const ShowGames = ({
             {similarTitlesForGame.length > 0 && (
               <View style={styles.similarTitlesContainer}>
                 <Text style={styles.similarTitlesHeader}>Similar titles:</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.resultsScroll} {...horizontalScrollViewProps}>
                   {similarTitlesForGame.map((similarGame) => {
                     const isSimilarSelected = selectedGames[gameTitle] === similarGame.id;
                     return (
@@ -442,7 +444,7 @@ const ShowGames = ({
   // Log when modal should be visible
   React.useEffect(() => {
     if (__DEV__) {
-      console.log('[ShowGames] Visibility check:', {
+      logger.debug('[ShowGames] Visibility check:', {
         visible,
         formattedGamesLength: formattedGames.length,
         shouldShow: visible && formattedGames.length > 0,

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useResponsive } from '../../utils/responsive';
 import { theme, commonStyles } from '../../utils/theme';
+import logger from '../../utils/logger';
 
 const ModalComponent = ({ isOpen, onClose, children, title, fullScreen = false }) => {
   const { width, height } = useWindowDimensions();
@@ -34,7 +35,7 @@ const ModalComponent = ({ isOpen, onClose, children, title, fullScreen = false }
   
   // Memoize onRequestClose to prevent recreation on every render
   const handleRequestClose = React.useCallback(() => {
-    console.log('[Modal] onRequestClose called (Android back button or similar)');
+    logger.debug('[Modal] onRequestClose called (Android back button or similar)');
     onClose();
   }, [onClose]);
   
@@ -42,7 +43,7 @@ const ModalComponent = ({ isOpen, onClose, children, title, fullScreen = false }
   const prevIsOpenRef = React.useRef(isOpen);
   React.useEffect(() => {
     if (prevIsOpenRef.current !== isOpen) {
-      console.log('[Modal] Modal state changed, isOpen:', isOpen, 'title:', title);
+      logger.debug('[Modal] Modal state changed, isOpen:', isOpen, 'title:', title);
       prevIsOpenRef.current = isOpen;
     }
   }, [isOpen, title]);

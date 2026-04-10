@@ -14,6 +14,7 @@ import {
   initializePurchases,
 } from '../services/meepleupPurchaseService';
 import { initializePurchases as initIAP } from '../services/subscriptionService';
+import logger from '../utils/logger';
 
 const EventsContext = createContext();
 
@@ -235,39 +236,39 @@ export const EventsProvider = ({ children }) => {
       try {
         const userId = user.uid || user.id;
         if (!userId) {
-          console.log('[EventsContext] No userId available, skipping sync');
+          logger.debug('[EventsContext] No userId available, skipping sync');
           return;
         }
 
-        console.log(`[EventsContext] 🔍 SYNC START: Syncing events for user: ${userId}`);
+        logger.debug(`[EventsContext] 🔍 SYNC START: Syncing events for user: ${userId}`);
 
         const memberDoc = await db.collection('users').doc(userId).get();
         const userData = memberDoc.data();
         const groupIds = userData?.groupIds || [];
 
-        console.log(`[EventsContext] 🔍 SYNC: User's groupIds from Firestore:`, {
+        logger.debug(`[EventsContext] 🔍 SYNC: User's groupIds from Firestore:`, {
           count: groupIds.length,
           groupIds: groupIds
         });
 
         if (groupIds.length === 0) {
-          console.log('[EventsContext] User has no group memberships');
+          logger.debug('[EventsContext] User has no group memberships');
           setEvents([]);
           return;
         }
 
         const groupPromises = groupIds.map(async (groupId) => {
           try {
-            console.log(`[EventsContext] 🔍 SYNC: Fetching group ${groupId}`);
+            logger.debug(`[EventsContext] 🔍 SYNC: Fetching group ${groupId}`);
             const groupDoc = await db.collection('gamingGroups').doc(groupId).get();
             
             if (!groupDoc.exists) {
-              console.log(`[EventsContext] 🔍 SYNC: Group ${groupId} does not exist in Firestore`);
+              logger.debug(`[EventsContext] 🔍 SYNC: Group ${groupId} does not exist in Firestore`);
               return null;
             }
 
             const firestoreData = groupDoc.data();
-            console.log(`[EventsContext] 🔍 SYNC: Group ${groupId} data:`, {
+            logger.debug(`[EventsContext] 🔍 SYNC: Group ${groupId} data:`, {
               id: groupId,
               name: firestoreData.name,
               isActive: firestoreData.isActive,
@@ -373,7 +374,7 @@ export const EventsProvider = ({ children }) => {
           .map(normalizeEvent)
           .filter(Boolean);
 
-        console.log(`[EventsContext] 🔍 SYNC: Processed events from Firestore:`, {
+        logger.debug(`[EventsContext] 🔍 SYNC: Processed events from Firestore:`, {
           count: firestoreEvents.length,
           events: firestoreEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive }))
         });
@@ -381,18 +382,18 @@ export const EventsProvider = ({ children }) => {
         // Check specifically for "Bobs MeepleUp"
         const bobsMeepleUp = firestoreEvents.find(e => e.name === "Bobs MeepleUp" || e.id === "1766552116194");
         if (bobsMeepleUp) {
-          console.log('[EventsContext] 🔍 SYNC: "Bobs MeepleUp" found in firestoreEvents:', {
+          logger.debug('[EventsContext] 🔍 SYNC: "Bobs MeepleUp" found in firestoreEvents:', {
             id: bobsMeepleUp.id,
             name: bobsMeepleUp.name,
             isActive: bobsMeepleUp.isActive
           });
         } else {
-          console.log('[EventsContext] 🔍 SYNC: "Bobs MeepleUp" NOT found in firestoreEvents');
+          logger.debug('[EventsContext] 🔍 SYNC: "Bobs MeepleUp" NOT found in firestoreEvents');
         }
 
         if (firestoreEvents.length > 0) {
           setEvents((prevEvents) => {
-            console.log(`[EventsContext] 🔍 SYNC: Merging events. Previous count: ${prevEvents.length}, New events: ${firestoreEvents.length}`);
+            logger.debug(`[EventsContext] 🔍 SYNC: Merging events. Previous count: ${prevEvents.length}, New events: ${firestoreEvents.length}`);
             
             const merged = new Map();
             
@@ -405,13 +406,13 @@ export const EventsProvider = ({ children }) => {
             });
             
             const finalEvents = Array.from(merged.values());
-            console.log(`[EventsContext] 🔍 SYNC: Final merged events count: ${finalEvents.length}`);
-            console.log(`[EventsContext] 🔍 SYNC: Final events:`, finalEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive })));
+            logger.debug(`[EventsContext] 🔍 SYNC: Final merged events count: ${finalEvents.length}`);
+            logger.debug(`[EventsContext] 🔍 SYNC: Final events:`, finalEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive })));
             
             return finalEvents;
           });
         } else {
-          console.log('[EventsContext] 🔍 SYNC: No events to merge (firestoreEvents.length === 0)');
+          logger.debug('[EventsContext] 🔍 SYNC: No events to merge (firestoreEvents.length === 0)');
         }
       } catch (error) {
         console.error('Error syncing events from Firestore:', error);
@@ -608,7 +609,7 @@ export const EventsProvider = ({ children }) => {
               const verification = await verifyMeepleupPurchaseReceipt(update.purchase, userId);
               
               if (verification.success && verification.verified) {
-                console.log('[EventsContext] Meepleup creation purchase verified successfully');
+                logger.debug('[EventsContext] Meepleup creation purchase verified successfully');
                 // Purchase is now recorded, user can create meepleups
               } else {
                 console.warn('[EventsContext] Meepleup creation purchase verification failed:', verification.error);
@@ -662,7 +663,7 @@ export const EventsProvider = ({ children }) => {
         }
       } else {
         // In development or when bypass is enabled, log that we're bypassing purchase check
-        console.log('[createEventWithPurchaseCheck] Purchase check bypassed (dev mode or EXPO_PUBLIC_BYPASS_PURCHASE_CHECK enabled)');
+        logger.debug('[createEventWithPurchaseCheck] Purchase check bypassed (dev mode or EXPO_PUBLIC_BYPASS_PURCHASE_CHECK enabled)');
       }
 
       // User has purchase (or bypass enabled), proceed with event creation
@@ -679,11 +680,11 @@ export const EventsProvider = ({ children }) => {
 
   const joinEventWithCode = useCallback(
     async (code, userId) => {
-      console.log('[EventsContext] ========== JOIN EVENT WITH CODE START ==========');
-      console.log('[EventsContext] Input code:', code);
-      console.log('[EventsContext] Input userId:', userId);
-      console.log('[EventsContext] User object:', { uid: user?.uid, id: user?.id, email: user?.email });
-      console.log('[EventsContext] DB available:', !!db);
+      logger.debug('[EventsContext] ========== JOIN EVENT WITH CODE START ==========');
+      logger.debug('[EventsContext] Input code:', code);
+      logger.debug('[EventsContext] Input userId:', userId);
+      logger.debug('[EventsContext] User object:', { uid: user?.uid, id: user?.id, email: user?.email });
+      logger.debug('[EventsContext] DB available:', !!db);
       
       if (!code || !userId) {
         console.error('[EventsContext] Missing required parameters:', { code: !!code, userId: !!userId });
@@ -691,7 +692,7 @@ export const EventsProvider = ({ children }) => {
       }
 
       const normalized = code.trim().toLowerCase().replace(/[\s-]+/g, ' ');
-      console.log('[EventsContext] Normalized code:', normalized);
+      logger.debug('[EventsContext] Normalized code:', normalized);
 
       if (!db) {
         console.error('[EventsContext] Database not available');
@@ -705,22 +706,22 @@ export const EventsProvider = ({ children }) => {
 
       try {
         const eventsRef = db.collection('gamingGroups');
-        console.log('[EventsContext] Created eventsRef, starting query...');
+        logger.debug('[EventsContext] Created eventsRef, starting query...');
         
         // Query by joinCode (security rules will filter to active groups)
         // Note: We don't filter by isActive in the query since security rules handle that
-        console.log('[EventsContext] Attempting query: where(joinCode == normalized)');
+        logger.debug('[EventsContext] Attempting query: where(joinCode == normalized)');
         let snapshot;
         try {
           snapshot = await eventsRef
             .where('joinCode', '==', normalized)
             .limit(10)
             .get();
-          console.log('[EventsContext] ✅ Query succeeded!');
-          console.log('[EventsContext] Documents found:', snapshot.docs.length);
+          logger.debug('[EventsContext] ✅ Query succeeded!');
+          logger.debug('[EventsContext] Documents found:', snapshot.docs.length);
           snapshot.docs.forEach((doc, index) => {
             const data = doc.data();
-            console.log(`[EventsContext] Doc ${index + 1}:`, {
+            logger.debug(`[EventsContext] Doc ${index + 1}:`, {
               id: doc.id,
               name: data.name,
               isActive: data.isActive,
@@ -740,28 +741,28 @@ export const EventsProvider = ({ children }) => {
         }
 
         // Filter results to ensure they match security rules (active and not deleted)
-        console.log('[EventsContext] Filtering results for active, non-deleted groups...');
+        logger.debug('[EventsContext] Filtering results for active, non-deleted groups...');
         let matchingDocs = snapshot.docs.filter(doc => {
           const data = doc.data();
           const isActive = data.isActive !== false;
           const notDeleted = !data.deletedAt;
           const matches = isActive && notDeleted;
-          console.log(`[EventsContext] Doc ${doc.id}: isActive=${isActive}, notDeleted=${notDeleted}, matches=${matches}`);
+          logger.debug(`[EventsContext] Doc ${doc.id}: isActive=${isActive}, notDeleted=${notDeleted}, matches=${matches}`);
           return matches;
         });
-        console.log('[EventsContext] After filtering:', matchingDocs.length, 'matching documents');
+        logger.debug('[EventsContext] After filtering:', matchingDocs.length, 'matching documents');
 
         if (matchingDocs.length === 0) {
           // Try querying by joinCodes array
-          console.log('[EventsContext] No matches by joinCode, trying joinCodes array...');
+          logger.debug('[EventsContext] No matches by joinCode, trying joinCodes array...');
           let snapshotArray;
           try {
             snapshotArray = await eventsRef
               .where('joinCodes', 'array-contains', normalized)
               .limit(10)
               .get();
-            console.log('[EventsContext] ✅ Array query succeeded!');
-            console.log('[EventsContext] Array query documents found:', snapshotArray.docs.length);
+            logger.debug('[EventsContext] ✅ Array query succeeded!');
+            logger.debug('[EventsContext] Array query documents found:', snapshotArray.docs.length);
           } catch (arrayQueryError) {
             console.error('[EventsContext] ❌ Query by joinCodes array failed:', {
               error: arrayQueryError,
@@ -777,10 +778,10 @@ export const EventsProvider = ({ children }) => {
             const isActive = data.isActive !== false;
             const notDeleted = !data.deletedAt;
             const matches = isActive && notDeleted;
-            console.log(`[EventsContext] Array query doc ${doc.id}: isActive=${isActive}, notDeleted=${notDeleted}, matches=${matches}`);
+            logger.debug(`[EventsContext] Array query doc ${doc.id}: isActive=${isActive}, notDeleted=${notDeleted}, matches=${matches}`);
             return matches;
           });
-          console.log('[EventsContext] After array query filtering:', matchingDocs.length, 'matching documents');
+          logger.debug('[EventsContext] After array query filtering:', matchingDocs.length, 'matching documents');
           
           if (matchingDocs.length === 0) {
             console.error('[EventsContext] ❌ No matching groups found after both queries');
@@ -788,10 +789,10 @@ export const EventsProvider = ({ children }) => {
           }
         }
         
-        console.log('[EventsContext] ✅ Found matching group:', matchingDocs[0].id);
-        console.log('[EventsContext] Proceeding to processJoinedGroup...');
+        logger.debug('[EventsContext] ✅ Found matching group:', matchingDocs[0].id);
+        logger.debug('[EventsContext] Proceeding to processJoinedGroup...');
         const result = await processJoinedGroup(matchingDocs[0], userId);
-        console.log('[EventsContext] ========== JOIN EVENT WITH CODE SUCCESS ==========');
+        logger.debug('[EventsContext] ========== JOIN EVENT WITH CODE SUCCESS ==========');
         return result;
       } catch (error) {
         console.error('[EventsContext] ========== JOIN EVENT WITH CODE ERROR ==========');
@@ -819,13 +820,13 @@ export const EventsProvider = ({ children }) => {
   );
 
   const processJoinedGroup = async (groupDoc, userId) => {
-    console.log('[EventsContext] ========== PROCESS JOINED GROUP START ==========');
-    console.log('[EventsContext] Group document ID:', groupDoc.id);
-    console.log('[EventsContext] User ID:', userId);
+    logger.debug('[EventsContext] ========== PROCESS JOINED GROUP START ==========');
+    logger.debug('[EventsContext] Group document ID:', groupDoc.id);
+    logger.debug('[EventsContext] User ID:', userId);
     
     const firestoreEvent = groupDoc.data();
     const groupId = groupDoc.id;
-    console.log('[EventsContext] Group data:', {
+    logger.debug('[EventsContext] Group data:', {
       name: firestoreEvent.name,
       organizerId: firestoreEvent.organizerId,
       isActive: firestoreEvent.isActive,
@@ -907,18 +908,18 @@ export const EventsProvider = ({ children }) => {
     const event = normalizeEvent(localEventData);
 
     try {
-      console.log('[EventsContext] Starting Firestore operations...');
+      logger.debug('[EventsContext] Starting Firestore operations...');
       const groupRef = db.collection('gamingGroups').doc(groupId);
-      console.log('[EventsContext] Group ref created:', groupId);
+      logger.debug('[EventsContext] Group ref created:', groupId);
       
             let userName = '';
             let userAvatarUrl = '';
             if (user && userId === (user.uid || user.id)) {
               userName = user.name || user.email || '';
               userAvatarUrl = user.photoURL || user.avatarUrl || '';
-              console.log('[EventsContext] Using user object for name/avatar:', { userName, hasAvatar: !!userAvatarUrl });
+              logger.debug('[EventsContext] Using user object for name/avatar:', { userName, hasAvatar: !!userAvatarUrl });
             } else {
-              console.log('[EventsContext] Fetching user data from Firestore...');
+              logger.debug('[EventsContext] Fetching user data from Firestore...');
               const userData = await db.collection('users').doc(userId).get().catch((err) => {
                 console.error('[EventsContext] Error fetching user data:', err);
                 return null;
@@ -926,10 +927,10 @@ export const EventsProvider = ({ children }) => {
               const userDocData = userData?.data();
               userName = userDocData?.name || userDocData?.email || '';
               userAvatarUrl = userDocData?.avatarUrl || '';
-              console.log('[EventsContext] User data fetched:', { userName, hasAvatar: !!userAvatarUrl });
+              logger.debug('[EventsContext] User data fetched:', { userName, hasAvatar: !!userAvatarUrl });
             }
             
-            console.log('[EventsContext] Creating member document...');
+            logger.debug('[EventsContext] Creating member document...');
             const membersRef = groupRef.collection('members').doc(userId);
             try {
               await membersRef.set({
@@ -941,7 +942,7 @@ export const EventsProvider = ({ children }) => {
               rsvpStatus: null,
               rsvpStatuses: {},
             }, { merge: true });
-            console.log('[EventsContext] ✅ Member document created successfully');
+            logger.debug('[EventsContext] ✅ Member document created successfully');
             } catch (memberError) {
               console.error('[EventsContext] ❌ Error creating member document:', {
                 error: memberError,
@@ -951,12 +952,12 @@ export const EventsProvider = ({ children }) => {
               throw memberError;
             }
             
-      console.log('[EventsContext] Updating user document with groupId...');
+      logger.debug('[EventsContext] Updating user document with groupId...');
       try {
         await db.collection('users').doc(userId).update({
           groupIds: firebase.firestore.FieldValue.arrayUnion(groupId),
         });
-        console.log('[EventsContext] ✅ User groupIds updated successfully');
+        logger.debug('[EventsContext] ✅ User groupIds updated successfully');
       } catch (userUpdateError) {
         console.error('[EventsContext] ❌ Error updating user groupIds:', {
           error: userUpdateError,
@@ -1006,7 +1007,7 @@ export const EventsProvider = ({ children }) => {
       throw new Error('Failed to join group: ' + error.message);
     }
     
-    console.log('[EventsContext] ========== PROCESS JOINED GROUP SUCCESS ==========');
+    logger.debug('[EventsContext] ========== PROCESS JOINED GROUP SUCCESS ==========');
 
         setEvents((prev) => {
           const existingEvent = prev.find((e) => e.id === event.id);
@@ -1039,19 +1040,19 @@ export const EventsProvider = ({ children }) => {
 
   const getUserEvents = useCallback(() => {
     if (!user) {
-      console.log('[EventsContext] getUserEvents: No user, returning empty array');
+      logger.debug('[EventsContext] getUserEvents: No user, returning empty array');
       return [];
     }
     const userId = user.uid || user.id;
-    console.log('[EventsContext] getUserEvents: Looking for events for user:', userId, 'Total events:', events.length);
+    logger.debug('[EventsContext] getUserEvents: Looking for events for user:', userId, 'Total events:', events.length);
     
     const userEvents = events.filter((event) =>
       event.members.some((member) => member.userId === userId),
     );
     
-    console.log('[EventsContext] getUserEvents: Found', userEvents.length, 'events for user', userId);
+    logger.debug('[EventsContext] getUserEvents: Found', userEvents.length, 'events for user', userId);
     if (userEvents.length > 0) {
-      console.log('[EventsContext] getUserEvents: Event names:', userEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive })));
+      logger.debug('[EventsContext] getUserEvents: Event names:', userEvents.map(e => ({ id: e.id, name: e.name, isActive: e.isActive })));
     }
     
     return userEvents;
@@ -1177,9 +1178,9 @@ export const EventsProvider = ({ children }) => {
 
   const updateEvent = useCallback(
     async (eventId, updates) => {
-      console.log('[EventsContext] ========== updateEvent CALLED ==========');
-      console.log('[EventsContext] updateEvent - eventId:', eventId);
-      console.log('[EventsContext] updateEvent - updates:', {
+      logger.debug('[EventsContext] ========== updateEvent CALLED ==========');
+      logger.debug('[EventsContext] updateEvent - eventId:', eventId);
+      logger.debug('[EventsContext] updateEvent - updates:', {
         ...updates,
         eventDates: updates.eventDates ? {
           count: Array.isArray(updates.eventDates) ? updates.eventDates.length : 'not an array',
@@ -1190,7 +1191,7 @@ export const EventsProvider = ({ children }) => {
       });
       
       if (!db) {
-        console.log('[EventsContext] ⚠️  No database available, returning early');
+        logger.debug('[EventsContext] ⚠️  No database available, returning early');
         return;
       }
       
@@ -1224,7 +1225,7 @@ export const EventsProvider = ({ children }) => {
           
           // Clean up RSVPs for deleted dates
           if (deletedDateKeys.length > 0) {
-            console.log('[EventsContext] Cleaning up RSVPs for deleted dates:', deletedDateKeys);
+            logger.debug('[EventsContext] Cleaning up RSVPs for deleted dates:', deletedDateKeys);
             
             // Get all members
             const membersRef = groupRef.collection('members');
@@ -1258,14 +1259,14 @@ export const EventsProvider = ({ children }) => {
             
             // Wait for all member updates to complete
             await Promise.all(updatePromises);
-            console.log('[EventsContext] ✅ Cleaned up RSVPs for', deletedDateKeys.length, 'deleted date(s)');
+            logger.debug('[EventsContext] ✅ Cleaned up RSVPs for', deletedDateKeys.length, 'deleted date(s)');
           }
         }
         
         // Convert eventDates to Firestore Timestamps if present
         const firestoreUpdates = { ...updates };
         if (firestoreUpdates.eventDates && Array.isArray(firestoreUpdates.eventDates)) {
-          console.log('[EventsContext] Converting eventDates to Firestore Timestamps...');
+          logger.debug('[EventsContext] Converting eventDates to Firestore Timestamps...');
           firestoreUpdates.eventDates = firestoreUpdates.eventDates.map((ed) => {
             // Handle both ISO string and Date object formats
             const date = ed.date instanceof Date ? ed.date : new Date(ed.date);
@@ -1287,7 +1288,7 @@ export const EventsProvider = ({ children }) => {
             firestoreUpdates.nextEventDate = firestoreUpdates.eventDates[0].date;
           }
           
-          console.log('[EventsContext] Converted eventDates to Timestamps:', {
+          logger.debug('[EventsContext] Converted eventDates to Timestamps:', {
             count: firestoreUpdates.eventDates.length,
             firstDate: firestoreUpdates.eventDates[0]?.date?.toDate?.()?.toISOString(),
           });
@@ -1309,7 +1310,7 @@ export const EventsProvider = ({ children }) => {
         
         firestoreUpdates.updatedAt = firebase.firestore.Timestamp.now();
         
-        console.log('[EventsContext] Preparing Firestore update:', {
+        logger.debug('[EventsContext] Preparing Firestore update:', {
           hasEventDates: !!firestoreUpdates.eventDates,
           eventDatesType: Array.isArray(firestoreUpdates.eventDates) ? 'array' : typeof firestoreUpdates.eventDates,
           eventDatesCount: Array.isArray(firestoreUpdates.eventDates) ? firestoreUpdates.eventDates.length : 'N/A',
@@ -1322,20 +1323,20 @@ export const EventsProvider = ({ children }) => {
             : 'no dates',
         });
         
-        console.log('[EventsContext] Calling Firestore update...');
+        logger.debug('[EventsContext] Calling Firestore update...');
         await groupRef.update(firestoreUpdates);
-        console.log('[EventsContext] ✅ Firestore update completed successfully');
+        logger.debug('[EventsContext] ✅ Firestore update completed successfully');
         
-        console.log('[EventsContext] Updating local events state...');
+        logger.debug('[EventsContext] Updating local events state...');
         setEvents((prev) => {
           const updated = prev.map((event) =>
             event.id === eventId ? { ...event, ...updates, lastUpdatedAt: new Date().toISOString() } : event
           );
-          console.log('[EventsContext] Local events state updated - this will cause EventHub to re-render');
+          logger.debug('[EventsContext] Local events state updated - this will cause EventHub to re-render');
           return updated;
         });
-        console.log('[EventsContext] ✅ Local events state updated');
-        console.log('[EventsContext] ========== updateEvent COMPLETE ==========');
+        logger.debug('[EventsContext] ✅ Local events state updated');
+        logger.debug('[EventsContext] ========== updateEvent COMPLETE ==========');
         } catch (error) {
         console.error('[EventsContext] ❌ Error updating event:', error);
         console.error('[EventsContext] Error details:', {
@@ -1411,9 +1412,9 @@ export const EventsProvider = ({ children }) => {
 
   const updateEventSchedule = useCallback(
     async (eventId, scheduleUpdates) => {
-      console.log('[EventsContext] ========== updateEventSchedule CALLED ==========');
-      console.log('[EventsContext] updateEventSchedule - eventId:', eventId);
-      console.log('[EventsContext] updateEventSchedule - scheduleUpdates:', {
+      logger.debug('[EventsContext] ========== updateEventSchedule CALLED ==========');
+      logger.debug('[EventsContext] updateEventSchedule - eventId:', eventId);
+      logger.debug('[EventsContext] updateEventSchedule - scheduleUpdates:', {
         ...scheduleUpdates,
         eventDates: scheduleUpdates.eventDates ? {
           count: Array.isArray(scheduleUpdates.eventDates) ? scheduleUpdates.eventDates.length : 'not an array',
@@ -1422,9 +1423,9 @@ export const EventsProvider = ({ children }) => {
             : 'no dates',
         } : 'no eventDates',
       });
-      console.log('[EventsContext] updateEventSchedule - delegating to updateEvent...');
+      logger.debug('[EventsContext] updateEventSchedule - delegating to updateEvent...');
       const result = await updateEvent(eventId, scheduleUpdates);
-      console.log('[EventsContext] ========== updateEventSchedule COMPLETE ==========');
+      logger.debug('[EventsContext] ========== updateEventSchedule COMPLETE ==========');
       return result;
     },
     [updateEvent],

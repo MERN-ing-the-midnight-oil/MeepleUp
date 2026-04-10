@@ -21,6 +21,7 @@ import UserProfileModal from '../components/UserProfileModal';
 import MeepleupPurchaseModal from '../components/MeepleupPurchaseModal';
 import ArchivedMeepleUpsModal from '../components/ArchivedMeepleUpsModal';
 import AppTour, { useTour } from '../components/AppTour';
+import logger from '../utils/logger';
 
 const Onboarding = () => {
   const navigation = useNavigation();
@@ -151,13 +152,13 @@ const Onboarding = () => {
     const userCollection = getUserCollection(userId);
     const hasGames = userCollection && userCollection.length > 0;
     if (__DEV__) {
-      console.log('[Onboarding] User collection:', userCollection?.length || 0, 'games');
+      logger.debug('[Onboarding] User collection:', userCollection?.length || 0, 'games');
     }
 
     // If user has no games, redirect to collection screen
     if (!hasGames) {
       if (__DEV__) {
-        console.log('[Onboarding] User has no games, redirecting to collection');
+        logger.debug('[Onboarding] User has no games, redirecting to collection');
       }
       setHasCheckedRedirect(true);
       navigation.navigate('Collection');
@@ -183,7 +184,7 @@ const Onboarding = () => {
     // If we have events but not exactly one, we're done checking
     if (activeEvents.length !== 1 && (userEvents.length > 0 || events.length > 0)) {
       if (__DEV__) {
-        console.log('[Onboarding] ✗ Not redirecting - user has', activeEvents.length, 'active events');
+        logger.debug('[Onboarding] ✗ Not redirecting - user has', activeEvents.length, 'active events');
       }
       setHasCheckedRedirect(true);
       return;
@@ -192,25 +193,25 @@ const Onboarding = () => {
     // If events haven't loaded yet, wait a bit for Firestore sync
     if (activeEvents.length === 0 && events.length === 0 && !eventsLoading) {
       if (__DEV__) {
-        console.log('[Onboarding] Waiting for Firestore sync...');
+        logger.debug('[Onboarding] Waiting for Firestore sync...');
       }
       redirectTimeoutRef.current = setTimeout(() => {
         const delayedUserEvents = getUserEvents();
         const delayedActiveEvents = delayedUserEvents.filter(event => event.isActive === true);
         if (__DEV__) {
-          console.log('[Onboarding] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
+          logger.debug('[Onboarding] Delayed check - active events:', delayedActiveEvents.length, 'of', delayedUserEvents.length, 'total user events');
         }
         
         if (delayedActiveEvents.length === 1) {
           const eventId = delayedActiveEvents[0].id;
           if (__DEV__) {
-            console.log('[Onboarding] ✓ Redirecting to event after Firestore sync:', eventId);
+            logger.debug('[Onboarding] ✓ Redirecting to event after Firestore sync:', eventId);
           }
           setHasCheckedRedirect(true);
           navigation.navigate('EventHub', { eventId });
         } else {
           if (__DEV__) {
-            console.log('[Onboarding] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
+            logger.debug('[Onboarding] ✗ Not redirecting after delay - user has', delayedActiveEvents.length, 'active events');
           }
           setHasCheckedRedirect(true);
         }
@@ -338,7 +339,7 @@ const Onboarding = () => {
   };
 
   const handleDeleteEvent = async (eventId, currentUserId) => {
-    console.log('[Onboarding] handleDeleteEvent called:', eventId, currentUserId);
+    logger.debug('[Onboarding] handleDeleteEvent called:', eventId, currentUserId);
     const userIdentifier = currentUserId || user?.uid || user?.id;
     if (!userIdentifier) {
       console.warn('[Onboarding] No user identifier found');
@@ -347,9 +348,9 @@ const Onboarding = () => {
     }
 
     try {
-      console.log('[Onboarding] Calling deleteEvent with:', eventId, userIdentifier);
+      logger.debug('[Onboarding] Calling deleteEvent with:', eventId, userIdentifier);
       await deleteEvent(eventId, userIdentifier);
-      console.log('[Onboarding] deleteEvent completed successfully');
+      logger.debug('[Onboarding] deleteEvent completed successfully');
       // Alert is shown in the modal
     } catch (error) {
       console.error('[Onboarding] Error in handleDeleteEvent:', error);
@@ -371,7 +372,7 @@ const Onboarding = () => {
     setLoading(true);
     try {
       if (__DEV__) {
-        console.log('[Onboarding] handleCreateEvent - selectedDates before conversion:', {
+        logger.debug('[Onboarding] handleCreateEvent - selectedDates before conversion:', {
           count: selectedDates.length,
           selectedDates: selectedDates.map(d => ({
             date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -408,7 +409,7 @@ const Onboarding = () => {
         }
         
         if (__DEV__) {
-          console.log(`[Onboarding] Converting date ${index + 1}:`, {
+          logger.debug(`[Onboarding] Converting date ${index + 1}:`, {
             original: {
               date: d.date instanceof Date ? d.date.toISOString() : d.date,
               startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
@@ -424,7 +425,7 @@ const Onboarding = () => {
       });
       
       if (__DEV__) {
-        console.log('[Onboarding] handleCreateEvent - eventDates after conversion:', {
+        logger.debug('[Onboarding] handleCreateEvent - eventDates after conversion:', {
           count: eventDates.length,
           eventDates: eventDates.map((ed, index) => ({
             index,
@@ -443,7 +444,7 @@ const Onboarding = () => {
         : (selectedDates[0]?.date ? new Date(selectedDates[0].date).toISOString() : '');
       
       if (__DEV__) {
-        console.log('[Onboarding] handleCreateEvent - scheduledFor:', {
+        logger.debug('[Onboarding] handleCreateEvent - scheduledFor:', {
           scheduledFor: scheduledForValue,
           firstDate: selectedDates[0]?.date instanceof Date 
             ? selectedDates[0].date.toISOString() 
@@ -463,7 +464,7 @@ const Onboarding = () => {
       };
       
       if (__DEV__) {
-        console.log('[Onboarding] handleCreateEvent - eventData being sent to createEvent:', {
+        logger.debug('[Onboarding] handleCreateEvent - eventData being sent to createEvent:', {
           ...eventData,
           eventDates: eventData.eventDates.map((ed, index) => ({
             index,
@@ -1117,7 +1118,12 @@ const Onboarding = () => {
         title="Select Event Dates"
         fullScreen={true}
       >
-        <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalScrollContent}>
+        <ScrollView
+          style={styles.modalContent}
+          contentContainerStyle={styles.modalScrollContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
           <View style={styles.modalFieldContainer}>
             <Text style={styles.fieldLabel}>Usual Time</Text>
             
@@ -1177,10 +1183,11 @@ const Onboarding = () => {
           <View style={[styles.modalFieldContainer, { marginBottom: theme.spacing.xs }]}>
             <Text style={styles.fieldLabel}>Long press to set dates, tap to edit times</Text>
             <CalendarDatePicker
+              persistScrollRestore={false}
               selectedDates={selectedDates}
               onDatesChange={(newDates) => {
                 if (__DEV__) {
-                  console.log('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
+                  logger.debug('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
                     count: newDates.length,
                     dates: newDates.map(d => ({
                       date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -1202,7 +1209,7 @@ const Onboarding = () => {
               }}
               onDatePress={(dateIndex, dateInfo) => {
                 if (__DEV__) {
-                  console.log('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
+                  logger.debug('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
                 }
                 
                 // Close calendar modal first
@@ -1213,14 +1220,14 @@ const Onboarding = () => {
                 setTimeout(() => {
                   const currentDates = selectedDatesRef.current;
                   if (__DEV__) {
-                    console.log('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
+                    logger.debug('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
                   }
                   
                   if (dateIndex !== null && dateIndex !== undefined && dateIndex >= 0 && currentDates[dateIndex]) {
                     const date = currentDates[dateIndex];
                     if (__DEV__) {
-                      console.log('[Onboarding] Opening edit modal for date:', date);
-                      console.log('[Onboarding] Setting editingDateIndex to:', dateIndex);
+                      logger.debug('[Onboarding] Opening edit modal for date:', date);
+                      logger.debug('[Onboarding] Setting editingDateIndex to:', dateIndex);
                     }
                     setEditingDateIndex(dateIndex);
                     setEditingDateForm({
@@ -1228,7 +1235,7 @@ const Onboarding = () => {
                       note: date.note || '',
                     });
                     if (__DEV__) {
-                      console.log('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
+                      logger.debug('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
                     }
                   } else {
                     if (__DEV__) {
@@ -1259,7 +1266,7 @@ const Onboarding = () => {
         isOpen={editingDateIndex !== null}
         onClose={() => {
           if (__DEV__) {
-            console.log('[Onboarding] Closing Date Edit Modal');
+            logger.debug('[Onboarding] Closing Date Edit Modal');
           }
           setEditingDateIndex(null);
           setEditingDateForm({ location: '', note: '' });

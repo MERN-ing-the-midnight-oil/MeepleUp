@@ -9,6 +9,7 @@ import { bggLogoColor } from './BGGLogoAssets';
 import Input from './common/Input';
 import Button from './common/Button';
 import LoadingSpinner from './common/LoadingSpinner';
+import logger from '../utils/logger';
 
 const BGGImport = ({ onImportComplete }) => {
   const { user, updateUser } = useAuth();
@@ -90,7 +91,7 @@ const BGGImport = ({ onImportComplete }) => {
   const handleImportGames = async (gamesToImport = null) => {
     const importStartTime = Date.now();
     if (__DEV__) {
-      console.log('[BGG Import] 🚀 Starting import process', {
+      logger.debug('[BGG Import] 🚀 Starting import process', {
         userIdentifier,
         userEmail: user?.email,
         gamesToImportCount: gamesToImport?.length,
@@ -108,7 +109,7 @@ const BGGImport = ({ onImportComplete }) => {
     }
 
     if (__DEV__) {
-      console.log('[BGG Import] Importing games', {
+      logger.debug('[BGG Import] Importing games', {
         totalGames: games.length,
         userIdentifier,
         userEmail: user?.email,
@@ -133,7 +134,7 @@ const BGGImport = ({ onImportComplete }) => {
     // Get existing collection to check for duplicates
     const existingCollection = userIdentifier ? getUserCollection(userIdentifier) : [];
     if (__DEV__) {
-      console.log('[BGG Import] Checking existing collection', {
+      logger.debug('[BGG Import] Checking existing collection', {
         userIdentifier,
         existingCollectionCount: existingCollection.length,
         sampleExisting: existingCollection.slice(0, 3).map(g => ({
@@ -151,7 +152,7 @@ const BGGImport = ({ onImportComplete }) => {
     );
     
     if (__DEV__) {
-      console.log('[BGG Import] Existing BGG IDs', {
+      logger.debug('[BGG Import] Existing BGG IDs', {
         count: existingBggIds.size,
         sampleIds: Array.from(existingBggIds).slice(0, 5),
       });
@@ -164,7 +165,7 @@ const BGGImport = ({ onImportComplete }) => {
       );
       
       if (__DEV__) {
-        console.log('[BGG Import] Filtered games to import', {
+        logger.debug('[BGG Import] Filtered games to import', {
           totalGames: games.length,
           gamesToImportCount: gamesToImport.length,
           skippedCount: games.length - gamesToImport.length,
@@ -179,13 +180,13 @@ const BGGImport = ({ onImportComplete }) => {
         skippedCount = games.length;
         setImportProgress({ current: games.length, total: games.length });
         if (__DEV__) {
-          console.log('[BGG Import] ⚠️ All games already in collection, skipping import');
+          logger.debug('[BGG Import] ⚠️ All games already in collection, skipping import');
         }
       } else {
         // Step 1: Check Firestore for all games first (to see what we already have cached)
         const firestoreCheckStartTime = Date.now();
         if (__DEV__) {
-          console.log('[BGG Import] ⏱️ Step 1: Checking Firestore cache...', {
+          logger.debug('[BGG Import] ⏱️ Step 1: Checking Firestore cache...', {
             gamesToCheck: gamesToImport.length,
           });
         }
@@ -205,7 +206,7 @@ const BGGImport = ({ onImportComplete }) => {
         const firestoreCheckDuration = ((Date.now() - firestoreCheckStartTime) / 1000).toFixed(2);
         const cachedCount = firestoreChecks.filter(({ cached }) => !!cached).length;
         if (__DEV__) {
-          console.log('[BGG Import] ✅ Firestore check completed', {
+          logger.debug('[BGG Import] ✅ Firestore check completed', {
             durationSeconds: firestoreCheckDuration,
             totalGames: gamesToImport.length,
             cachedGames: cachedCount,
@@ -221,7 +222,7 @@ const BGGImport = ({ onImportComplete }) => {
           .map(({ game }) => game.bggId);
         
         if (__DEV__) {
-          console.log(`[BGG Import] ${gamesNeedingAPI.length} games need fetching from BGG API`, {
+          logger.debug(`[BGG Import] ${gamesNeedingAPI.length} games need fetching from BGG API`, {
             totalGames: gamesToImport.length,
             cachedGames: cachedCount,
             gamesNeedingAPI: gamesNeedingAPI.length,
@@ -242,7 +243,7 @@ const BGGImport = ({ onImportComplete }) => {
           const estimatedTotalSeconds = totalBatches * DELAY_BETWEEN_BATCHES / 1000;
           
           if (__DEV__) {
-            console.log('[BGG Import] ⏱️ Step 2: Fetching games from BGG API...', {
+            logger.debug('[BGG Import] ⏱️ Step 2: Fetching games from BGG API...', {
               totalBatches,
               batchSize: BATCH_SIZE,
               delayBetweenBatches: DELAY_BETWEEN_BATCHES,
@@ -258,7 +259,7 @@ const BGGImport = ({ onImportComplete }) => {
             
             try {
               if (__DEV__) {
-                console.log(`[BGG Import] 📦 Fetching batch ${batchNumber}/${totalBatches} (${batch.length} games)...`, {
+                logger.debug(`[BGG Import] 📦 Fetching batch ${batchNumber}/${totalBatches} (${batch.length} games)...`, {
                   batchStartTime: new Date().toISOString(),
                   elapsedSeconds: ((Date.now() - apiFetchStartTime) / 1000).toFixed(1),
                 });
@@ -278,7 +279,7 @@ const BGGImport = ({ onImportComplete }) => {
               }
               
               if (__DEV__) {
-                console.log(`[BGG Import] ✅ Batch ${batchNumber}/${totalBatches} completed`, {
+                logger.debug(`[BGG Import] ✅ Batch ${batchNumber}/${totalBatches} completed`, {
                   durationSeconds: batchDuration,
                   gamesFetched: batchResults?.length || 0,
                   totalFetchedSoFar: batchFetchedGames.size,
@@ -306,7 +307,7 @@ const BGGImport = ({ onImportComplete }) => {
             // API-friendly delay between batches (except after the last batch)
             if (i + BATCH_SIZE < gamesNeedingAPI.length) {
               if (__DEV__) {
-                console.log(`[BGG Import] ⏸️ Waiting ${DELAY_BETWEEN_BATCHES}ms before next batch (BGG API rate limit)...`);
+                logger.debug(`[BGG Import] ⏸️ Waiting ${DELAY_BETWEEN_BATCHES}ms before next batch (BGG API rate limit)...`);
               }
               await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
             }
@@ -314,7 +315,7 @@ const BGGImport = ({ onImportComplete }) => {
           
           const apiFetchDuration = ((Date.now() - apiFetchStartTime) / 1000).toFixed(2);
           if (__DEV__) {
-            console.log(`[BGG Import] ✅ Completed fetching ${batchFetchedGames.size} games from BGG API`, {
+            logger.debug(`[BGG Import] ✅ Completed fetching ${batchFetchedGames.size} games from BGG API`, {
               durationSeconds: apiFetchDuration,
               durationMinutes: (apiFetchDuration / 60).toFixed(2),
               averageSecondsPerGame: (apiFetchDuration / gamesNeedingAPI.length).toFixed(2),
@@ -325,7 +326,7 @@ const BGGImport = ({ onImportComplete }) => {
         // Step 4: Process all games and import them
         const processingStartTime = Date.now();
         if (__DEV__) {
-          console.log('[BGG Import] ⏱️ Step 3: Processing games for import...', {
+          logger.debug('[BGG Import] ⏱️ Step 3: Processing games for import...', {
             totalGames: firestoreChecks.length,
             userIdentifier,
             userEmail: user?.email,
@@ -350,7 +351,7 @@ const BGGImport = ({ onImportComplete }) => {
             }
 
             if (__DEV__) {
-              console.log(`[BGG Import] Processing game ${i + 1}/${firestoreChecks.length}`, {
+              logger.debug(`[BGG Import] Processing game ${i + 1}/${firestoreChecks.length}`, {
                 bggId: game.bggId,
                 name: game.name,
                 hasCached: !!cached,
@@ -423,7 +424,7 @@ const BGGImport = ({ onImportComplete }) => {
             // Add to collection
             if (userIdentifier) {
               if (__DEV__) {
-                console.log(`[BGG Import] Adding game to collection`, {
+                logger.debug(`[BGG Import] Adding game to collection`, {
                   bggId: game.bggId,
                   gameId: gameData.id,
                   title: gameData.title || gameData.name,
@@ -436,7 +437,7 @@ const BGGImport = ({ onImportComplete }) => {
               try {
                 addGameToCollection(userIdentifier, gameData);
                 if (__DEV__) {
-                  console.log(`[BGG Import] ✅ Successfully called addGameToCollection for game ${game.bggId}`);
+                  logger.debug(`[BGG Import] ✅ Successfully called addGameToCollection for game ${game.bggId}`);
                 }
                 setImportedGames((prev) => [...prev, gameData]);
                 existingBggIds.add(game.bggId.toString()); // Track as added
@@ -481,7 +482,7 @@ const BGGImport = ({ onImportComplete }) => {
         
         const processingDuration = ((Date.now() - processingStartTime) / 1000).toFixed(2);
         if (__DEV__) {
-          console.log('[BGG Import] ✅ Game processing completed', {
+          logger.debug('[BGG Import] ✅ Game processing completed', {
             durationSeconds: processingDuration,
             successCount,
             failCount,
@@ -493,7 +494,7 @@ const BGGImport = ({ onImportComplete }) => {
         if (batchFetchedGames.size > 0) {
           const cacheStartTime = Date.now();
           if (__DEV__) {
-            console.log('[BGG Import] ⏱️ Step 4: Caching games to Firestore...', {
+            logger.debug('[BGG Import] ⏱️ Step 4: Caching games to Firestore...', {
               gamesToCache: batchFetchedGames.size,
             });
           }
@@ -519,7 +520,7 @@ const BGGImport = ({ onImportComplete }) => {
           
           const cacheDuration = ((Date.now() - cacheStartTime) / 1000).toFixed(2);
           if (__DEV__) {
-            console.log(`[BGG Import] ✅ Cached ${batchFetchedGames.size} complete game objects to Firestore`, {
+            logger.debug(`[BGG Import] ✅ Cached ${batchFetchedGames.size} complete game objects to Firestore`, {
               durationSeconds: cacheDuration,
             });
           }
@@ -531,7 +532,7 @@ const BGGImport = ({ onImportComplete }) => {
 
       const totalImportDuration = ((Date.now() - importStartTime) / 1000).toFixed(2);
       if (__DEV__) {
-        console.log('[BGG Import] ✅ Import summary', {
+        logger.debug('[BGG Import] ✅ Import summary', {
           userIdentifier,
           userEmail: user?.email,
           totalGames: games.length,
@@ -567,7 +568,7 @@ const BGGImport = ({ onImportComplete }) => {
       }
 
       if (__DEV__) {
-        console.log('[BGG Import] Final import results', {
+        logger.debug('[BGG Import] Final import results', {
           userIdentifier,
           userEmail: user?.email,
           successCount,
@@ -587,7 +588,7 @@ const BGGImport = ({ onImportComplete }) => {
         }
         
         if (__DEV__) {
-          console.log('[BGG Import] ✅ Import completed successfully', {
+          logger.debug('[BGG Import] ✅ Import completed successfully', {
             message,
             successCount,
             userIdentifier,
@@ -637,7 +638,7 @@ const BGGImport = ({ onImportComplete }) => {
       setError(err.message || 'Failed to import games. Some games may have been imported.');
     } finally {
       if (__DEV__) {
-        console.log('[BGG Import] Import process finished', {
+        logger.debug('[BGG Import] Import process finished', {
           userIdentifier,
           userEmail: user?.email,
           importing: false,

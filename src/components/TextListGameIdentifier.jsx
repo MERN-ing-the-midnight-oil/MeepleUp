@@ -19,6 +19,7 @@ import { getGames, searchGamesByName } from '../utils/api';
 import { theme, commonStyles } from '../utils/theme';
 import { addPendingRetry } from '../utils/pendingGameRetries';
 import ShowGames from './ShowGames';
+import logger from '../utils/logger';
 
 const TextListGameIdentifier = ({ 
   onAddToCollection, 
@@ -61,14 +62,14 @@ const TextListGameIdentifier = ({
         return;
       }
 
-      console.log('[TextListGameIdentifier] Claude returned games:', result.games);
-      console.log(`[TextListGameIdentifier] Starting BGG search for ${result.games.length} games`);
+      logger.debug('[TextListGameIdentifier] Claude returned games:', result.games);
+      logger.debug(`[TextListGameIdentifier] Starting BGG search for ${result.games.length} games`);
 
       setFormattedGames(result.games);
       
       if (__DEV__) {
-        console.log('[TextListGameIdentifier] Set formattedGames:', result.games.length, 'games');
-        console.log('[TextListGameIdentifier] ShowGames should now be visible:', result.games.length > 0);
+        logger.debug('[TextListGameIdentifier] Set formattedGames:', result.games.length, 'games');
+        logger.debug('[TextListGameIdentifier] ShowGames should now be visible:', result.games.length > 0);
       }
       
       // Automatically search for each game
@@ -286,7 +287,7 @@ const TextListGameIdentifier = ({
   };
 
   const handleReviseTitle = async (oldTitle, newTitle) => {
-    console.log('[TextListGameIdentifier] User revised game title:', { oldTitle, newTitle });
+    logger.debug('[TextListGameIdentifier] User revised game title:', { oldTitle, newTitle });
     
     // Remove old title from all state
     setFormattedGames(prev => prev.map(title => title === oldTitle ? newTitle : title));
@@ -401,7 +402,7 @@ const TextListGameIdentifier = ({
           [newTitle]: bestMatch.id, // Only update the revised game
         }));
         
-        console.log(`[TextListGameIdentifier] Revised title search complete: "${newTitle}" - found ${finalResults.length} results, auto-selected "${bestMatch.name}"`);
+        logger.debug(`[TextListGameIdentifier] Revised title search complete: "${newTitle}" - found ${finalResults.length} results, auto-selected "${bestMatch.name}"`);
       } else {
         // No results - merge empty array
         setSearchResults(prev => ({
@@ -412,7 +413,7 @@ const TextListGameIdentifier = ({
         // Add to pending retries
         try {
           await addPendingRetry(newTitle);
-          console.log(`[TextListGameIdentifier] Saved revised title "${newTitle}" to pending retries (no results found)`);
+          logger.debug(`[TextListGameIdentifier] Saved revised title "${newTitle}" to pending retries (no results found)`);
         } catch (retryError) {
           console.error(`[TextListGameIdentifier] Error saving revised title to pending retries:`, retryError);
         }
@@ -435,7 +436,7 @@ const TextListGameIdentifier = ({
   };
 
   const handleSkipGame = async (gameTitle) => {
-    console.log('[TextListGameIdentifier] User chose to keep trying for:', gameTitle);
+    logger.debug('[TextListGameIdentifier] User chose to keep trying for:', gameTitle);
     
     // Save to pending retries for background retry
     await addPendingRetry(gameTitle);

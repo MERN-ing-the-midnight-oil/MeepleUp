@@ -1,6 +1,7 @@
 import { searchGamesByName, getGames } from './api';
 import { addPendingRetry } from './pendingGameRetries';
 import logger from './inAppLogger';
+import fileLogger from './logger';
 
 /**
  * Shared utility function to search BGG for multiple game titles
@@ -95,11 +96,11 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     estimatedTimeMinutes: Math.ceil(games.length * 0.5),
     games,
   });
-  console.log(`${logPrefix} 🚀 Starting search for ${games.length} games`, {
+  fileLogger.debug(`${logPrefix} 🚀 Starting search for ${games.length} games`, {
     timestamp: new Date().toISOString(),
     estimatedTimeMinutes: Math.ceil(games.length * 0.5), // ~0.5 min per game (conservative)
   });
-  console.log(`${logPrefix} Game titles to search:`, games);
+  fileLogger.debug(`${logPrefix} Game titles to search:`, games);
 
   // Helper function to clean game title by removing parenthetical text
   // Example: "Bridge City Poker (modern published game)" -> "Bridge City Poker"
@@ -128,7 +129,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     // Mark this game as loading (will persist through retries)
     setLoadingGames(prev => new Set(prev).add(gameTitle));
     
-    console.log(`${logPrefix} ⏱️ Searching BGG for: "${gameTitle}" (${i + 1}/${games.length})`, {
+    fileLogger.debug(`${logPrefix} ⏱️ Searching BGG for: "${gameTitle}" (${i + 1}/${games.length})`, {
       gameIndex: i + 1,
       totalGames: games.length,
       searchStartTime: new Date().toISOString(),
@@ -148,7 +149,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     while (retryCount <= maxRetries) {
       // Check if user skipped this game
       if (isSkipped && isSkipped(gameTitle)) {
-        console.log(`${logPrefix} ⏭️ Skipping "${gameTitle}" - user chose to try again later`);
+        fileLogger.debug(`${logPrefix} ⏭️ Skipping "${gameTitle}" - user chose to try again later`);
         results[gameTitle] = [];
         setLoadingGames(prev => {
           const updated = new Set(prev);
@@ -168,13 +169,13 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           elapsedSeconds: (elapsedMs / 1000).toFixed(1),
           bucketSize: stuckBucket.length + 1,
         });
-        console.log(`${logPrefix} ⏱️ Search for "${gameTitle}" has been running for ${(elapsedMs / 1000).toFixed(1)}s - adding to stuck bucket for batch retry`);
+        fileLogger.debug(`${logPrefix} ⏱️ Search for "${gameTitle}" has been running for ${(elapsedMs / 1000).toFixed(1)}s - adding to stuck bucket for batch retry`);
         results[gameTitle] = [];
         
         // Add to stuck bucket instead of immediately adding to pending retries
         // We'll retry all stuck games together after all other games complete
         stuckBucket.push(gameTitle);
-        console.log(`${logPrefix} 📦 Added "${gameTitle}" to stuck bucket (${stuckBucket.length} games in bucket)`);
+        fileLogger.debug(`${logPrefix} 📦 Added "${gameTitle}" to stuck bucket (${stuckBucket.length} games in bucket)`);
         
         // Keep in loading state - we'll retry it later
         // Don't mark as skipped yet - let the batch retry handle it
@@ -185,12 +186,12 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
       try {
         if (retryCount > 0) {
           const backoffMs = Math.min(10000 * Math.pow(2, Math.min(retryCount - 1, 4)), 80000); // Cap at 80s
-          console.log(`${logPrefix} 🔄 Retry ${retryCount}/${maxRetries} for "${gameTitle}" after ${backoffMs}ms delay...`);
+          fileLogger.debug(`${logPrefix} 🔄 Retry ${retryCount}/${maxRetries} for "${gameTitle}" after ${backoffMs}ms delay...`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
           
           // Check again after backoff delay (user might have skipped during delay)
           if (isSkipped && isSkipped(gameTitle)) {
-            console.log(`${logPrefix} ⏭️ Skipping "${gameTitle}" after backoff - user chose to try again later`);
+            fileLogger.debug(`${logPrefix} ⏭️ Skipping "${gameTitle}" after backoff - user chose to try again later`);
             results[gameTitle] = [];
             setLoadingGames(prev => {
               const updated = new Set(prev);
@@ -208,7 +209,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           searchQuery = cleanedTitle !== gameTitle ? cleanedTitle : gameTitle;
         }
         
-        console.log(`${logPrefix} 📡 Calling searchGamesByName for "${searchQuery}" with fallbackToBGG=true`, {
+        fileLogger.debug(`${logPrefix} 📡 Calling searchGamesByName for "${searchQuery}" with fallbackToBGG=true`, {
           attempt: retryCount + 1,
           maxRetries,
           isCleaned: searchQuery === cleanedTitle && cleanedTitle !== gameTitle,
@@ -249,14 +250,14 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         
         // If no results with cleaned title and we haven't tried original, try original
         if ((!searchResults || searchResults.length === 0) && searchQuery === cleanedTitle && cleanedTitle !== gameTitle && !triedOriginal) {
-          console.log(`${logPrefix} 🔄 No results with cleaned title "${cleanedTitle}", trying original "${gameTitle}"...`);
+          fileLogger.debug(`${logPrefix} 🔄 No results with cleaned title "${cleanedTitle}", trying original "${gameTitle}"...`);
           triedOriginal = true;
           searchQuery = gameTitle;
           // Continue to retry with original title (this counts as retryCount 0 still, so no delay)
           continue;
         }
         
-        console.log(`${logPrefix} ✅ BGG search completed for "${gameTitle}"`, {
+        fileLogger.debug(`${logPrefix} ✅ BGG search completed for "${gameTitle}"`, {
           durationSeconds: searchAttemptDuration,
           resultCount: searchResults?.length || 0,
           attempt: retryCount + 1,
@@ -265,7 +266,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         // Process results and set timing data
         // Wrap in try-catch to ensure we always update loading state
         try {
-          console.log(`${logPrefix} 📊 BGG search results for "${gameTitle}":`, {
+          fileLogger.debug(`${logPrefix} 📊 BGG search results for "${gameTitle}":`, {
             resultCount: searchResults?.length || 0,
             firstResult: searchResults?.length > 0 ? searchResults[0]?.name : null,
             hasResults: !!(searchResults && searchResults.length > 0),
@@ -280,7 +281,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             // This ensures we've given BGG API multiple chances before showing "stuck" message
             if (firstFailureTime === null) {
               firstFailureTime = Date.now();
-              console.log(`${logPrefix} ⏱️ First failure for "${gameTitle}" at attempt ${retryCount + 1}`);
+              fileLogger.debug(`${logPrefix} ⏱️ First failure for "${gameTitle}" at attempt ${retryCount + 1}`);
             }
             
             // Only update the stuck timer start time after we've tried multiple times (retryCount >= 2 means 3+ attempts)
@@ -298,7 +299,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
                 }
                 return prev;
               });
-              console.log(`${logPrefix} ⏱️ "${gameTitle}" has failed ${retryCount + 1} times - stuck timer starts from first failure (${((Date.now() - firstFailureTime) / 1000).toFixed(1)}s ago)`);
+              fileLogger.debug(`${logPrefix} ⏱️ "${gameTitle}" has failed ${retryCount + 1} times - stuck timer starts from first failure (${((Date.now() - firstFailureTime) / 1000).toFixed(1)}s ago)`);
             }
             
             logger.warn(`⚠️ No results for "${gameTitle}" - adding to pending retries`, {
@@ -313,7 +314,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             if (addPendingRetry) {
               try {
                 await addPendingRetry(gameTitle);
-                console.log(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries (no results found - will retry later)`);
+                fileLogger.debug(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries (no results found - will retry later)`);
                 // Don't mark as stuck immediately - let the 30-second check handle it
                 // This prevents showing the stuck message too quickly
               } catch (retryError) {
@@ -375,7 +376,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           const thumbnailFetchDuration = ((Date.now() - thumbnailFetchStartTime) / 1000).toFixed(2);
           
           if (searchResults && searchResults.length > MAX_THUMBNAIL_FETCHES) {
-            console.log(`${logPrefix} ⚡ Fetched thumbnails for top ${MAX_THUMBNAIL_FETCHES} of ${searchResults.length} results (saved ${searchResults.length - MAX_THUMBNAIL_FETCHES} API calls)`);
+            fileLogger.debug(`${logPrefix} ⚡ Fetched thumbnails for top ${MAX_THUMBNAIL_FETCHES} of ${searchResults.length} results (saved ${searchResults.length - MAX_THUMBNAIL_FETCHES} API calls)`);
           }
           
           const totalGameDuration = ((Date.now() - gameSearchStartTime) / 1000).toFixed(2);
@@ -387,7 +388,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             resultCount: searchResults?.length || 0,
           };
           
-          console.log(`${logPrefix} ✅ Completed "${gameTitle}"`, {
+          fileLogger.debug(`${logPrefix} ✅ Completed "${gameTitle}"`, {
             totalDurationSeconds: totalGameDuration,
             searchDurationSeconds: searchAttemptDuration,
             thumbnailFetchDurationSeconds: thumbnailFetchDuration,
@@ -538,7 +539,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
                 resultCount: resultsWithThumbnails.length,
               });
               
-              console.log(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, type: ${matchType}, rank: ${bestMatch.rank || 'N/A'}, Firebase tries: ${tryCounts.firebaseTries}, BGG tries: ${tryCounts.bggTries})`);
+              fileLogger.debug(`${logPrefix} Auto-selected BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, type: ${matchType}, rank: ${bestMatch.rank || 'N/A'}, Firebase tries: ${tryCounts.firebaseTries}, BGG tries: ${tryCounts.bggTries})`);
               
               selected[gameTitle] = bestMatch.id;
               setSelectedGames({ ...selected });
@@ -548,13 +549,13 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
                 try {
                   const { removePendingRetries } = await import('./pendingGameRetries');
                   await removePendingRetries([gameTitle]);
-                  console.log(`${logPrefix} ✅ Removed "${gameTitle}" from pending retries (successfully found)`);
+                  fileLogger.debug(`${logPrefix} ✅ Removed "${gameTitle}" from pending retries (successfully found)`);
                 } catch (removeError) {
                   console.error(`${logPrefix} ❌ Error removing "${gameTitle}" from pending retries:`, removeError);
                 }
               }
               
-              console.log(`${logPrefix} Updated selectedGames, total selected: ${Object.keys(selected).length + 1}`);
+              fileLogger.debug(`${logPrefix} Updated selectedGames, total selected: ${Object.keys(selected).length + 1}`);
             } else {
               logger.warn(`⚠️ Found "${gameTitle}" but match quality is poor - requires manual selection`, {
                 gameTitle,
@@ -573,7 +574,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
               console.warn(`${logPrefix} ⚠️ Poor match for "${gameTitle}" - found "${bestMatch.name}" (score: ${matchScore}, type: ${matchType}, min required: ${minScore}) - NOT auto-selecting, requires manual selection`);
             }
             
-            console.log(`${logPrefix} ${isGoodMatch ? 'Auto-selected' : 'Found'} BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, type: ${matchType}, rank: ${bestMatch.rank || 'N/A'})`);
+            fileLogger.debug(`${logPrefix} ${isGoodMatch ? 'Auto-selected' : 'Found'} BGG ID ${bestMatch.id} ("${bestMatch.name}") for "${gameTitle}" (score: ${matchScore}, type: ${matchType}, rank: ${bestMatch.rank || 'N/A'})`);
           } else {
             const tryCounts = gameTryCounts[gameTitle] || { firebaseTries: 0, bggTries: 0, totalTries: 0 };
             logger.warn(`⚠️ No results for "${gameTitle}"`, {
@@ -674,7 +675,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             };
             // Keep in loading state - don't mark as failed (user can retry later)
             // But still log timing
-            console.log(`${logPrefix} ⏱️ Timing for "${gameTitle}" (rate limited):`, gameTimings[gameTitle]);
+            fileLogger.debug(`${logPrefix} ⏱️ Timing for "${gameTitle}" (rate limited):`, gameTimings[gameTitle]);
             break; // Move to next game but keep this one loading
           }
         } else {
@@ -695,7 +696,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             // Save to pending retries for background retry
             try {
               await addPendingRetry(gameTitle);
-              console.log(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries for background retry`);
+              fileLogger.debug(`${logPrefix} 💾 Saved "${gameTitle}" to pending retries for background retry`);
               // No alert - BGG API retries with exponential backoff, so failures are expected and will retry automatically
             } catch (retryError) {
               console.error(`${logPrefix} ❌ Error saving "${gameTitle}" to pending retries:`, retryError);
@@ -721,7 +722,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             
             // Update search results to show "No matches found"
             setSearchResults({ ...results });
-            console.log(`${logPrefix} ⏱️ Timing for "${gameTitle}" (failed):`, gameTimings[gameTitle]);
+            fileLogger.debug(`${logPrefix} ⏱️ Timing for "${gameTitle}" (failed):`, gameTimings[gameTitle]);
             break; // Move to next game
           }
         }
@@ -730,7 +731,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     
     // Log timing for this game (whether successful or failed)
     if (gameTimings[gameTitle]) {
-      console.log(`${logPrefix} ⏱️ Final timing for "${gameTitle}":`, gameTimings[gameTitle]);
+      fileLogger.debug(`${logPrefix} ⏱️ Final timing for "${gameTitle}":`, gameTimings[gameTitle]);
     } else {
       // This shouldn't happen now, but log if it does
       const totalGameDuration = ((Date.now() - gameSearchStartTime) / 1000).toFixed(2);
@@ -749,7 +750,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     // Check if results exist and are empty (not just undefined/null)
     if ((!results[gameTitle] || results[gameTitle].length === 0) && !zeroResultGames.includes(gameTitle)) {
       zeroResultGames.push(gameTitle);
-      console.log(`${logPrefix} 📦 Added "${gameTitle}" to zero-result games bucket for alternative strategy retry (${zeroResultGames.length} games)`);
+      fileLogger.debug(`${logPrefix} 📦 Added "${gameTitle}" to zero-result games bucket for alternative strategy retry (${zeroResultGames.length} games)`);
     }
   }
 
@@ -773,7 +774,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
     ? ((games.length / parseFloat(totalSearchDuration)) * 60).toFixed(2)
     : '0';
   
-  console.log(`${logPrefix} ✅ Completed searching all games. Summary:`, {
+  fileLogger.debug(`${logPrefix} ✅ Completed searching all games. Summary:`, {
     totalGames: games.length,
     gamesWithResults,
     gamesWithNoResults,
@@ -795,24 +796,24 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
   });
   
   // Log detailed timing for each game
-  console.log(`${logPrefix} 📊 Detailed timing breakdown:`, gameTimings);
+  fileLogger.debug(`${logPrefix} 📊 Detailed timing breakdown:`, gameTimings);
 
   setSearchResults(results);
   setSelectedGames(selected);
   
   // Retry all stuck games in the bucket now that other games are done
   if (stuckBucket.length > 0) {
-    console.log(`${logPrefix} 🔄 Retrying ${stuckBucket.length} stuck games from bucket...`);
+    fileLogger.debug(`${logPrefix} 🔄 Retrying ${stuckBucket.length} stuck games from bucket...`);
     const bucketRetryStartTime = Date.now();
     
     for (const stuckGameTitle of stuckBucket) {
       // Skip if user manually skipped this game
       if (isSkipped && isSkipped(stuckGameTitle)) {
-        console.log(`${logPrefix} ⏭️ Skipping bucket retry for "${stuckGameTitle}" - user chose to skip`);
+        fileLogger.debug(`${logPrefix} ⏭️ Skipping bucket retry for "${stuckGameTitle}" - user chose to skip`);
         continue;
       }
       
-      console.log(`${logPrefix} 🔄 Retrying stuck game: "${stuckGameTitle}"`);
+      fileLogger.debug(`${logPrefix} 🔄 Retrying stuck game: "${stuckGameTitle}"`);
       
       // Mark as loading again
       setLoadingGames(prev => new Set(prev).add(stuckGameTitle));
@@ -827,7 +828,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         
         for (const query of queriesToTry) {
           try {
-            console.log(`${logPrefix} 📡 Bucket retry: searching for "${query}" (from "${stuckGameTitle}")`);
+            fileLogger.debug(`${logPrefix} 📡 Bucket retry: searching for "${query}" (from "${stuckGameTitle}")`);
             const bucketRetryResponse = await searchGamesByName(query, true);
             bucketRetryResults = (bucketRetryResponse && typeof bucketRetryResponse === 'object' && 'results' in bucketRetryResponse) 
               ? bucketRetryResponse.results 
@@ -849,7 +850,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             
             if (bucketRetryResults && bucketRetryResults.length > 0) {
               bucketRetrySuccess = true;
-              console.log(`${logPrefix} ✅ Bucket retry SUCCESS for "${stuckGameTitle}" - found ${bucketRetryResults.length} results`);
+              fileLogger.debug(`${logPrefix} ✅ Bucket retry SUCCESS for "${stuckGameTitle}" - found ${bucketRetryResults.length} results`);
               break;
             }
           } catch (queryError) {
@@ -913,7 +914,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             selected[stuckGameTitle] = bestMatch.id;
             setSelectedGames({ ...selected });
             
-            console.log(`${logPrefix} ✅ Bucket retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${stuckGameTitle}"`);
+            fileLogger.debug(`${logPrefix} ✅ Bucket retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${stuckGameTitle}"`);
             performanceStats.gamesFound++;
             
             // Remove from pending retries since we successfully found it
@@ -921,7 +922,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
               try {
                 const { removePendingRetries } = await import('./pendingGameRetries');
                 await removePendingRetries([stuckGameTitle]);
-                console.log(`${logPrefix} ✅ Removed "${stuckGameTitle}" from pending retries (bucket retry succeeded)`);
+                fileLogger.debug(`${logPrefix} ✅ Removed "${stuckGameTitle}" from pending retries (bucket retry succeeded)`);
               } catch (removeError) {
                 console.error(`${logPrefix} ❌ Error removing "${stuckGameTitle}" from pending retries:`, removeError);
               }
@@ -929,13 +930,13 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           }
         } else {
           // Bucket retry also failed - add to pending retries for background retry
-          console.log(`${logPrefix} ⚠️ Bucket retry failed for "${stuckGameTitle}" - adding to pending retries`);
+          fileLogger.debug(`${logPrefix} ⚠️ Bucket retry failed for "${stuckGameTitle}" - adding to pending retries`);
           results[stuckGameTitle] = [];
           
           if (addPendingRetry) {
             try {
               await addPendingRetry(stuckGameTitle);
-              console.log(`${logPrefix} 💾 Saved "${stuckGameTitle}" to pending retries (bucket retry failed)`);
+              fileLogger.debug(`${logPrefix} 💾 Saved "${stuckGameTitle}" to pending retries (bucket retry failed)`);
             } catch (retryError) {
               console.error(`${logPrefix} ❌ Error saving "${stuckGameTitle}" to pending retries:`, retryError);
             }
@@ -951,7 +952,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         if (addPendingRetry) {
           try {
             await addPendingRetry(stuckGameTitle);
-            console.log(`${logPrefix} 💾 Saved "${stuckGameTitle}" to pending retries (bucket retry error)`);
+            fileLogger.debug(`${logPrefix} 💾 Saved "${stuckGameTitle}" to pending retries (bucket retry error)`);
           } catch (retryError) {
             console.error(`${logPrefix} ❌ Error saving "${stuckGameTitle}" to pending retries:`, retryError);
           }
@@ -975,18 +976,18 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
       totalStuck: stuckBucket.length,
       durationSeconds: bucketRetryDuration,
     });
-    console.log(`${logPrefix} ✅ Bucket retry complete: ${bucketSuccessCount}/${stuckBucket.length} games resolved (${bucketRetryDuration}s)`);
+    fileLogger.debug(`${logPrefix} ✅ Bucket retry complete: ${bucketSuccessCount}/${stuckBucket.length} games resolved (${bucketRetryDuration}s)`);
   }
   
   // Retry zero-result games with alternative search strategies
   if (zeroResultGames.length > 0) {
-    console.log(`${logPrefix} 🔄 Retrying ${zeroResultGames.length} zero-result games with alternative strategies...`);
+    fileLogger.debug(`${logPrefix} 🔄 Retrying ${zeroResultGames.length} zero-result games with alternative strategies...`);
     const strategyRetryStartTime = Date.now();
     
     for (const zeroResultGameTitle of zeroResultGames) {
       // Skip if user manually skipped this game
       if (isSkipped && isSkipped(zeroResultGameTitle)) {
-        console.log(`${logPrefix} ⏭️ Skipping strategy retry for "${zeroResultGameTitle}" - user chose to skip`);
+        fileLogger.debug(`${logPrefix} ⏭️ Skipping strategy retry for "${zeroResultGameTitle}" - user chose to skip`);
         continue;
       }
       
@@ -995,7 +996,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         continue;
       }
       
-      console.log(`${logPrefix} 🔄 Retrying "${zeroResultGameTitle}" with alternative strategies...`);
+      fileLogger.debug(`${logPrefix} 🔄 Retrying "${zeroResultGameTitle}" with alternative strategies...`);
       
       // Mark as loading again
       setLoadingGames(prev => new Set(prev).add(zeroResultGameTitle));
@@ -1009,7 +1010,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         // Try each alternative strategy
         for (const strategy of strategies) {
           try {
-            console.log(`${logPrefix} 📡 Strategy retry: searching for "${strategy}" (from "${zeroResultGameTitle}")`);
+            fileLogger.debug(`${logPrefix} 📡 Strategy retry: searching for "${strategy}" (from "${zeroResultGameTitle}")`);
             const strategyRetryResponse = await searchGamesByName(strategy, true);
             strategyRetryResults = (strategyRetryResponse && typeof strategyRetryResponse === 'object' && 'results' in strategyRetryResponse) 
               ? strategyRetryResponse.results 
@@ -1031,7 +1032,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
             
             if (strategyRetryResults && strategyRetryResults.length > 0) {
               strategyRetrySuccess = true;
-              console.log(`${logPrefix} ✅ Strategy retry SUCCESS for "${zeroResultGameTitle}" using strategy "${strategy}" - found ${strategyRetryResults.length} results`);
+              fileLogger.debug(`${logPrefix} ✅ Strategy retry SUCCESS for "${zeroResultGameTitle}" using strategy "${strategy}" - found ${strategyRetryResults.length} results`);
               break;
             }
           } catch (strategyError) {
@@ -1149,7 +1150,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
                 rank: bestMatch.rank || 'N/A',
               });
               
-              console.log(`${logPrefix} ✅ Strategy retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${zeroResultGameTitle}" (score: ${matchScore}, type: ${matchType})`);
+              fileLogger.debug(`${logPrefix} ✅ Strategy retry auto-selected "${bestMatch.name}" (ID: ${bestMatch.id}) for "${zeroResultGameTitle}" (score: ${matchScore}, type: ${matchType})`);
               performanceStats.gamesFound++;
               
               // Remove from pending retries since we successfully found it
@@ -1157,7 +1158,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
                 try {
                   const { removePendingRetries } = await import('./pendingGameRetries');
                   await removePendingRetries([zeroResultGameTitle]);
-                  console.log(`${logPrefix} ✅ Removed "${zeroResultGameTitle}" from pending retries (strategy retry succeeded)`);
+                  fileLogger.debug(`${logPrefix} ✅ Removed "${zeroResultGameTitle}" from pending retries (strategy retry succeeded)`);
                 } catch (removeError) {
                   console.error(`${logPrefix} ❌ Error removing "${zeroResultGameTitle}" from pending retries:`, removeError);
                 }
@@ -1178,13 +1179,13 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
           }
         } else {
           // Strategy retry also failed - add to pending retries for background retry
-          console.log(`${logPrefix} ⚠️ Strategy retry failed for "${zeroResultGameTitle}" - adding to pending retries`);
+          fileLogger.debug(`${logPrefix} ⚠️ Strategy retry failed for "${zeroResultGameTitle}" - adding to pending retries`);
           results[zeroResultGameTitle] = [];
           
           if (addPendingRetry) {
             try {
               await addPendingRetry(zeroResultGameTitle);
-              console.log(`${logPrefix} 💾 Saved "${zeroResultGameTitle}" to pending retries (strategy retry failed)`);
+              fileLogger.debug(`${logPrefix} 💾 Saved "${zeroResultGameTitle}" to pending retries (strategy retry failed)`);
             } catch (retryError) {
               console.error(`${logPrefix} ❌ Error saving "${zeroResultGameTitle}" to pending retries:`, retryError);
             }
@@ -1200,7 +1201,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
         if (addPendingRetry) {
           try {
             await addPendingRetry(zeroResultGameTitle);
-            console.log(`${logPrefix} 💾 Saved "${zeroResultGameTitle}" to pending retries (strategy retry error)`);
+            fileLogger.debug(`${logPrefix} 💾 Saved "${zeroResultGameTitle}" to pending retries (strategy retry error)`);
           } catch (retryError) {
             console.error(`${logPrefix} ❌ Error saving "${zeroResultGameTitle}" to pending retries:`, retryError);
           }
@@ -1224,7 +1225,7 @@ export const searchForAllGames = async (games, callbacks, source = 'game_import'
       totalZeroResult: zeroResultGames.length,
       durationSeconds: strategyRetryDuration,
     });
-    console.log(`${logPrefix} ✅ Strategy retry complete: ${strategySuccessCount}/${zeroResultGames.length} games resolved (${strategyRetryDuration}s)`);
+    fileLogger.debug(`${logPrefix} ✅ Strategy retry complete: ${strategySuccessCount}/${zeroResultGames.length} games resolved (${strategyRetryDuration}s)`);
   }
   
   // Clear processing index if callback provided

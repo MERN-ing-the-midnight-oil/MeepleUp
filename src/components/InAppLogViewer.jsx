@@ -13,6 +13,8 @@ import {
   Alert,
 } from 'react-native';
 import logger from '../utils/inAppLogger';
+import debugLogger from '../utils/logger';
+import { horizontalScrollViewProps } from '../utils/horizontalScrollViewProps';
 import { theme } from '../utils/theme';
 
 const InAppLogViewer = ({ visible, onClose }) => {
@@ -78,7 +80,7 @@ const InAppLogViewer = ({ visible, onClose }) => {
         } catch (clipError) {
           // Fallback: try to use Share API
           if (__DEV__) {
-            console.log('Clipboard API not available, using Share instead');
+            debugLogger.debug('Clipboard API not available, using Share instead');
           }
         }
       } else {
@@ -91,7 +93,7 @@ const InAppLogViewer = ({ visible, onClose }) => {
         } catch (clipError) {
           // Clipboard not available, will use Share instead
           if (__DEV__) {
-            console.log('Clipboard not available, using Share instead');
+            debugLogger.debug('Clipboard not available, using Share instead');
           }
         }
       }
@@ -165,7 +167,7 @@ const InAppLogViewer = ({ visible, onClose }) => {
         </View>
 
         <View style={styles.filters}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} {...horizontalScrollViewProps}>
             {['all', 'info', 'warn', 'error', 'debug'].map(level => (
               <Pressable
                 key={level}

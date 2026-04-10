@@ -6,6 +6,7 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
+import logger from '../utils/logger';
 
 /**
  * Calculate and store match scores for a game for all members of a meepleup
@@ -72,7 +73,7 @@ export const calculateMatchScoresForGame = async (eventId, gameId, game = null, 
       .collection('members').get();
 
     if (membersSnapshot.empty) {
-      console.log('[MatchScores] No members found for meepleup');
+      logger.debug('[MatchScores] No members found for meepleup');
       return;
     }
 
@@ -163,7 +164,7 @@ export const calculateMatchScoresForGame = async (eventId, gameId, game = null, 
         updatedAt: firebase.firestore.Timestamp.now(),
       }, { merge: true });
 
-      console.log(`[MatchScores] Calculated scores for ${Object.keys(updates).length} members for game ${gameIdStr}`);
+      logger.debug(`[MatchScores] Calculated scores for ${Object.keys(updates).length} members for game ${gameIdStr}`);
     }
   } catch (error) {
     console.error('[MatchScores] Error calculating match scores:', error);
@@ -191,7 +192,7 @@ export const calculateMatchScoresForUser = async (eventId, userId, userCollectio
       .collection('members').get();
 
     if (membersSnapshot.empty) {
-      console.log('[MatchScores] No members found for meepleup');
+      logger.debug('[MatchScores] No members found for meepleup');
       return;
     }
 
@@ -230,7 +231,7 @@ export const calculateMatchScoresForUser = async (eventId, userId, userCollectio
       }
     }
 
-    console.log(`[MatchScores] Found ${allGames.size} unique games in meepleup`);
+    logger.debug(`[MatchScores] Found ${allGames.size} unique games in meepleup`);
 
     // Calculate score for each game
     // Use batches to avoid Firestore limits (500 operations per batch)
@@ -309,7 +310,7 @@ export const calculateMatchScoresForUser = async (eventId, userId, userCollectio
     }
 
     if (totalUpdated > 0) {
-      console.log(`[MatchScores] Calculated scores for ${totalUpdated} games for user ${userId}`);
+      logger.debug(`[MatchScores] Calculated scores for ${totalUpdated} games for user ${userId}`);
     }
   } catch (error) {
     console.error('[MatchScores] Error calculating match scores for user:', error);

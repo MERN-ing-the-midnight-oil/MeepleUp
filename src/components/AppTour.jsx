@@ -16,6 +16,7 @@ import { theme, commonStyles } from '../utils/theme';
 import { useResponsive } from '../utils/responsive';
 import storage from '../utils/storage';
 import { useAuth } from '../context/AuthContext';
+import logger from '../utils/logger';
 
 const TOUR_STORAGE_KEY = 'meepleup_tour_completed';
 const TOUR_VERSION = 1; // Increment to show tour again after updates
@@ -400,7 +401,7 @@ export const TourProvider = ({ children, currentScreen }) => {
     if (step.highlight) {
       // This would need to be implemented per screen
       // For now, we'll just log it
-      console.log('Tour step:', step.id, 'highlight:', step.highlight);
+      logger.debug('Tour step:', step.id, 'highlight:', step.highlight);
     }
   };
 

@@ -1,6 +1,6 @@
 {
   "name": "MeepleUp",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "A platform for managing board game events and collections.",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
@@ -16,9 +16,9 @@
     "build:ios:local": "eas build --platform ios --profile preview --local",
     "build:ios:preview": "eas build --platform ios --profile preview --local",
     "build:ios:production": "eas build --platform ios --profile production --local",
-    "build:ios:store": "eas build --platform ios --profile production",
-    "build:android:store": "eas build --platform android --profile production",
-    "build:all:store": "eas build --platform all --profile production",
+    "build:ios:store": "eas build --platform ios --profile production --auto-submit",
+    "build:android:store": "eas build --platform android --profile production --auto-submit",
+    "build:all:store": "eas build --platform all --profile production --auto-submit",
     "submit:ios": "eas submit --platform ios --profile production",
     "type-check": "tsc --noEmit",
     "type-check:watch": "tsc --noEmit --watch"

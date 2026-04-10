@@ -1,6 +1,7 @@
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { Platform } from 'react-native';
+import logger from './logger';
 
 // Note: Email sending requires a Cloud Function to be deployed
 // See EMAIL_SETUP.md for instructions on setting up the email Cloud Function
@@ -20,7 +21,7 @@ try {
     });
   }
 } catch (error) {
-  console.log('[notifications] expo-notifications not available, push notifications will be limited');
+  logger.debug('[notifications] expo-notifications not available, push notifications will be limited');
 }
 
 /**
@@ -63,7 +64,7 @@ export const createNotification = async (userId, notificationData) => {
     };
 
     await notificationsRef.doc(notificationId).set(notification);
-    console.log(`Notification created for user ${userId}:`, notification);
+    logger.debug(`Notification created for user ${userId}:`, notification);
     return notificationId;
   } catch (error) {
     console.error('Error creating notification:', error);
@@ -187,7 +188,7 @@ export const notifyGameAdditions = async (userId, userName, gameCount) => {
 
     if (notificationCount > 0) {
       await batch.commit();
-      console.log(`Created ${notificationCount} game addition notifications for user ${userId}`);
+      logger.debug(`Created ${notificationCount} game addition notifications for user ${userId}`);
     }
   } catch (error) {
     console.error('Error notifying about game additions:', error);
@@ -249,7 +250,7 @@ export const notifyMeepleUpMembers = async (groupId, excludeUserId, notification
 
     if (notificationCount > 0) {
       await batch.commit();
-      console.log(`Created ${notificationCount} notifications for MeepleUp ${groupId}`);
+      logger.debug(`Created ${notificationCount} notifications for MeepleUp ${groupId}`);
     }
   } catch (error) {
     console.error('Error notifying MeepleUp members:', error);
@@ -363,7 +364,7 @@ export const notifyDiscussionActivity = async (groupId, excludeUserId, notificat
 
     if (notificationCount > 0) {
       await batch.commit();
-      console.log(`Created ${notificationCount} Discussion notifications for MeepleUp ${groupId}`);
+      logger.debug(`Created ${notificationCount} Discussion notifications for MeepleUp ${groupId}`);
     }
   } catch (error) {
     console.error('Error notifying Discussion activity:', error);
@@ -389,7 +390,7 @@ export const notifyGameOwner = async (
   gameName,
   groupId
 ) => {
-  console.log('[notifyGameOwner] Starting notification process:', {
+  logger.debug('[notifyGameOwner] Starting notification process:', {
     ownerId,
     interestedUserId,
     interestedUserName,
@@ -405,7 +406,7 @@ export const notifyGameOwner = async (
 
   // Don't notify if user commented on their own game
   if (ownerId === interestedUserId) {
-    console.log('[notifyGameOwner] Skipping: user is commenting on their own game');
+    logger.debug('[notifyGameOwner] Skipping: user is commenting on their own game');
     return;
   }
 
@@ -417,7 +418,7 @@ export const notifyGameOwner = async (
 
   try {
     // Check if both users are members of the MeepleUp
-    console.log('[notifyGameOwner] Checking MeepleUp membership for group:', groupId);
+    logger.debug('[notifyGameOwner] Checking MeepleUp membership for group:', groupId);
     const groupRef = db.collection('gamingGroups').doc(groupId);
     const groupDoc = await groupRef.get();
     
@@ -429,13 +430,13 @@ export const notifyGameOwner = async (
     const groupData = groupDoc.data();
     const memberIds = groupData.memberIds || [];
     
-    console.log('[notifyGameOwner] MeepleUp members:', memberIds);
+    logger.debug('[notifyGameOwner] MeepleUp members:', memberIds);
     
     // Check if both users are members
     const ownerIsMember = memberIds.includes(ownerId);
     const commenterIsMember = memberIds.includes(interestedUserId);
     
-    console.log('[notifyGameOwner] Membership check:', {
+    logger.debug('[notifyGameOwner] Membership check:', {
       ownerIsMember,
       commenterIsMember,
       ownerId,
@@ -443,7 +444,7 @@ export const notifyGameOwner = async (
     });
     
     if (!ownerIsMember || !commenterIsMember) {
-      console.log(`[notifyGameOwner] Skipping notification: users do not share MeepleUp ${groupId}`, {
+      logger.debug(`[notifyGameOwner] Skipping notification: users do not share MeepleUp ${groupId}`, {
         ownerIsMember,
         commenterIsMember
       });
@@ -451,17 +452,17 @@ export const notifyGameOwner = async (
     }
 
     // Get owner's notification preferences
-    console.log('[notifyGameOwner] Fetching notification preferences for owner:', ownerId);
+    logger.debug('[notifyGameOwner] Fetching notification preferences for owner:', ownerId);
     const preferences = await getUserNotificationPreferences(ownerId);
-    console.log('[notifyGameOwner] Notification preferences:', preferences);
+    logger.debug('[notifyGameOwner] Notification preferences:', preferences);
 
     if (!isNotificationEnabled(preferences, 'gameMarking')) {
-      console.log('[notifyGameOwner] Skipping: gameMarking notification is disabled for user:', ownerId);
+      logger.debug('[notifyGameOwner] Skipping: gameMarking notification is disabled for user:', ownerId);
       return;
     }
 
     const message = `${interestedUserName || 'Someone'} has expressed interest in ${gameName} for your next meeting`;
-    console.log('[notifyGameOwner] Creating notification with message:', message);
+    logger.debug('[notifyGameOwner] Creating notification with message:', message);
 
     // Create in-app notification
     const notificationId = await createNotification(ownerId, {
@@ -472,7 +473,7 @@ export const notifyGameOwner = async (
       message: message,
     });
 
-    console.log('[notifyGameOwner] Notification created with ID:', notificationId);
+    logger.debug('[notifyGameOwner] Notification created with ID:', notificationId);
 
     // Send push notification
     try {
@@ -491,22 +492,22 @@ export const notifyGameOwner = async (
 
     // Send email if email notifications are enabled
     if (preferences.gameMarkingEmail === true && notificationId) {
-      console.log('[notifyGameOwner] Sending email notification');
+      logger.debug('[notifyGameOwner] Sending email notification');
       try {
         await sendGameRequestEmail(ownerId, interestedUserName, gameName, groupId);
-        console.log('[notifyGameOwner] Email notification sent successfully');
+        logger.debug('[notifyGameOwner] Email notification sent successfully');
       } catch (emailError) {
         console.error('[notifyGameOwner] Error sending game request email:', emailError);
         // Don't fail the notification if email fails
       }
     } else {
-      console.log('[notifyGameOwner] Email notifications disabled or notificationId missing:', {
+      logger.debug('[notifyGameOwner] Email notifications disabled or notificationId missing:', {
         gameMarkingEmail: preferences.gameMarkingEmail,
         notificationId
       });
     }
 
-    console.log(`[notifyGameOwner] Successfully sent notification to owner ${ownerId} for game ${gameName}`);
+    logger.debug(`[notifyGameOwner] Successfully sent notification to owner ${ownerId} for game ${gameName}`);
   } catch (error) {
     console.error('[notifyGameOwner] Error notifying game owner:', error);
     console.error('[notifyGameOwner] Error stack:', error.stack);
@@ -584,7 +585,7 @@ const sendGameRequestEmail = async (ownerId, interestedUserName, gameName, group
       }
 
       const result = await response.json().catch(() => ({}));
-      console.log(`Game request email sent to ${ownerEmail}`, result);
+      logger.debug(`Game request email sent to ${ownerEmail}`, result);
     } catch (error) {
       // If Cloud Function doesn't exist or fails, log but don't throw
       // This allows the in-app notification to still be created
@@ -697,7 +698,7 @@ export const sendRSVPUpdateEmail = async (memberId, organizerName, newStatus, da
       }
 
       const result = await response.json().catch(() => ({}));
-      console.log(`RSVP update email sent to ${memberEmail}`, result);
+      logger.debug(`RSVP update email sent to ${memberEmail}`, result);
     } catch (error) {
       console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
     }
@@ -767,7 +768,7 @@ export const sendMeepleupArchiveEmail = async (memberId, organizerName, groupId,
       }
 
       const result = await response.json().catch(() => ({}));
-      console.log(`Archive email sent to ${memberEmail}`, result);
+      logger.debug(`Archive email sent to ${memberEmail}`, result);
     } catch (error) {
       console.warn('Could not send archive email (Cloud Function may not be deployed):', error.message);
     }
@@ -801,7 +802,7 @@ const sendPushNotification = async (userId, message, data = {}) => {
     const pushToken = userData.pushToken || userData.expoPushToken;
 
     if (!pushToken) {
-      console.log(`[sendPushNotification] User ${userId} does not have a push token registered`);
+      logger.debug(`[sendPushNotification] User ${userId} does not have a push token registered`);
       // Still try to send a local notification if on the same device
       if (Platform.OS !== 'web' && Notifications && Notifications.scheduleNotificationAsync) {
         try {
@@ -813,7 +814,7 @@ const sendPushNotification = async (userId, message, data = {}) => {
             },
             trigger: null, // Show immediately
           });
-          console.log('[sendPushNotification] Local notification sent');
+          logger.debug('[sendPushNotification] Local notification sent');
         } catch (localError) {
           console.error('[sendPushNotification] Error sending local notification:', localError);
         }
@@ -844,7 +845,7 @@ const sendPushNotification = async (userId, message, data = {}) => {
 
       const result = await response.json();
       if (result.data?.status === 'ok') {
-        console.log(`[sendPushNotification] Push notification sent successfully to ${userId}`);
+        logger.debug(`[sendPushNotification] Push notification sent successfully to ${userId}`);
       } else {
         console.warn(`[sendPushNotification] Push notification may have failed:`, result);
       }
@@ -1125,7 +1126,7 @@ const sendMentionEmail = async (recipientId, senderName, postContent, groupName,
       }
 
       const result = await response.json().catch(() => ({}));
-      console.log(`Mention email sent to ${recipientEmail}`, result);
+      logger.debug(`Mention email sent to ${recipientEmail}`, result);
     } catch (error) {
       console.warn('Could not send email (Cloud Function may not be deployed):', error.message);
     }
@@ -1186,7 +1187,7 @@ const sendMentionSMS = async (recipientId, senderName, postContent, groupName, g
       }
 
       const result = await response.json().catch(() => ({}));
-      console.log(`Mention SMS sent to ${phoneNumber}`, result);
+      logger.debug(`Mention SMS sent to ${phoneNumber}`, result);
     } catch (error) {
       console.warn('Could not send SMS (Cloud Function may not be deployed):', error.message);
     }

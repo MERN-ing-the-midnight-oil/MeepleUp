@@ -6,6 +6,7 @@ import { useCollections } from '../context/CollectionsContext';
 import Input from './common/Input';
 import GameCard, { GameCardView } from './GameCard';
 import { theme } from '../utils/theme';
+import logger from '../utils/logger';
 
 /** Wrapper that passes only bridge-safe props to GameCardView (no ref/framework extras). Avoid nesting Pressable. */
 function GridGameCard({ gamePayload, preloadedBggDataPayload, gameId, onPress, shouldLoadImage, userId }) {
@@ -499,7 +500,7 @@ const GameCollectionView = ({
     renderStartTime.current = performance.now();
   }, [games]);
   
-  console.log('[GameCollectionView] Component rendering', {
+  logger.debug('[GameCollectionView] Component rendering', {
     gamesCount: Array.isArray(games) ? games.length : 0,
     showMatchScores,
     showOwners,
@@ -587,9 +588,9 @@ const GameCollectionView = ({
   // Enrich games with category data
   const enrichedGames = useMemo(() => {
     const startTime = performance.now();
-    console.log('[GameCollectionView] enrichingGames useMemo running', { gamesCount: Array.isArray(games) ? games.length : 0 });
+    logger.debug('[GameCollectionView] enrichingGames useMemo running', { gamesCount: Array.isArray(games) ? games.length : 0 });
     if (!Array.isArray(games) || games.length === 0) {
-      console.log('[GameCollectionView] No games to enrich');
+      logger.debug('[GameCollectionView] No games to enrich');
       return [];
     }
     
@@ -629,7 +630,7 @@ const GameCollectionView = ({
     });
     
     const enrichTime = performance.now() - startTime;
-    console.log('[GameCollectionView] enrichedGames complete', { 
+    logger.debug('[GameCollectionView] enrichedGames complete', { 
       count: enriched.length,
       timeMs: enrichTime.toFixed(2),
     });
@@ -639,7 +640,7 @@ const GameCollectionView = ({
   // Filter games based on all filters
   const filteredGames = useMemo(() => {
     const startTime = performance.now();
-    console.log('[GameCollectionView] filteredGames useMemo running', {
+    logger.debug('[GameCollectionView] filteredGames useMemo running', {
       enrichedGamesCount: Array.isArray(enrichedGames) ? enrichedGames.length : 0,
       searchQuery,
       selectedCategoriesCount: selectedCategories.length,
@@ -654,7 +655,7 @@ const GameCollectionView = ({
     });
     
     if (!Array.isArray(enrichedGames) || enrichedGames.length === 0) {
-      console.log('[GameCollectionView] No enriched games to filter');
+      logger.debug('[GameCollectionView] No enriched games to filter');
       return [];
     }
     
@@ -669,7 +670,7 @@ const GameCollectionView = ({
         return rankA - rankB; // Ascending order (lower rank = better)
       });
       const filterTime = performance.now() - startTime;
-      console.log('[GameCollectionView] Browse all mode - showing all games sorted by rank', { 
+      logger.debug('[GameCollectionView] Browse all mode - showing all games sorted by rank', { 
         count: filtered.length,
         timeMs: filterTime.toFixed(2),
       });
@@ -798,7 +799,7 @@ const GameCollectionView = ({
     }
 
     const filterTime = performance.now() - startTime;
-    console.log('[GameCollectionView] filteredGames complete', { 
+    logger.debug('[GameCollectionView] filteredGames complete', { 
       originalCount: enrichedGames.length,
       filteredCount: filtered.length,
       browseAllMode,
@@ -1106,14 +1107,14 @@ const GameCollectionView = ({
     );
   }, [showMatchScores, matchScores, onGamePress, handleGamePress, width, userId]);
 
-  console.log('[GameCollectionView] About to render', {
+  logger.debug('[GameCollectionView] About to render', {
     showResults,
     filteredGamesCount: filteredGames.length,
     hasHeaderComponent: !!headerComponent,
   });
 
   useEffect(() => {
-    console.log('[GameCollectionView] useEffect - component mounted/updated', {
+    logger.debug('[GameCollectionView] useEffect - component mounted/updated', {
       gamesCount: games.length,
       enrichedGamesCount: enrichedGames.length,
       filteredGamesCount: filteredGames.length,
@@ -1132,7 +1133,7 @@ const GameCollectionView = ({
         scrollEventThrottle={16}
       >
         {headerComponent && (() => {
-          console.log('[GameCollectionView] Rendering headerComponent');
+          logger.debug('[GameCollectionView] Rendering headerComponent');
           try {
             return headerComponent;
           } catch (error) {

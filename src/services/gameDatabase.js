@@ -6,6 +6,7 @@
 import { db, auth } from '../config/firebase';
 import firebase from 'firebase/compat/app';
 import { ensureSerializableId, ensureStringOrNull } from '../utils/helpers';
+import logger from '../utils/logger';
 
 const GAMES_COLLECTION = 'games';
 const GAMES_INDEX_COLLECTION = 'games_index'; // For faster searches
@@ -29,7 +30,7 @@ export async function searchGamesByName(query, limit = 10) {
   // Circuit breaker: skip Firestore if it's been disabled due to failures
   if (firestoreDisabled) {
     if (__DEV__) {
-      console.log('[Game Database] Firestore disabled due to previous failures, skipping');
+      logger.debug('[Game Database] Firestore disabled due to previous failures, skipping');
     }
     return [];
   }
@@ -52,12 +53,12 @@ export async function searchGamesByName(query, limit = 10) {
     if (!currentUser) {
       if (__DEV__) {
         console.warn('[Game Database] User not authenticated, Firestore rules may block query');
-        console.log('[Game Database] Auth state:', auth ? 'exists' : 'null');
+        logger.debug('[Game Database] Auth state:', auth ? 'exists' : 'null');
       }
       // Don't fail here - let the query try and see what error we get
     } else {
       if (__DEV__) {
-        console.log('[Game Database] User authenticated:', currentUser.uid);
+        logger.debug('[Game Database] User authenticated:', currentUser.uid);
       }
     }
   } catch (authError) {
@@ -82,15 +83,15 @@ export async function searchGamesByName(query, limit = 10) {
     }
     
     if (__DEV__) {
-      console.log('[Game Database] Starting search for:', originalSearchTerm);
-      console.log('[Game Database] db object:', db ? 'exists' : 'null');
-      console.log('[Game Database] db type:', typeof db);
+      logger.debug('[Game Database] Starting search for:', originalSearchTerm);
+      logger.debug('[Game Database] db object:', db ? 'exists' : 'null');
+      logger.debug('[Game Database] db type:', typeof db);
     }
     
     const gamesRef = db.collection(GAMES_COLLECTION);
     
     if (__DEV__) {
-      console.log('[Game Database] Collection reference created');
+      logger.debug('[Game Database] Collection reference created');
     }
     
     // Strategy: Try progressive suffix removal for better matching
@@ -143,7 +144,7 @@ export async function searchGamesByName(query, limit = 10) {
     
     const searchVariants = generateSearchVariants(originalSearchTerm);
     if (__DEV__ && searchVariants.length > 1) {
-      console.log('[Game Database] Generated search variants:', searchVariants);
+      logger.debug('[Game Database] Generated search variants:', searchVariants);
     }
     
     // Add timeout wrapper to prevent hanging
@@ -163,14 +164,14 @@ export async function searchGamesByName(query, limit = 10) {
       const activeCount = activeQueries.size;
       
       if (__DEV__) {
-        console.log(`[Game Database] Starting ${queryName} with ${QUERY_TIMEOUT_MS/1000}s timeout${searchInfo} (${activeCount} active queries)`);
+        logger.debug(`[Game Database] Starting ${queryName} with ${QUERY_TIMEOUT_MS/1000}s timeout${searchInfo} (${activeCount} active queries)`);
       }
       
       return Promise.race([
         queryPromise.then((result) => {
           activeQueries.delete(queryId);
           if (__DEV__) {
-            console.log(`[Game Database] ${queryName} completed successfully${searchInfo}`);
+            logger.debug(`[Game Database] ${queryName} completed successfully${searchInfo}`);
           }
           return result;
         }),
@@ -212,14 +213,14 @@ export async function searchGamesByName(query, limit = 10) {
       const isFirstVariant = variantIndex === 0;
       
       if (__DEV__ && !isFirstVariant) {
-        console.log(`[Game Database] Trying variant ${variantIndex + 1}/${searchVariants.length}: "${searchTerm}"`);
+        logger.debug(`[Game Database] Trying variant ${variantIndex + 1}/${searchVariants.length}: "${searchTerm}"`);
       }
       
       // Try optimized query with index first (if index exists)
       try {
         if (__DEV__ && isFirstVariant) {
-          console.log('[Game Database] Attempting indexed query with nameLower field');
-          console.log('[Game Database] Search term:', searchTerm);
+          logger.debug('[Game Database] Attempting indexed query with nameLower field');
+          logger.debug('[Game Database] Search term:', searchTerm);
         }
         
         // Use range query for prefix matching (starts with)
@@ -239,7 +240,7 @@ export async function searchGamesByName(query, limit = 10) {
       const searchUpperBound = (useFullTerm ? searchTerm : firstWord) + '\uf8ff';
       
       if (__DEV__) {
-        console.log('[Game Database] Range:', searchPrefix, 'to', searchUpperBound, '(searching for:', searchTerm + ')');
+        logger.debug('[Game Database] Range:', searchPrefix, 'to', searchUpperBound, '(searching for:', searchTerm + ')');
       }
       
       // Use a more targeted search: if the search term is short or specific, use exact prefix
@@ -251,7 +252,7 @@ export async function searchGamesByName(query, limit = 10) {
       const limitSize = isShortQuery ? 50 : (isMultiWord ? 200 : 100);
       
       if (__DEV__ && isMultiWord) {
-        console.log('[Game Database] Multi-word search detected, using higher limit:', limitSize);
+        logger.debug('[Game Database] Multi-word search detected, using higher limit:', limitSize);
       }
       
       let queryRef = gamesRef
@@ -261,7 +262,7 @@ export async function searchGamesByName(query, limit = 10) {
         .limit(limitSize);
       
       if (__DEV__) {
-        console.log('[Game Database] Query ref created, executing get()...');
+        logger.debug('[Game Database] Query ref created, executing get()...');
       }
       
       const snapshot = await queryWithTimeout(queryRef.get(), 'indexed query', searchTerm);
@@ -275,16 +276,16 @@ export async function searchGamesByName(query, limit = 10) {
       }
       
       if (__DEV__) {
-        console.log('[Game Database] Indexed query returned, empty:', snapshot.empty, 'size:', snapshot.size);
+        logger.debug('[Game Database] Indexed query returned, empty:', snapshot.empty, 'size:', snapshot.size);
         if (!snapshot.empty) {
           const firstDoc = snapshot.docs[0];
           const lastDoc = snapshot.docs[snapshot.docs.length - 1];
-          console.log('[Game Database] First result:', {
+          logger.debug('[Game Database] First result:', {
             id: firstDoc.id,
             name: firstDoc.data().name,
             nameLower: firstDoc.data().nameLower
           });
-          console.log('[Game Database] Last result:', {
+          logger.debug('[Game Database] Last result:', {
             id: lastDoc.id,
             name: lastDoc.data().name,
             nameLower: lastDoc.data().nameLower
@@ -294,9 +295,9 @@ export async function searchGamesByName(query, limit = 10) {
             const nameLower = doc.data().nameLower || '';
             return nameLower.includes(searchTerm);
           });
-          console.log('[Game Database] Results containing search term "' + searchTerm + '":', matchingResults.length);
+          logger.debug('[Game Database] Results containing search term "' + searchTerm + '":', matchingResults.length);
           if (matchingResults.length > 0) {
-            console.log('[Game Database] Matching game names:', matchingResults.slice(0, 5).map(doc => doc.data().name));
+            logger.debug('[Game Database] Matching game names:', matchingResults.slice(0, 5).map(doc => doc.data().name));
           }
         }
       }
@@ -307,10 +308,10 @@ export async function searchGamesByName(query, limit = 10) {
         // This ensures reverseContains matches work correctly
         const results = processSearchResults(snapshot, originalSearchTerm, limit);
         if (__DEV__) {
-          console.log('[Game Database] Processed', results.length, 'results from indexed query (showing top', limit, ')');
+          logger.debug('[Game Database] Processed', results.length, 'results from indexed query (showing top', limit, ')');
           if (results.length > 0) {
-            console.log('[Game Database] Games found:', results.map(r => r.name).join(', '));
-            console.log('[Game Database] Top 10 game titles:', results.slice(0, 10).map(r => `"${r.name}" (rank: ${r.rank || 'N/A'}, match: ${r.matchType || 'unknown'})`));
+            logger.debug('[Game Database] Games found:', results.map(r => r.name).join(', '));
+            logger.debug('[Game Database] Top 10 game titles:', results.slice(0, 10).map(r => `"${r.name}" (rank: ${r.rank || 'N/A'}, match: ${r.matchType || 'unknown'})`));
           }
         }
         
@@ -333,7 +334,7 @@ export async function searchGamesByName(query, limit = 10) {
             logger.debug(`[Firebase] No results with full term "${searchTerm}", trying first word "${firstWord}"`);
           }
           if (__DEV__) {
-            console.log('[Game Database] No results with full term, trying first word only:', firstWord);
+            logger.debug('[Game Database] No results with full term, trying first word only:', firstWord);
           }
           
           // Try again with just the first word
@@ -351,21 +352,21 @@ export async function searchGamesByName(query, limit = 10) {
             const fallbackSnapshot = await queryWithTimeout(fallbackQueryRef.get(), 'fallback first-word query', searchTerm);
             if (!fallbackSnapshot.empty) {
               if (__DEV__) {
-                console.log('[Game Database] Fallback query returned', fallbackSnapshot.size, 'documents starting with "' + firstWord + '"');
+                logger.debug('[Game Database] Fallback query returned', fallbackSnapshot.size, 'documents starting with "' + firstWord + '"');
                 // Log first few game names to see what we got
                 const sampleGames = fallbackSnapshot.docs.slice(0, 10).map(doc => ({
                   id: doc.id,
                   name: doc.data().name,
                   nameLower: doc.data().nameLower
                 }));
-                console.log('[Game Database] Sample games from fallback query:', sampleGames);
+                logger.debug('[Game Database] Sample games from fallback query:', sampleGames);
               }
               const fallbackResults = processSearchResults(fallbackSnapshot, originalSearchTerm, limit);
               if (__DEV__) {
-                console.log('[Game Database] Fallback query found', fallbackResults.length, 'results after filtering');
+                logger.debug('[Game Database] Fallback query found', fallbackResults.length, 'results after filtering');
                 if (fallbackResults.length === 0 && fallbackSnapshot.size > 0) {
-                  console.log('[Game Database] WARNING: Fallback returned', fallbackSnapshot.size, 'games but 0 matched the search term "' + searchTerm + '"');
-                  console.log('[Game Database] This suggests the game might not be in the database, or the nameLower field doesn\'t match');
+                  logger.debug('[Game Database] WARNING: Fallback returned', fallbackSnapshot.size, 'games but 0 matched the search term "' + searchTerm + '"');
+                  logger.debug('[Game Database] This suggests the game might not be in the database, or the nameLower field doesn\'t match');
                 }
               }
               if (fallbackResults.length > 0) {
@@ -389,7 +390,7 @@ export async function searchGamesByName(query, limit = 10) {
         // For multi-word searches, try falling back to first word only
         if (useFullTerm && words.length > 1) {
           if (__DEV__) {
-            console.log('[Game Database] No results with full term, trying first word only:', firstWord);
+            logger.debug('[Game Database] No results with full term, trying first word only:', firstWord);
           }
           
           const fallbackPrefix = firstWord;
@@ -404,21 +405,21 @@ export async function searchGamesByName(query, limit = 10) {
             const fallbackSnapshot = await queryWithTimeout(fallbackQueryRef.get(), 'fallback first-word query', searchTerm);
             if (!fallbackSnapshot.empty) {
               if (__DEV__) {
-                console.log('[Game Database] Fallback query returned', fallbackSnapshot.size, 'documents starting with "' + firstWord + '"');
+                logger.debug('[Game Database] Fallback query returned', fallbackSnapshot.size, 'documents starting with "' + firstWord + '"');
                 // Log first few game names to see what we got
                 const sampleGames = fallbackSnapshot.docs.slice(0, 10).map(doc => ({
                   id: doc.id,
                   name: doc.data().name,
                   nameLower: doc.data().nameLower
                 }));
-                console.log('[Game Database] Sample games from fallback query:', sampleGames);
+                logger.debug('[Game Database] Sample games from fallback query:', sampleGames);
               }
               const fallbackResults = processSearchResults(fallbackSnapshot, searchTerm, limit);
               if (__DEV__) {
-                console.log('[Game Database] Fallback query found', fallbackResults.length, 'results after filtering');
+                logger.debug('[Game Database] Fallback query found', fallbackResults.length, 'results after filtering');
                 if (fallbackResults.length === 0 && fallbackSnapshot.size > 0) {
-                  console.log('[Game Database] WARNING: Fallback returned', fallbackSnapshot.size, 'games but 0 matched the search term "' + searchTerm + '"');
-                  console.log('[Game Database] This suggests the game might not be in the database, or the nameLower field doesn\'t match');
+                  logger.debug('[Game Database] WARNING: Fallback returned', fallbackSnapshot.size, 'games but 0 matched the search term "' + searchTerm + '"');
+                  logger.debug('[Game Database] This suggests the game might not be in the database, or the nameLower field doesn\'t match');
                 }
               }
               if (fallbackResults.length > 0) {
@@ -445,8 +446,8 @@ export async function searchGamesByName(query, limit = 10) {
           });
         }
         if (__DEV__) {
-          console.log('[Game Database] Indexed query returned empty - game not found in database');
-          console.log('[Game Database] Returning empty array');
+          logger.debug('[Game Database] Indexed query returned empty - game not found in database');
+          logger.debug('[Game Database] Returning empty array');
         }
         return [];
       }
@@ -460,30 +461,30 @@ export async function searchGamesByName(query, limit = 10) {
         }
         // If index doesn't exist or query fails, fall back to simpler approach
         if (__DEV__) {
-          console.log('[Game Database] Indexed query failed, using fallback:', indexError.message);
-          console.log('[Game Database] Index error details:', indexError);
+          logger.debug('[Game Database] Indexed query failed, using fallback:', indexError.message);
+          logger.debug('[Game Database] Index error details:', indexError);
         }
         
         // Fallback: Get a smaller batch and filter client-side
         // Reduced from 1000 to 200 to improve performance
         try {
           if (__DEV__) {
-            console.log('[Game Database] Attempting fallback query (limit 200)...');
+            logger.debug('[Game Database] Attempting fallback query (limit 200)...');
           }
           
           const snapshot = await queryWithTimeout(gamesRef.limit(200).get(), 'fallback query', searchTerm); // Reduced limit for better performance
           
           if (__DEV__) {
-            console.log('[Game Database] Fallback query returned, empty:', snapshot.empty, 'size:', snapshot.size);
+            logger.debug('[Game Database] Fallback query returned, empty:', snapshot.empty, 'size:', snapshot.size);
           }
           
           if (!snapshot.empty) {
             const results = processSearchResults(snapshot, originalSearchTerm, limit);
             if (__DEV__) {
-              console.log('[Game Database] Processed', results.length, 'results from fallback query');
+              logger.debug('[Game Database] Processed', results.length, 'results from fallback query');
               if (results.length > 0) {
-                console.log('[Game Database] Fallback games found:', results.map(r => r.name).join(', '));
-                console.log('[Game Database] Top 10 fallback game titles:', results.slice(0, 10).map(r => `"${r.name}" (rank: ${r.rank || 'N/A'}, match: ${r.matchType || 'unknown'})`));
+                logger.debug('[Game Database] Fallback games found:', results.map(r => r.name).join(', '));
+                logger.debug('[Game Database] Top 10 fallback game titles:', results.slice(0, 10).map(r => `"${r.name}" (rank: ${r.rank || 'N/A'}, match: ${r.matchType || 'unknown'})`));
               }
             }
             if (results.length > 0) {
@@ -512,7 +513,7 @@ export async function searchGamesByName(query, limit = 10) {
     
     // If we get here, all variants were tried but none returned results
     if (__DEV__) {
-      console.log('[Game Database] All search variants exhausted, returning empty array');
+      logger.debug('[Game Database] All search variants exhausted, returning empty array');
     }
     return [];
   } catch (error) {
@@ -656,7 +657,7 @@ function processSearchResults(snapshot, searchTerm, limit) {
   // This significantly improves performance for common games
   if (goodMatchesCount < limit && nonMatches.length > 0 && searchTerm.length >= 4) {
     if (__DEV__) {
-      console.log(`[Game Database] Only ${goodMatchesCount} good matches found, doing fuzzy matching on ${nonMatches.length} candidates`);
+      logger.debug(`[Game Database] Only ${goodMatchesCount} good matches found, doing fuzzy matching on ${nonMatches.length} candidates`);
     }
     
     // Second pass: fuzzy matching only on non-matching documents
@@ -675,7 +676,7 @@ function processSearchResults(snapshot, searchTerm, limit) {
       }
     });
   } else if (__DEV__ && goodMatchesCount >= limit) {
-    console.log(`[Game Database] Found ${goodMatchesCount} good matches (>= ${limit}), skipping fuzzy matching for performance`);
+    logger.debug(`[Game Database] Found ${goodMatchesCount} good matches (>= ${limit}), skipping fuzzy matching for performance`);
   }
   
   // Combine results in priority order: exact > startsWith > contains > reverseContains > fuzzy
@@ -884,7 +885,7 @@ export async function batchGetGamesById(gameIds) {
         
         // Reduced logging - only log every 5th batch or final batch
         if (__DEV__ && (Math.floor(i / BATCH_SIZE) + 1) % 5 === 0 || i + BATCH_SIZE >= gameIds.length) {
-          console.log(`[Game Database] Batch fetched ${fetchedCount}/${batch.length} games (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
+          logger.debug(`[Game Database] Batch fetched ${fetchedCount}/${batch.length} games (batch ${Math.floor(i / BATCH_SIZE) + 1})`);
         }
       } catch (batchError) {
         console.error(`[Game Database] Error in batch fetch (batch ${Math.floor(i / BATCH_SIZE) + 1}):`, batchError);
@@ -894,7 +895,7 @@ export async function batchGetGamesById(gameIds) {
     
     // Reduced logging - only log summary if incomplete or in dev mode with significant batch
     if (__DEV__ && (gameMap.size < gameIds.length * 0.9 || gameIds.length > 50)) {
-      console.log(`[Game Database] Batch fetch complete: ${gameMap.size}/${gameIds.length} games found`);
+      logger.debug(`[Game Database] Batch fetch complete: ${gameMap.size}/${gameIds.length} games found`);
     }
     
     return gameMap;
@@ -947,7 +948,7 @@ export async function updateGameWithBGGData(gameId, bggData) {
     
     if (!doc.exists) {
       if (__DEV__) {
-        console.log('[Game Database] Game not in Firestore, creating new document:', gameId);
+        logger.debug('[Game Database] Game not in Firestore, creating new document:', gameId);
       }
       // Create new document with ALL BGG data
       // Save the entire BGG "Thing" object, preserving all fields even if not currently used
@@ -999,12 +1000,12 @@ export async function updateGameWithBGGData(gameId, bggData) {
       
       if (Object.keys(updateData).length > 0) {
         if (__DEV__) {
-          console.log('[Game Database] Updating game with ALL BGG data:', gameId, Object.keys(updateData).length, 'fields');
+          logger.debug('[Game Database] Updating game with ALL BGG data:', gameId, Object.keys(updateData).length, 'fields');
         }
         await docRef.update(updateData);
       } else {
         if (__DEV__) {
-          console.log('[Game Database] No updates needed for game:', gameId);
+          logger.debug('[Game Database] No updates needed for game:', gameId);
         }
       }
     }
@@ -1034,7 +1035,7 @@ export async function cacheBGGSearchResults(searchResults) {
   // Search results only have id, name, yearPublished - not full "Thing" data
   // Games should only be saved to Firestore after fetching complete data via getGamesFromGeek()
   if (__DEV__) {
-    console.log(`[Game Database] Skipping cache of ${searchResults?.length || 0} search results - incomplete data. Full "Thing" data will be fetched and cached when games are selected.`);
+    logger.debug(`[Game Database] Skipping cache of ${searchResults?.length || 0} search results - incomplete data. Full "Thing" data will be fetched and cached when games are selected.`);
   }
   return 0;
 }

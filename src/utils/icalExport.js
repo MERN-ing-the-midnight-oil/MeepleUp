@@ -3,6 +3,8 @@
  * Generates .ics files compatible with iCal, Google Calendar, and other calendar applications
  */
 
+import logger from './logger';
+
 /**
  * Escape text for iCal format
  * @param {string} text - Text to escape
@@ -275,7 +277,7 @@ export const shareIcalFile = async (icalContent, filename = 'meepleup-events.ics
       }
     } catch (error) {
       // Web Share API not available or user cancelled, fall back to download
-      console.log('Web Share API not available, falling back to download');
+      logger.debug('Web Share API not available, falling back to download');
     }
   }
   

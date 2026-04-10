@@ -5,6 +5,7 @@ import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import { startBackgroundRetryService, stopBackgroundRetryService } from '../utils/backgroundRetryService';
 import { ensureSerializableId, ensureStringOrNull } from '../utils/helpers';
+import logger from '../utils/logger';
 
 const CollectionsContext = createContext();
 
@@ -45,7 +46,7 @@ export const CollectionsProvider = ({ children }) => {
         const totalGames = userIds.reduce((sum, uid) => sum + (parsed[uid]?.length || 0), 0);
         // Reduced logging - only log once on initial load
         if (__DEV__ && totalGames > 0 && Object.keys(collections).length === 0) {
-          console.log(`[Collections] Loaded from storage: ${userIds.length} users, ${totalGames} total games`);
+          logger.debug(`[Collections] Loaded from storage: ${userIds.length} users, ${totalGames} total games`);
         }
         if (isMountedRef.current) {
           setCollections(parsed);
@@ -144,7 +145,7 @@ export const CollectionsProvider = ({ children }) => {
 
   // Sync current user ONCE
   useEffect(() => {
-    console.log('[Collections] Sync effect triggered', {
+    logger.debug('[Collections] Sync effect triggered', {
       hasUser: !!user,
       hasDb: !!db,
       initialised,
@@ -153,7 +154,7 @@ export const CollectionsProvider = ({ children }) => {
     });
     
     if (!user || !db || !initialised) {
-      console.log('[Collections] Sync skipped - missing requirements', {
+      logger.debug('[Collections] Sync skipped - missing requirements', {
         hasUser: !!user,
         hasDb: !!db,
         initialised,
@@ -168,7 +169,7 @@ export const CollectionsProvider = ({ children }) => {
       return;
     }
     
-    console.log('[Collections] Starting sync for user', {
+    logger.debug('[Collections] Starting sync for user', {
       userId,
       email: user.email,
       currentUserSyncedRef: currentUserSyncedRef.current,
@@ -176,7 +177,7 @@ export const CollectionsProvider = ({ children }) => {
     
     // Reset sync flag if user changed
     if (currentUserSyncedRef.current !== userId) {
-      console.log('[Collections] User changed, resetting sync flag', {
+      logger.debug('[Collections] User changed, resetting sync flag', {
         oldUserId: currentUserSyncedRef.current,
         newUserId: userId,
       });
@@ -185,11 +186,11 @@ export const CollectionsProvider = ({ children }) => {
     
     // Check if already synced for this user
     if (currentUserSyncedRef.current === userId) {
-      console.log('[Collections] Already synced for this user, skipping');
+      logger.debug('[Collections] Already synced for this user, skipping');
       return;
     }
     
-    console.log('[Collections] Syncing current user games', {
+    logger.debug('[Collections] Syncing current user games', {
       userId,
       email: user.email,
     });
@@ -204,7 +205,7 @@ export const CollectionsProvider = ({ children }) => {
       if (!isMountedRef.current) return;
       setLoading(true);
       try {
-        console.log('[Collections] Fetching games from Firestore with pagination', {
+        logger.debug('[Collections] Fetching games from Firestore with pagination', {
           userId,
           path: `userGames/${userId}/games`,
         });
@@ -241,7 +242,7 @@ export const CollectionsProvider = ({ children }) => {
               await new Promise(resolve => setTimeout(resolve, 100));
             }
             
-            console.log(`[Collections] Batch ${batchNumber}: ${batch.docs.length} games (total: ${allDocs.length})`);
+            logger.debug(`[Collections] Batch ${batchNumber}: ${batch.docs.length} games (total: ${allDocs.length})`);
             
           } catch (batchError) {
             console.error(`[Collections] Error loading batch ${batchNumber}:`, batchError);
@@ -251,7 +252,7 @@ export const CollectionsProvider = ({ children }) => {
           }
         }
         
-        console.log('[Collections] Firestore query completed', {
+        logger.debug('[Collections] Firestore query completed', {
           userId,
           totalGames: allDocs.length,
           batches: batchNumber,
@@ -259,7 +260,7 @@ export const CollectionsProvider = ({ children }) => {
         });
         
         if (allDocs.length > 0) {
-          console.log('[Collections] Parsing game documents', {
+          logger.debug('[Collections] Parsing game documents', {
             userId,
             docCount: allDocs.length,
           });
@@ -317,7 +318,7 @@ export const CollectionsProvider = ({ children }) => {
             return (ref.title && ref.title !== 'Unknown Game') || ref.bggId;
           });
           
-          console.log('[Collections] Parsed references', {
+          logger.debug('[Collections] Parsed references', {
             userId,
             totalReferences: references.length,
             sampleRefs: references.slice(0, 3).map(r => ({
@@ -331,7 +332,7 @@ export const CollectionsProvider = ({ children }) => {
           const newFormatRefs = references.filter(ref => isReferenceOnly(ref));
           const oldFormatGames = references.filter(ref => !isReferenceOnly(ref));
           
-          console.log('[Collections] Separated by format', {
+          logger.debug('[Collections] Separated by format', {
             userId,
             newFormatRefs: newFormatRefs.length,
             oldFormatGames: oldFormatGames.length,
@@ -341,12 +342,12 @@ export const CollectionsProvider = ({ children }) => {
           let enrichedGames = [...oldFormatGames]; // Start with old format games
           
           if (newFormatRefs.length > 0) {
-            console.log('[Collections] Enriching references with game data', {
+            logger.debug('[Collections] Enriching references with game data', {
               userId,
               refCount: newFormatRefs.length,
             });
             const enriched = await enrichReferencesWithGameData(newFormatRefs);
-            console.log('[Collections] Enrichment completed', {
+            logger.debug('[Collections] Enrichment completed', {
               userId,
               enrichedCount: enriched.length,
               sampleEnriched: enriched.slice(0, 2).map(g => ({
@@ -386,7 +387,7 @@ export const CollectionsProvider = ({ children }) => {
             return true;
           });
           
-          console.log('[Collections] Setting collections state', {
+          logger.debug('[Collections] Setting collections state', {
             userId,
             gameCount: deduplicatedGames.length,
             sampleGames: deduplicatedGames.slice(0, 3).map(g => ({
@@ -402,10 +403,10 @@ export const CollectionsProvider = ({ children }) => {
               ...prev,
               [userId]: deduplicatedGames,
             }));
-            console.log(`[Collections] ✅ Loaded ${deduplicatedGames.length} games for user ${userId} (${user.email})`);
+            logger.debug(`[Collections] ✅ Loaded ${deduplicatedGames.length} games for user ${userId} (${user.email})`);
           }
         } else {
-          console.log('[Collections] ⚠️ No games found in Firestore', {
+          logger.debug('[Collections] ⚠️ No games found in Firestore', {
             userId,
             email: user.email,
             path: `userGames/${userId}/games`,
@@ -430,7 +431,7 @@ export const CollectionsProvider = ({ children }) => {
         // Reset flag on error so we can retry
         currentUserSyncedRef.current = null;
       } finally {
-        console.log('[Collections] Sync completed', {
+        logger.debug('[Collections] Sync completed', {
           userId,
           email: user.email,
         });
@@ -459,7 +460,7 @@ export const CollectionsProvider = ({ children }) => {
     
     // Reduced logging - only log if syncing multiple users
     if (__DEV__ && toSync.length > 1) {
-      console.log('[Collections] Syncing', toSync.length, 'users');
+      logger.debug('[Collections] Syncing', toSync.length, 'users');
     }
     toSync.forEach(uid => syncedUsersRef.current.add(uid));
     
@@ -623,7 +624,7 @@ export const CollectionsProvider = ({ children }) => {
     
     const userIds = Object.keys(collections);
     const totalGames = userIds.reduce((sum, uid) => sum + (collections[uid]?.length || 0), 0);
-    console.log('[Collections] Collections state changed, saving to storage', {
+    logger.debug('[Collections] Collections state changed, saving to storage', {
       userIds,
       totalGames,
       gamesPerUser: userIds.reduce((acc, uid) => {
@@ -634,7 +635,7 @@ export const CollectionsProvider = ({ children }) => {
     
     const timeoutId = setTimeout(() => {
       storage.setItem('meepleup_collections', JSON.stringify(collections));
-      console.log('[Collections] Saved collections to storage');
+      logger.debug('[Collections] Saved collections to storage');
     }, 500);
     
     return () => clearTimeout(timeoutId);
@@ -665,7 +666,7 @@ export const CollectionsProvider = ({ children }) => {
 
   // Simple stable callbacks
   const addGameToCollection = useCallback(async (userId, gameData) => {
-    console.log('[Collections] addGameToCollection called', {
+    logger.debug('[Collections] addGameToCollection called', {
       userId,
       gameId: gameData.id,
       bggId: gameData.bggId,
@@ -684,7 +685,7 @@ export const CollectionsProvider = ({ children }) => {
     // This is important - we need to store full game data in main collection
     if (gameData.bggId && db) {
       try {
-        console.log('[Collections] Ensuring game exists in main collection', {
+        logger.debug('[Collections] Ensuring game exists in main collection', {
           userId,
           bggId: gameData.bggId,
         });
@@ -692,7 +693,7 @@ export const CollectionsProvider = ({ children }) => {
         const { getGamesFromFirebase, updateGameWithBGGData } = await import('../services/gameDatabase');
         const existingGame = await getGamesFromFirebase(gameData.bggId);
         
-        console.log('[Collections] Checked main collection', {
+        logger.debug('[Collections] Checked main collection', {
           userId,
           bggId: gameData.bggId,
           existsInMainCollection: !!existingGame,
@@ -702,7 +703,7 @@ export const CollectionsProvider = ({ children }) => {
           // Game not in main collection - we need full game data to store it
           // If gameData has full data, store it. Otherwise, we need to fetch it.
           if (gameData.title || gameData.name || gameData.image || gameData.thumbnail) {
-            console.log('[Collections] Game not in main collection, storing full data', {
+            logger.debug('[Collections] Game not in main collection, storing full data', {
               userId,
               bggId: gameData.bggId,
               hasTitle: !!(gameData.title || gameData.name),
@@ -754,7 +755,7 @@ export const CollectionsProvider = ({ children }) => {
               weight: gameData.weight || null,
             };
 
-            console.log('[Collections] Storing game in main collection', {
+            logger.debug('[Collections] Storing game in main collection', {
               userId,
               bggId: gameData.bggId,
               dataKeys: Object.keys(mainCollectionData),
@@ -762,7 +763,7 @@ export const CollectionsProvider = ({ children }) => {
 
             await updateGameWithBGGData(gameData.bggId, mainCollectionData);
             
-            console.log('[Collections] ✅ Successfully stored game in main collection', {
+            logger.debug('[Collections] ✅ Successfully stored game in main collection', {
               userId,
               bggId: gameData.bggId,
             });
@@ -775,7 +776,7 @@ export const CollectionsProvider = ({ children }) => {
             });
           }
         } else {
-          console.log('[Collections] Game already exists in main collection', {
+          logger.debug('[Collections] Game already exists in main collection', {
             userId,
             bggId: gameData.bggId,
           });
@@ -793,7 +794,7 @@ export const CollectionsProvider = ({ children }) => {
     
     // Store full game data in state for immediate UI update
     // Prevent duplicates by checking if game with same bggId or id already exists
-    console.log('[Collections] Updating local state with game', {
+    logger.debug('[Collections] Updating local state with game', {
       userId,
       gameId: gameData.id,
       bggId: gameData.bggId,
@@ -805,7 +806,7 @@ export const CollectionsProvider = ({ children }) => {
       const gameId = gameData.id || (gameData.bggId ? `bgg_${gameData.bggId}` : null);
       const bggId = gameData.bggId?.toString();
       
-      console.log('[Collections] Checking for duplicates', {
+      logger.debug('[Collections] Checking for duplicates', {
         userId,
         gameId,
         bggId,
@@ -824,7 +825,7 @@ export const CollectionsProvider = ({ children }) => {
       });
       
       if (isDuplicate) {
-        console.log(`[Collections] ⚠️ Skipping duplicate game: ${gameId || bggId || 'unknown'}`, {
+        logger.debug(`[Collections] ⚠️ Skipping duplicate game: ${gameId || bggId || 'unknown'}`, {
           userId,
           gameId,
           bggId,
@@ -833,7 +834,7 @@ export const CollectionsProvider = ({ children }) => {
       }
       
       const newCollection = [...currentCollection, gameData];
-      console.log('[Collections] ✅ Added game to local state', {
+      logger.debug('[Collections] ✅ Added game to local state', {
         userId,
         gameId,
         bggId,
@@ -860,7 +861,7 @@ export const CollectionsProvider = ({ children }) => {
       };
       
       const firestorePath = `userGames/${userId}/games/${gameDocId}`;
-      console.log('[Collections] Saving game reference to Firestore', {
+      logger.debug('[Collections] Saving game reference to Firestore', {
         userId,
         gameDocId,
         bggId: gameData.bggId,
@@ -873,7 +874,7 @@ export const CollectionsProvider = ({ children }) => {
         .collection('games').doc(gameDocId)
         .set(referenceData, { merge: true })
         .then(() => {
-          console.log('[Collections] ✅ Successfully saved game reference to Firestore', {
+          logger.debug('[Collections] ✅ Successfully saved game reference to Firestore', {
             userId,
             gameDocId,
             bggId: gameData.bggId,
@@ -908,7 +909,7 @@ export const CollectionsProvider = ({ children }) => {
         updatedAt: firebase.firestore.Timestamp.now(),
       };
 
-      console.log('[Collections] Saving full game data to Firestore (legacy mode)', {
+      logger.debug('[Collections] Saving full game data to Firestore (legacy mode)', {
         userId,
         gameId: gameData.id,
         firestorePath,
@@ -919,7 +920,7 @@ export const CollectionsProvider = ({ children }) => {
         .collection('games').doc(gameData.id)
         .set(fullGameData, { merge: true })
         .then(() => {
-          console.log('[Collections] ✅ Successfully saved full game data to Firestore (legacy mode)', {
+          logger.debug('[Collections] ✅ Successfully saved full game data to Firestore (legacy mode)', {
             userId,
             gameId: gameData.id,
             firestorePath,
@@ -1000,7 +1001,7 @@ export const CollectionsProvider = ({ children }) => {
           .set(userSpecificUpdates, { merge: true });
           
         if (__DEV__) {
-          console.log(`[Collections] Updated game reference ${gameId} with user-specific fields:`, Object.keys(userSpecificUpdates));
+          logger.debug(`[Collections] Updated game reference ${gameId} with user-specific fields:`, Object.keys(userSpecificUpdates));
         }
       } catch (error) {
         console.error('Error updating game reference:', error);
@@ -1019,7 +1020,7 @@ export const CollectionsProvider = ({ children }) => {
     const userCountChanged = userIds.length !== prevCollectionCountRef.current;
     const gamesChangedSignificantly = Math.abs(totalGames - prevTotalGamesRef.current) > 10;
     if (__DEV__ && (userCountChanged || gamesChangedSignificantly)) {
-      console.log('[CollectionsContext] Context updated, users:', userIds.length, 'total games:', totalGames);
+      logger.debug('[CollectionsContext] Context updated, users:', userIds.length, 'total games:', totalGames);
       prevCollectionCountRef.current = userIds.length;
       prevTotalGamesRef.current = totalGames;
     }

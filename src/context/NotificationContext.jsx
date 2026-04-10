@@ -4,6 +4,7 @@ import { useEvents } from './EventsContext';
 import { db } from '../config/firebase';
 import firebase from '../config/firebase';
 import NotificationPopup from '../components/NotificationPopup';
+import logger from '../utils/logger';
 
 const NotificationContext = createContext();
 
@@ -48,7 +49,7 @@ export const NotificationProvider = ({ children }) => {
         snapshot = await notificationsRef.get();
       } catch (error) {
         // If orderBy fails (index missing), fetch without it and sort manually
-        console.log('OrderBy index may not exist, fetching without orderBy:', error);
+        logger.debug('OrderBy index may not exist, fetching without orderBy:', error);
         const notificationsRef = db
           .collection('users')
           .doc(userId)

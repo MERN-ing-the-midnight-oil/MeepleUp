@@ -14,12 +14,14 @@ import { batchGetGamesById } from '../services/gameDatabase';
 import { getStarRating } from '../utils/gameBadges';
 import { theme, commonStyles } from '../utils/theme';
 import { retryPendingGameSearches } from '../utils/retryPendingGames';
+import logger from '../utils/logger';
+import { horizontalScrollViewProps } from '../utils/horizontalScrollViewProps';
 
 // All game categories in order (for legacy code - GameCollectionView now handles this)
 const ALL_CATEGORIES = ['Strategy', 'Family', 'Party', 'War', 'Thematic', 'Abstract', 'Children', 'CCG', 'Other'];
 
 const CollectionScreen = () => {
-  console.log('[CollectionScreen] Component rendering');
+  logger.debug('[CollectionScreen] Component rendering');
   
   const { width } = useWindowDimensions();
   const { user } = useAuth();
@@ -148,7 +150,7 @@ const CollectionScreen = () => {
   const gamescannerIconSize = width > 768 ? Math.round(72 * 3.5) : Math.round(64 * 3.5);
   
   const userIdentifier = user?.uid || user?.id;
-  console.log('[CollectionScreen] User identifier:', {
+  logger.debug('[CollectionScreen] User identifier:', {
     found: !!userIdentifier,
     userId: userIdentifier,
     email: user?.email,
@@ -158,11 +160,11 @@ const CollectionScreen = () => {
   // Memoize rawCollection to prevent infinite loops - only recalculate when collections or userIdentifier changes
   const rawCollection = useMemo(() => {
     if (!userIdentifier) {
-      console.log('[CollectionScreen] No userIdentifier, returning empty collection');
+      logger.debug('[CollectionScreen] No userIdentifier, returning empty collection');
       return [];
     }
     const collection = collections[userIdentifier] || [];
-    console.log('[CollectionScreen] Raw collection from memo', {
+    logger.debug('[CollectionScreen] Raw collection from memo', {
       userId: userIdentifier,
       collectionLength: collection.length,
       hasCollections: !!collections[userIdentifier],
@@ -170,7 +172,7 @@ const CollectionScreen = () => {
     });
     return collection;
   }, [collections, userIdentifier]);
-  console.log('[CollectionScreen] Raw collection length:', rawCollection.length, {
+  logger.debug('[CollectionScreen] Raw collection length:', rawCollection.length, {
     userId: userIdentifier,
     email: user?.email,
   });
@@ -183,25 +185,25 @@ const CollectionScreen = () => {
   // Component mount/unmount logging
   useEffect(() => {
     isMountedRef.current = true;
-    console.log('[CollectionScreen] Component mounted');
+    logger.debug('[CollectionScreen] Component mounted');
     
     // Retry pending game searches when screen loads
     const handlePendingRetries = async () => {
       try {
-        console.log('[CollectionScreen] Checking for pending game retries...');
+        logger.debug('[CollectionScreen] Checking for pending game retries...');
         const result = await retryPendingGameSearches(addGameToCollection);
         
         // Only show alert if component is still mounted
         if (isMountedRef.current) {
           if (result.successCount > 0) {
-            console.log('[CollectionScreen] Successfully retried', result.successCount, 'games');
+            logger.debug('[CollectionScreen] Successfully retried', result.successCount, 'games');
             Alert.alert(
               'Games Added!',
               `We found and added ${result.successCount} game${result.successCount !== 1 ? 's' : ''} from your previous search:\n\n${result.addedGames.join(', ')}`,
               [{ text: 'OK' }]
             );
           } else if (result.failedCount > 0) {
-            console.log('[CollectionScreen]', result.failedCount, 'games still pending (not found)');
+            logger.debug('[CollectionScreen]', result.failedCount, 'games still pending (not found)');
           }
         }
       } catch (error) {
@@ -216,7 +218,7 @@ const CollectionScreen = () => {
     return () => {
       isMountedRef.current = false;
       clearTimeout(timeoutId);
-      console.log('[CollectionScreen] Component unmounting');
+      logger.debug('[CollectionScreen] Component unmounting');
     };
   }, [addGameToCollection]);
 
@@ -234,7 +236,7 @@ const CollectionScreen = () => {
         enrichedGameIdsRef.current.add(gameId);
         const cached = bggDataCacheRef.current[gameId];
         if (__DEV__) {
-          console.log(`[CollectionScreen] Using cached BGG data for ${gameId}:`, {
+          logger.debug(`[CollectionScreen] Using cached BGG data for ${gameId}:`, {
             hasThumbnail: !!cached.thumbnail,
             thumbnail: cached.thumbnail ? cached.thumbnail.substring(0, 50) + '...' : null,
           });
@@ -280,7 +282,7 @@ const CollectionScreen = () => {
         };
         
         if (__DEV__) {
-          console.log(`[CollectionScreen] Enriched game ${gameId} from Firebase (${game.title || 'unknown'}):`, {
+          logger.debug(`[CollectionScreen] Enriched game ${gameId} from Firebase (${game.title || 'unknown'}):`, {
             hasThumbnail: !!formattedData.thumbnail,
             thumbnail: formattedData.thumbnail ? formattedData.thumbnail.substring(0, 50) + '...' : null,
             hasImage: !!formattedData.image,
@@ -493,7 +495,7 @@ const CollectionScreen = () => {
             bggDataCacheRef.current = { ...bggDataCacheRef.current, ...cacheUpdates };
             
             if (__DEV__) {
-              console.log(`[CollectionScreen] Enriched ${Object.keys(cacheUpdates).length} games from Firebase batch`);
+              logger.debug(`[CollectionScreen] Enriched ${Object.keys(cacheUpdates).length} games from Firebase batch`);
             }
           }
         } catch (error) {
@@ -671,7 +673,7 @@ const CollectionScreen = () => {
   }, []);
 
   const handleAddToCollection = (gameData) => {
-    console.log('[CollectionScreen] handleAddToCollection called for:', gameData.title || gameData.id);
+    logger.debug('[CollectionScreen] handleAddToCollection called for:', gameData.title || gameData.id);
     if (userIdentifier) {
       try {
         addGameToCollection(userIdentifier, gameData);
@@ -687,7 +689,7 @@ const CollectionScreen = () => {
   };
 
   const handleRemoveFromCollection = (gameId) => {
-    console.log('[CollectionScreen] handleRemoveFromCollection called for:', gameId);
+    logger.debug('[CollectionScreen] handleRemoveFromCollection called for:', gameId);
     if (userIdentifier) {
       removeGameFromCollection(userIdentifier, gameId);
     } else {
@@ -696,29 +698,29 @@ const CollectionScreen = () => {
   };
 
   const handleDoneIdentifying = () => {
-    console.log('[CollectionScreen] handleDoneIdentifying called');
+    logger.debug('[CollectionScreen] handleDoneIdentifying called');
     // After identifying games, close results modal
     setShowResultsModal(false);
   };
 
   const handleOpenCamera = () => {
-    console.log('[CollectionScreen] handleOpenCamera called');
+    logger.debug('[CollectionScreen] handleOpenCamera called');
     setShowCameraModal(true);
   };
 
   const handleCameraModalClose = () => {
-    console.log('[CollectionScreen] handleCameraModalClose called');
+    logger.debug('[CollectionScreen] handleCameraModalClose called');
     setShowCameraModal(false);
     // Don't open results modal - games will be shown in the camera modal itself
   };
 
   const handleResultsModalClose = () => {
-    console.log('[CollectionScreen] handleResultsModalClose called');
+    logger.debug('[CollectionScreen] handleResultsModalClose called');
     setShowResultsModal(false);
   };
 
   const handleDeleteGame = useCallback((gameId) => {
-    console.log('[CollectionScreen] handleDeleteGame called for:', gameId);
+    logger.debug('[CollectionScreen] handleDeleteGame called for:', gameId);
     Alert.alert(
       'Delete Game?',
       'Are you sure you want to remove this game from your collection?',
@@ -774,12 +776,12 @@ const CollectionScreen = () => {
   );
 
   const renderHeader = () => {
-    console.log('[CollectionScreen] renderHeader called');
+    logger.debug('[CollectionScreen] renderHeader called');
     
     // Calculate logo width to fit screen with comfortable margins (40px on each side)
     const logoContainerWidth = Math.max(width - 80, 200); // Min 200px, max screen width - 80px margins
     
-    console.log('[CollectionScreen] renderHeader: rendering header content');
+    logger.debug('[CollectionScreen] renderHeader: rendering header content');
     return (
       <>
         <View style={styles.bggLogoTopContainer}>
@@ -839,7 +841,7 @@ const CollectionScreen = () => {
   // Memoize header component to prevent re-renders
   // Always show import methods, even when games exist
   const headerComponent = useMemo(() => {
-    console.log('[CollectionScreen] Creating headerComponent with useMemo', { filteredGamesLength: filteredGames.length });
+    logger.debug('[CollectionScreen] Creating headerComponent with useMemo', { filteredGamesLength: filteredGames.length });
     // Always show the import menu, regardless of showMenu state
     return renderHeader();
   }, [filteredGames.length, width, iconSize, gamescannerIconSize]);
@@ -847,9 +849,9 @@ const CollectionScreen = () => {
   const renderGameCard = useCallback(({ item }) => {
     const hasBggData = !!item._bggData;
     const hasThumbnail = !!(item._bggData?.thumbnail || item.bggThumbnail || item.thumbnail);
-    console.log('[CollectionScreen] renderGameCard called for:', item.title || item.id, 'has_bggData:', hasBggData, 'hasThumbnail:', hasThumbnail, 'bggId:', item.bggId);
+    logger.debug('[CollectionScreen] renderGameCard called for:', item.title || item.id, 'has_bggData:', hasBggData, 'hasThumbnail:', hasThumbnail, 'bggId:', item.bggId);
     if (hasBggData && !hasThumbnail) {
-      console.log('[CollectionScreen] ⚠️ Game has BGG data but no thumbnail:', {
+      logger.debug('[CollectionScreen] ⚠️ Game has BGG data but no thumbnail:', {
         title: item.title,
         bggId: item.bggId,
         bggDataKeys: item._bggData ? Object.keys(item._bggData) : [],
@@ -933,6 +935,7 @@ const CollectionScreen = () => {
           horizontal 
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.categoryButtonsScrollContent}
+          {...horizontalScrollViewProps}
         >
           {[...ALL_CATEGORIES, 'Uncategorized'].map((category) => {
             const count = categoryCounts[category];
@@ -1026,7 +1029,7 @@ const CollectionScreen = () => {
     );
   }, [gamesByCategory, renderCategoryHeader, renderGameCard, renderHeader, renderCategoryButtons, selectedCategory, categoriesDetermined, sortBy]);
 
-  console.log('[CollectionScreen] Render state:', {
+  logger.debug('[CollectionScreen] Render state:', {
     showMenu,
     activeView,
     filteredGamesLength: filteredGames.length,
@@ -1054,7 +1057,7 @@ const CollectionScreen = () => {
   );
   const showGamesView = showMenu && gamesForView.length > 0;
   
-  console.log('[CollectionScreen] Loading state check', {
+  logger.debug('[CollectionScreen] Loading state check', {
     initialised,
     loading,
     hasCachedGames,
@@ -1066,7 +1069,7 @@ const CollectionScreen = () => {
   });
   
   if (shouldShowLoading) {
-    console.log('[CollectionScreen] Showing loading spinner');
+    logger.debug('[CollectionScreen] Showing loading spinner');
     return (
       <View style={styles.container}>
         <LoadingSpinner />
@@ -1078,7 +1081,7 @@ const CollectionScreen = () => {
     <View style={styles.container}>
       {showGamesView ? (
         (() => {
-          console.log('[CollectionScreen] Rendering GameCollectionView', {
+          logger.debug('[CollectionScreen] Rendering GameCollectionView', {
             rawCollectionLength: rawCollection.length,
             gamesForViewLength: gamesForView.length,
             hasHeaderComponent: !!headerComponent,
@@ -1099,17 +1102,17 @@ const CollectionScreen = () => {
         })()
       ) : (
         (() => {
-          console.log('[CollectionScreen] Rendering ScrollView (no games or not menu)');
+          logger.debug('[CollectionScreen] Rendering ScrollView (no games or not menu)');
           return (
             <ScrollView 
               style={styles.scrollView}
               contentContainerStyle={styles.content}
               showsVerticalScrollIndicator={true}
               onLayout={() => {
-                console.log('[CollectionScreen] ScrollView onLayout called');
+                logger.debug('[CollectionScreen] ScrollView onLayout called');
               }}
               onContentSizeChange={(width, height) => {
-                console.log('[CollectionScreen] ScrollView content size changed:', width, 'x', height);
+                logger.debug('[CollectionScreen] ScrollView content size changed:', width, 'x', height);
               }}
             >
               {showMenu && (
@@ -1169,7 +1172,7 @@ const CollectionScreen = () => {
                 <Pressable
                   style={styles.backButton}
                   onPress={() => {
-                    console.log('[CollectionScreen] Back button pressed, switching to menu');
+                    logger.debug('[CollectionScreen] Back button pressed, switching to menu');
                     setActiveView('menu');
                   }}
                 >
@@ -1180,7 +1183,7 @@ const CollectionScreen = () => {
               <View style={styles.tabContent}>
                 <BGGImport
                   onImportComplete={(count) => {
-                    console.log('[CollectionScreen] BGGImport onImportComplete, count:', count);
+                    logger.debug('[CollectionScreen] BGGImport onImportComplete, count:', count);
                     // Games will automatically appear in the inventory section
                     if (count > 0) {
                       setActiveView('menu');
@@ -1233,7 +1236,7 @@ const CollectionScreen = () => {
       >
         <BGGImport
           onImportComplete={(count) => {
-            console.log('[CollectionScreen] BGGImport onImportComplete, count:', count);
+            logger.debug('[CollectionScreen] BGGImport onImportComplete, count:', count);
             if (count > 0) {
               setShowBGGImportModal(false);
               // Scroll to inventory after import completes

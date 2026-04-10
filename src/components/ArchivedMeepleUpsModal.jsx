@@ -5,6 +5,7 @@ import Modal from './common/Modal';
 import Button from './common/Button';
 import { theme } from '../utils/theme';
 import { formatDate } from '../utils/helpers';
+import logger from '../utils/logger';
 
 const ArchivedMeepleUpsModal = ({ isOpen, onClose, archivedEvents, onDelete, currentUserId }) => {
   const [deletingIds, setDeletingIds] = useState(new Set());
@@ -15,7 +16,7 @@ const ArchivedMeepleUpsModal = ({ isOpen, onClose, archivedEvents, onDelete, cur
       return;
     }
 
-    console.log('[ArchivedMeepleUpsModal] handleDelete called for event:', event.id, event.name);
+    logger.debug('[ArchivedMeepleUpsModal] handleDelete called for event:', event.id, event.name);
     Alert.alert(
       'Delete MeepleUp Forever?',
       `Are you sure you want to permanently delete "${event.name}"? This cannot be undone. All data will be permanently removed.`,
@@ -25,11 +26,11 @@ const ArchivedMeepleUpsModal = ({ isOpen, onClose, archivedEvents, onDelete, cur
           text: 'Delete Forever',
           style: 'destructive',
           onPress: async () => {
-            console.log('[ArchivedMeepleUpsModal] Delete confirmed, calling onDelete:', event.id, currentUserId);
+            logger.debug('[ArchivedMeepleUpsModal] Delete confirmed, calling onDelete:', event.id, currentUserId);
             try {
               setDeletingIds(prev => new Set(prev).add(event.id));
               await onDelete(event.id, currentUserId);
-              console.log('[ArchivedMeepleUpsModal] Delete successful');
+              logger.debug('[ArchivedMeepleUpsModal] Delete successful');
               Alert.alert(
                 'Deleted',
                 `"${event.name}" has been permanently deleted.`,
@@ -92,7 +93,7 @@ const ArchivedMeepleUpsModal = ({ isOpen, onClose, archivedEvents, onDelete, cur
                       <TouchableOpacity
                         style={styles.deleteButton}
                         onPress={() => {
-                          console.log('[ArchivedMeepleUpsModal] Delete button pressed for event:', event.id);
+                          logger.debug('[ArchivedMeepleUpsModal] Delete button pressed for event:', event.id);
                           handleDelete(event);
                         }}
                         activeOpacity={0.7}

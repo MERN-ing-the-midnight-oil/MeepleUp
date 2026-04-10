@@ -17,6 +17,7 @@ import BeepleGameOptimizer from '../components/BeepleGameOptimizer';
 import { getMatchScore, calculateMatchScoresForGame } from '../services/matchScores';
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 import { createNotification } from '../utils/notifications';
+import logger from '../utils/logger';
 
 // Platform-specific navigation hooks
 let useNavigationHook;
@@ -88,7 +89,7 @@ const BrowseAndProposeScreen = () => {
   
   // Log when screen mounts or params change
   useEffect(() => {
-    console.log('[BrowseAndProposeScreen] Screen mounted/updated:', {
+    logger.debug('[BrowseAndProposeScreen] Screen mounted/updated:', {
       eventId,
       dateIndex,
       params,
@@ -206,7 +207,7 @@ const BrowseAndProposeScreen = () => {
   
   // Get event dates
   const eventDates = useMemo(() => {
-    console.log('[BrowseAndProposeScreen] Computing eventDates:', {
+    logger.debug('[BrowseAndProposeScreen] Computing eventDates:', {
       hasEvent: !!event,
       eventId: event?.id,
       hasEventDates: !!event?.eventDates,
@@ -215,7 +216,7 @@ const BrowseAndProposeScreen = () => {
     });
     
     if (!event) {
-      console.log('[BrowseAndProposeScreen] No event, returning empty eventDates');
+      logger.debug('[BrowseAndProposeScreen] No event, returning empty eventDates');
       return [];
     }
     
@@ -230,7 +231,7 @@ const BrowseAndProposeScreen = () => {
           endTime: safeParseDate(ed.endTime),
           location: ed.location || ed.generalLocation || event.location || event.generalLocation || '',
         };
-        console.log(`[BrowseAndProposeScreen] Event date ${index}:`, {
+        logger.debug(`[BrowseAndProposeScreen] Event date ${index}:`, {
           rawDate: ed.date,
           parsedDate: result.date,
           dateKey: result.date ? getDateKey(result.date) : null,
@@ -239,7 +240,7 @@ const BrowseAndProposeScreen = () => {
         return result;
       }).filter(ed => ed.date !== null);
       
-      console.log('[BrowseAndProposeScreen] Filtered eventDates:', {
+      logger.debug('[BrowseAndProposeScreen] Filtered eventDates:', {
         count: dates.length,
         dates: dates.map(d => ({
           index: d.index,
@@ -251,7 +252,7 @@ const BrowseAndProposeScreen = () => {
       
       return dates;
     } else if (event.scheduledFor) {
-      console.log('[BrowseAndProposeScreen] Using scheduledFor (legacy format):', event.scheduledFor);
+      logger.debug('[BrowseAndProposeScreen] Using scheduledFor (legacy format):', event.scheduledFor);
       const date = safeParseDate(event.scheduledFor);
       if (date && !isNaN(date.getTime())) {
         const result = [{
@@ -262,7 +263,7 @@ const BrowseAndProposeScreen = () => {
           endTime: null,
           location: event.location || event.generalLocation || '',
         }];
-        console.log('[BrowseAndProposeScreen] Created eventDates from scheduledFor:', {
+        logger.debug('[BrowseAndProposeScreen] Created eventDates from scheduledFor:', {
           dateKey: getDateKey(date),
           date: date
         });
@@ -274,7 +275,7 @@ const BrowseAndProposeScreen = () => {
       console.warn('[BrowseAndProposeScreen] No eventDates or scheduledFor found in event');
     }
     
-    console.log('[BrowseAndProposeScreen] Returning empty eventDates');
+    logger.debug('[BrowseAndProposeScreen] Returning empty eventDates');
     return [];
   }, [event]);
   
@@ -292,7 +293,7 @@ const BrowseAndProposeScreen = () => {
   
   // Log selected date info
   useEffect(() => {
-    console.log('[BrowseAndProposeScreen] Selected date info:', {
+    logger.debug('[BrowseAndProposeScreen] Selected date info:', {
       dateIndex,
       normalizedDateIndex,
       eventDatesCount: eventDates.length,
@@ -351,7 +352,7 @@ const BrowseAndProposeScreen = () => {
       }
     }
     
-    console.log('[RSVP Check] Confirmed attendees:', {
+    logger.debug('[RSVP Check] Confirmed attendees:', {
       count: confirmed.length,
       userIds: confirmed.map(c => c.userId),
       currentUserIncluded: confirmed.some(c => c.userId === userId),
@@ -364,12 +365,12 @@ const BrowseAndProposeScreen = () => {
   // Aggregate games from confirmed attendees
   const aggregatedGames = useMemo(() => {
     if (!selectedDate) {
-      console.log('[BrowseAndProposeScreen] No selectedDate, returning empty games');
+      logger.debug('[BrowseAndProposeScreen] No selectedDate, returning empty games');
       return [];
     }
     
     if (confirmedAttendees.length === 0) {
-      console.log('[BrowseAndProposeScreen] No confirmed attendees, returning empty games');
+      logger.debug('[BrowseAndProposeScreen] No confirmed attendees, returning empty games');
       return [];
     }
     
@@ -377,7 +378,7 @@ const BrowseAndProposeScreen = () => {
     const safeCollections = collections || {};
     const safeMemberNames = memberNames || {};
     
-    console.log('[BrowseAndProposeScreen] Aggregating games:', {
+    logger.debug('[BrowseAndProposeScreen] Aggregating games:', {
       confirmedAttendeesCount: confirmedAttendees.length,
       confirmedAttendeeIds: confirmedAttendees.map(a => a.userId),
       collectionsKeys: Object.keys(safeCollections),
@@ -393,7 +394,7 @@ const BrowseAndProposeScreen = () => {
       const attendeeName = safeMemberNames[attendeeId] || attendeeId;
       const attendeeGames = Array.isArray(safeCollections[attendeeId]) ? safeCollections[attendeeId] : [];
       
-      console.log(`[BrowseAndProposeScreen] Processing attendee ${attendeeId}:`, {
+      logger.debug(`[BrowseAndProposeScreen] Processing attendee ${attendeeId}:`, {
         name: attendeeName,
         gamesCount: attendeeGames.length
       });
@@ -426,7 +427,7 @@ const BrowseAndProposeScreen = () => {
       _owners: item.owners || [],
     }));
     
-    console.log('[BrowseAndProposeScreen] Aggregated games result:', {
+    logger.debug('[BrowseAndProposeScreen] Aggregated games result:', {
       totalGames: result.length,
       gameIds: result.map(g => g.bggId || g.id).slice(0, 5)
     });
@@ -509,7 +510,7 @@ const BrowseAndProposeScreen = () => {
     
     // Clean up orphaned proposals
     const cleanup = async () => {
-      console.log(`[BrowseAndProposeScreen] Cleaning up ${newOrphanedProposals.length} orphaned proposals for date ${dateKey}`);
+      logger.debug(`[BrowseAndProposeScreen] Cleaning up ${newOrphanedProposals.length} orphaned proposals for date ${dateKey}`);
       
       for (const proposal of newOrphanedProposals) {
         const gameId = String(proposal.gameId || '');
@@ -545,7 +546,7 @@ const BrowseAndProposeScreen = () => {
             await batch.commit();
           }
           
-          console.log(`[BrowseAndProposeScreen] Successfully cleaned up proposal for ${gameId}`);
+          logger.debug(`[BrowseAndProposeScreen] Successfully cleaned up proposal for ${gameId}`);
         } catch (error) {
           console.error(`[BrowseAndProposeScreen] Error cleaning up proposal for ${gameId}:`, error);
           // Don't remove from cleanupAttemptedRef - we'll skip retrying this one
@@ -560,7 +561,7 @@ const BrowseAndProposeScreen = () => {
   const enrichedGames = useMemo(() => {
     const memoStartTime = performance.now();
     if (!Array.isArray(aggregatedGames) || aggregatedGames.length === 0) {
-      console.log('[BrowseAndProposeScreen] enrichedGames useMemo: returning empty array');
+      logger.debug('[BrowseAndProposeScreen] enrichedGames useMemo: returning empty array');
       return [];
     }
     
@@ -598,7 +599,7 @@ const BrowseAndProposeScreen = () => {
     });
     
     const memoTime = performance.now() - memoStartTime;
-    console.log('[BrowseAndProposeScreen] enrichedGames useMemo complete:', {
+    logger.debug('[BrowseAndProposeScreen] enrichedGames useMemo complete:', {
       inputCount: aggregatedGames.length,
       outputCount: result.length,
       timeMs: memoTime.toFixed(2),
@@ -650,13 +651,13 @@ const BrowseAndProposeScreen = () => {
 
     // Prevent multiple simultaneous calculations
     if (matchScoresCalculationInProgressRef.current) {
-      console.log('[BrowseAndPropose] Match scores calculation already in progress, skipping');
+      logger.debug('[BrowseAndPropose] Match scores calculation already in progress, skipping');
       return;
     }
 
     const loadMatchScores = async () => {
       const startTime = performance.now();
-      console.log('[BrowseAndPropose] Starting match scores calculation', {
+      logger.debug('[BrowseAndPropose] Starting match scores calculation', {
         enrichedGamesCount: enrichedGamesRef.current?.length || 0,
         proposedGamesCount: proposedGamesRef.current?.length || 0,
       });
@@ -706,14 +707,14 @@ const BrowseAndProposeScreen = () => {
         }
         
         if (allGamesToScore.length === 0) {
-          console.log('[BrowseAndPropose] No new games to score');
+          logger.debug('[BrowseAndPropose] No new games to score');
           matchScoresCalculationInProgressRef.current = false;
           return; // All scores already calculated or no games
         }
         
         const userCollection = collectionsRef.current[userId] || [];
         if (userCollection.length === 0) {
-          console.log('[BrowseAndPropose] User collection is empty');
+          logger.debug('[BrowseAndPropose] User collection is empty');
           matchScoresCalculationInProgressRef.current = false;
           return;
         }
@@ -727,7 +728,7 @@ const BrowseAndProposeScreen = () => {
           favorite: 2,
         };
         
-        console.log('[BrowseAndPropose] Processing match scores', {
+        logger.debug('[BrowseAndPropose] Processing match scores', {
           gamesToScore: allGamesToScore.length,
           userCollectionSize: userCollection.length,
         });
@@ -760,7 +761,7 @@ const BrowseAndProposeScreen = () => {
           }
         });
         
-        console.log('[BrowseAndPropose] Stored scores found', {
+        logger.debug('[BrowseAndPropose] Stored scores found', {
           storedCount: Object.keys(scores).length,
           needsCalculation: gamesNeedingCalculation.length,
         });
@@ -771,7 +772,7 @@ const BrowseAndProposeScreen = () => {
           // Batch calculate all matches at once (much more efficient)
           const gamesToCalculate = gamesNeedingCalculation.filter(({ game }) => game && game._bggData);
           if (gamesToCalculate.length > 0) {
-            console.log('[BrowseAndPropose] Calculating match scores for', gamesToCalculate.length, 'games');
+            logger.debug('[BrowseAndPropose] Calculating match scores for', gamesToCalculate.length, 'games');
             const calculationStartTime = performance.now();
             
             const preCalculatedMatches = preCalculateAllMatches(
@@ -800,7 +801,7 @@ const BrowseAndProposeScreen = () => {
             });
             
             const calculationTime = performance.now() - calculationStartTime;
-            console.log('[BrowseAndPropose] Match score calculation completed', {
+            logger.debug('[BrowseAndPropose] Match score calculation completed', {
               timeMs: calculationTime.toFixed(2),
               gamesCalculated: gamesToCalculate.length,
             });
@@ -815,12 +816,12 @@ const BrowseAndProposeScreen = () => {
           matchScoresRef.current = scores; // Update ref
           setMatchScores(scores);
           const totalTime = performance.now() - startTime;
-          console.log('[BrowseAndPropose] Match scores updated', {
+          logger.debug('[BrowseAndPropose] Match scores updated', {
             totalTimeMs: totalTime.toFixed(2),
             scoresCount: Object.keys(scores).length,
           });
         } else {
-          console.log('[BrowseAndPropose] No new scores to update');
+          logger.debug('[BrowseAndPropose] No new scores to update');
         }
       } catch (error) {
         console.error('[BrowseAndPropose] Error in loadMatchScores:', error);
@@ -932,9 +933,9 @@ const BrowseAndProposeScreen = () => {
     const loadEvent = async () => {
       try {
         setLoading(true);
-        console.log('[BrowseAndProposeScreen] Loading event:', eventId);
+        logger.debug('[BrowseAndProposeScreen] Loading event:', eventId);
         const eventData = await getEventById(eventId);
-        console.log('[BrowseAndProposeScreen] Event loaded:', {
+        logger.debug('[BrowseAndProposeScreen] Event loaded:', {
           hasEventData: !!eventData,
           eventId: eventData?.id,
           eventName: eventData?.name,
@@ -974,8 +975,8 @@ const BrowseAndProposeScreen = () => {
   useEffect(() => {
     if (!event?.id || !db) return;
     
-    console.log('[BrowseAndProposeScreen] Setting up members listener for event:', event.id);
-    console.log('[BrowseAndProposeScreen] Current user and event info:', {
+    logger.debug('[BrowseAndProposeScreen] Setting up members listener for event:', event.id);
+    logger.debug('[BrowseAndProposeScreen] Current user and event info:', {
       userId,
       eventId: event.id,
       eventOrganizerId: event?.organizerId,
@@ -995,7 +996,7 @@ const BrowseAndProposeScreen = () => {
         const memberDoc = await memberDocRef.get();
         
         if (!memberDoc.exists) {
-          console.log('[BrowseAndProposeScreen] Member document does not exist, creating it...', {
+          logger.debug('[BrowseAndProposeScreen] Member document does not exist, creating it...', {
             eventId: event.id,
             userId,
             isInMemberIds: event?.members?.some(m => m.userId === userId) || false,
@@ -1020,12 +1021,12 @@ const BrowseAndProposeScreen = () => {
               rsvpStatuses: {},
             }, { merge: true });
             
-            console.log('[BrowseAndProposeScreen] Member document created successfully');
+            logger.debug('[BrowseAndProposeScreen] Member document created successfully');
           } else {
             console.warn('[BrowseAndProposeScreen] User is not a member, cannot create member document');
           }
         } else {
-          console.log('[BrowseAndProposeScreen] Member document exists:', {
+          logger.debug('[BrowseAndProposeScreen] Member document exists:', {
             eventId: event.id,
             userId,
             hasData: !!memberDoc.data()
@@ -1053,7 +1054,7 @@ const BrowseAndProposeScreen = () => {
           .then((groupDoc) => {
             if (groupDoc.exists) {
               const groupData = groupDoc.data();
-              console.log('[BrowseAndProposeScreen] Group document read successful:', {
+              logger.debug('[BrowseAndProposeScreen] Group document read successful:', {
                 groupId: event.id,
                 memberIds: groupData.memberIds || [],
                 isActive: groupData.isActive,
@@ -1075,11 +1076,11 @@ const BrowseAndProposeScreen = () => {
       })
       .then(() => {
         // Now set up the members listener after member document is ensured
-        console.log('[BrowseAndProposeScreen] Setting up members listener after ensuring member document');
+        logger.debug('[BrowseAndProposeScreen] Setting up members listener after ensuring member document');
         unsubscribeMembers = db.collection('gamingGroups').doc(event.id)
           .collection('members')
           .onSnapshot(async (snapshot) => {
-        console.log('[BrowseAndProposeScreen] Members snapshot received:', {
+        logger.debug('[BrowseAndProposeScreen] Members snapshot received:', {
           size: snapshot.size,
           empty: snapshot.empty,
           eventId: event.id,
@@ -1096,7 +1097,7 @@ const BrowseAndProposeScreen = () => {
         snapshot.forEach((doc) => {
           const data = doc.data();
           const userId = doc.id;
-          console.log(`[BrowseAndProposeScreen] Processing member document ${userId}:`, {
+          logger.debug(`[BrowseAndProposeScreen] Processing member document ${userId}:`, {
             hasRsvpStatuses: !!data.rsvpStatuses,
             hasRsvpStatus: !!data.rsvpStatus,
             rsvpStatuses: data.rsvpStatuses,
@@ -1111,14 +1112,14 @@ const BrowseAndProposeScreen = () => {
           if (data.rsvpStatuses && typeof data.rsvpStatuses === 'object') {
             // New format: rsvpStatuses is an object with date keys
             rsvps[userId] = { ...data.rsvpStatuses };
-            console.log(`[BrowseAndProposeScreen] Member ${userId} RSVPs (new format):`, rsvps[userId]);
+            logger.debug(`[BrowseAndProposeScreen] Member ${userId} RSVPs (new format):`, rsvps[userId]);
           } else if (data.rsvpStatus) {
             // Legacy format: single rsvpStatus field
             rsvps[userId] = { default: data.rsvpStatus };
-            console.log(`[BrowseAndProposeScreen] Member ${userId} RSVP (legacy format):`, rsvps[userId]);
+            logger.debug(`[BrowseAndProposeScreen] Member ${userId} RSVP (legacy format):`, rsvps[userId]);
           } else {
             rsvps[userId] = {};
-            console.log(`[BrowseAndProposeScreen] Member ${userId} has no RSVP data`);
+            logger.debug(`[BrowseAndProposeScreen] Member ${userId} has no RSVP data`);
           }
           
           // Extract name and avatar from member document
@@ -1130,7 +1131,7 @@ const BrowseAndProposeScreen = () => {
           }
         });
         
-        console.log('[BrowseAndProposeScreen] Members loaded:', {
+        logger.debug('[BrowseAndProposeScreen] Members loaded:', {
           count: membersList.length,
           memberIds: membersList.map(m => m.userId),
           rsvpsCount: Object.keys(rsvps).length,
@@ -1412,7 +1413,7 @@ const BrowseAndProposeScreen = () => {
     const ownerUserIds = findGameOwnerUserIds(game, memberNames, members);
     
     if (ownerUserIds.length === 0) {
-      console.log('[notifyGameOwnersAboutProposal] No game owners found');
+      logger.debug('[notifyGameOwnersAboutProposal] No game owners found');
       return;
     }
 
@@ -1448,8 +1449,8 @@ const BrowseAndProposeScreen = () => {
   };
 
   const handleProposeGame = async (game) => {
-    console.log('[BrowseAndPropose] Propose game button clicked');
-    console.log('[BrowseAndPropose] Initial checks:', {
+    logger.debug('[BrowseAndPropose] Propose game button clicked');
+    logger.debug('[BrowseAndPropose] Initial checks:', {
       hasEvent: !!event,
       eventId: event?.id,
       hasDb: !!db,
@@ -1503,7 +1504,7 @@ const BrowseAndProposeScreen = () => {
         const memberDoc = await db.collection('gamingGroups').doc(event.id)
           .collection('members').doc(userId).get();
         hasMemberDoc = memberDoc.exists;
-        console.log('[BrowseAndPropose] Member document check:', {
+        logger.debug('[BrowseAndPropose] Member document check:', {
           exists: hasMemberDoc,
           data: hasMemberDoc ? memberDoc.data() : null,
         });
@@ -1519,7 +1520,7 @@ const BrowseAndProposeScreen = () => {
       const isOrganizer = groupData?.organizerId === userId;
       const isUserMember = hasMemberDoc || isInMemberIds || isOrganizer;
       
-      console.log('[BrowseAndPropose] Membership check:', {
+      logger.debug('[BrowseAndPropose] Membership check:', {
         eventId: event.id,
         userId,
         hasMemberDoc,
@@ -1557,7 +1558,7 @@ const BrowseAndProposeScreen = () => {
             rsvpStatuses: {},
           }, { merge: true });
           
-          console.log('[BrowseAndPropose] Created missing member document');
+          logger.debug('[BrowseAndPropose] Created missing member document');
         } catch (memberDocError) {
           console.warn('[BrowseAndPropose] Error creating member document:', memberDocError);
           // Continue anyway - the user is still a member, just might have permission issues
@@ -1578,7 +1579,7 @@ const BrowseAndProposeScreen = () => {
       // Use dateKey in document ID to make proposals date-specific
       const proposalDocId = `${dateKey}_${gameId}`;
       
-      console.log('[BrowseAndPropose] Attempting to save proposal:', {
+      logger.debug('[BrowseAndPropose] Attempting to save proposal:', {
         eventId: event.id,
         gameId,
         dateKey,
@@ -1598,7 +1599,7 @@ const BrowseAndProposeScreen = () => {
         .doc(proposalDocId)
         .set(finalProposalDoc, { merge: true });
       
-      console.log('[BrowseAndPropose] Proposal saved successfully');
+      logger.debug('[BrowseAndPropose] Proposal saved successfully');
       
       // Note: userProposals and proposedGames will be updated via the snapshot listener
       // No need to manually update state here

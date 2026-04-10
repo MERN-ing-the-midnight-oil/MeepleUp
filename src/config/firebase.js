@@ -25,16 +25,16 @@ if (__DEV__) {
   const expoKey = process.env.EXPO_PUBLIC_FIREBASE_API_KEY;
   const reactKey = process.env.REACT_APP_FIREBASE_API_KEY;
   
-  console.log('🔍 Environment Variable Check:');
-  console.log('  EXPO_PUBLIC_FIREBASE_API_KEY:', expoKey ? expoKey.substring(0, 10) + '...' : '❌ NOT SET');
-  console.log('  REACT_APP_FIREBASE_API_KEY:', reactKey ? reactKey.substring(0, 10) + '...' : '❌ NOT SET');
+  logger.debug('🔍 Environment Variable Check:');
+  logger.debug('  EXPO_PUBLIC_FIREBASE_API_KEY:', expoKey ? expoKey.substring(0, 10) + '...' : '❌ NOT SET');
+  logger.debug('  REACT_APP_FIREBASE_API_KEY:', reactKey ? reactKey.substring(0, 10) + '...' : '❌ NOT SET');
   
   if (apiKey) {
-    console.log('✅ Firebase API Key loaded:', apiKey.substring(0, 10) + '...');
+    logger.debug('✅ Firebase API Key loaded:', apiKey.substring(0, 10) + '...');
   } else {
     console.error('❌ Firebase API Key NOT FOUND in environment variables!');
-    console.log('Looking for: EXPO_PUBLIC_FIREBASE_API_KEY or REACT_APP_FIREBASE_API_KEY');
-    console.log('Make sure your .env file is in the project root and you restarted the server.');
+    logger.debug('Looking for: EXPO_PUBLIC_FIREBASE_API_KEY or REACT_APP_FIREBASE_API_KEY');
+    logger.debug('Make sure your .env file is in the project root and you restarted the server.');
   }
 }
 
@@ -92,7 +92,6 @@ if (missingFields.length > 0) {
     if (!firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
       logger.info('Firebase initialized successfully');
-      console.log('✅ Firebase initialized successfully');
     }
   } catch (error) {
     firebaseInitError = error;

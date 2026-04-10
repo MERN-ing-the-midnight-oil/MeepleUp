@@ -5,6 +5,7 @@ import { getGameBadges, getStarRating } from '../utils/gameBadges';
 import { mapFontNameToFamily, shouldUseBoldWeight } from '../utils/fontMapper';
 import { loadFontOnDemand, isFontLoaded } from '../utils/fontLoader';
 import CategoryBadge from './CategoryBadge';
+import logger from '../utils/logger';
 
 /**
  * Enhanced Game Card Component with AI-Styled Support
@@ -129,7 +130,7 @@ const GameCard = ({ game, onDelete }) => {
       fontName = styling.fontFamily || styling.fontName || styling.fontStyle || null;
       
       if (__DEV__ && styling.fontFamily) {
-        console.log('[GameCard] Found fontFamily from Claude:', styling.fontFamily);
+        logger.debug('[GameCard] Found fontFamily from Claude:', styling.fontFamily);
       }
     }
   } catch (error) {
@@ -150,7 +151,7 @@ const GameCard = ({ game, onDelete }) => {
       }
       shouldBold = shouldUseBoldWeight(fontName);
       if (__DEV__) {
-        console.log('[GameCard] Font mapping:', {
+        logger.debug('[GameCard] Font mapping:', {
           fontName,
           fontFamily,
           shouldBold,
@@ -160,7 +161,7 @@ const GameCard = ({ game, onDelete }) => {
         });
       }
     } else if (__DEV__ && hasStyling) {
-      console.log('[GameCard] No fontName provided in styling:', styling);
+      logger.debug('[GameCard] No fontName provided in styling:', styling);
     }
   } catch (error) {
     console.warn('Error mapping font:', fontName, error);

@@ -2,6 +2,7 @@ import { getApp } from 'firebase/app';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { API_CONFIG } from '../config/api';
 import firebase, { auth } from '../config/firebase';
+import logger from '../utils/logger';
 
 /** Matches Firebase callable HTTP timeout (see @firebase/functions). */
 const CALLABLE_FETCH_TIMEOUT_MS = 70000;
@@ -92,7 +93,7 @@ const invokeCallableWithBearer = async (app, functionName, dataPayload, idTokenO
   const functionsInstance = getFunctions(app);
   const url = functionsInstance._url(functionName);
   if (__DEV__) {
-    console.log('[Claude API] Callable URL:', url);
+    logger.debug('[Claude API] Callable URL:', url);
   }
 
   let idToken =
@@ -222,7 +223,7 @@ const logCallableAuthDiagnostics = (logPrefix) => {
     const compatUid = compatAuth?.currentUser?.uid ?? null;
     const mismatch = modularUid !== compatUid;
     const pathLabel = 'explicit-bearer-fetch';
-    console.log(`${logPrefix} [auth diag]`, {
+    logger.debug(`${logPrefix} [auth diag]`, {
       callablePath: pathLabel,
       modularUid,
       compatFirebaseAuthUid: compatUid,
@@ -449,8 +450,8 @@ const parseClaudeJson = (text) => {
 
   // Log the raw response for debugging
   if (__DEV__) {
-    console.log('[Claude API] Raw response text (first 1000 chars):', text.substring(0, 1000));
-    console.log('[Claude API] Raw response text length:', text.length);
+    logger.debug('[Claude API] Raw response text (first 1000 chars):', text.substring(0, 1000));
+    logger.debug('[Claude API] Raw response text length:', text.length);
   }
 
   // Try to extract JSON from markdown code blocks if present
@@ -574,7 +575,7 @@ const parseClaudeJson = (text) => {
     
     try {
       const parsed = JSON.parse(fixedText);
-      console.log('[Claude API] Successfully fixed and parsed incomplete JSON');
+      logger.debug('[Claude API] Successfully fixed and parsed incomplete JSON');
       return parsed;
     } catch (fixError) {
       // Log more details about the parsing error
@@ -652,7 +653,7 @@ const callClaudeAPI = async (userContent, options = {}) => {
       if (attempt > 0) {
         const delayMs = Math.pow(2, attempt - 1) * 1000;
         if (__DEV__) {
-          console.log(`${logPrefix} Retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
+          logger.debug(`${logPrefix} Retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
         }
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
@@ -660,13 +661,13 @@ const callClaudeAPI = async (userContent, options = {}) => {
       const { data: responseData } = await callClaudeCallableWithFallback(app, payload);
 
       if (__DEV__) {
-        console.log(`${logPrefix} Full response structure:`, JSON.stringify(responseData, null, 2).substring(0, 1000));
+        logger.debug(`${logPrefix} Full response structure:`, JSON.stringify(responseData, null, 2).substring(0, 1000));
       }
 
       const rawText = extractTextFromClaudeResponse(responseData?.content);
 
       if (__DEV__) {
-        console.log(`${logPrefix} Extracted raw text length:`, rawText?.length || 0);
+        logger.debug(`${logPrefix} Extracted raw text length:`, rawText?.length || 0);
       }
 
       if (!rawText || rawText.trim().length === 0) {
@@ -790,9 +791,9 @@ export const buildGameIdentificationPrompt = buildPrompt;
  * @returns {Promise<{ games: Array<string>, rawText: string }>}
  */
 export const titlesFromText = async (gameListText) => {
-  console.log('[Claude → BGG] Starting titlesFromText with input text:');
-  console.log('[Claude → BGG] Input length:', gameListText?.length || 0);
-  console.log('[Claude → BGG] Input preview:', gameListText?.substring(0, 200) || 'empty');
+  logger.debug('[Claude → BGG] Starting titlesFromText with input text:');
+  logger.debug('[Claude → BGG] Input length:', gameListText?.length || 0);
+  logger.debug('[Claude → BGG] Input preview:', gameListText?.substring(0, 200) || 'empty');
   
   if (!gameListText || !gameListText.trim()) {
     throw new Error('A game list is required to format.');
@@ -848,10 +849,10 @@ ${gameListText.trim()}`;
   const gamesList = parsed.games ?? [];
   
   // Log what titles Claude identified
-  console.log('[Claude → BGG] Claude identified the following game titles:');
-  console.log(`[Claude → BGG] Total titles: ${gamesList.length}`);
+  logger.debug('[Claude → BGG] Claude identified the following game titles:');
+  logger.debug(`[Claude → BGG] Total titles: ${gamesList.length}`);
   gamesList.forEach((title, index) => {
-    console.log(`[Claude → BGG] ${index + 1}. "${title}"`);
+    logger.debug(`[Claude → BGG] ${index + 1}. "${title}"`);
   });
 
   return {

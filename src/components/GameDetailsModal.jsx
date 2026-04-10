@@ -18,6 +18,7 @@ import { getMatchScore, calculateMatchScoresForGame } from '../services/matchSco
 import { preCalculateAllMatches, calculateGameScore } from '../utils/optimizedRecommendations';
 import Input from './common/Input';
 import Button from './common/Button';
+import logger from '../utils/logger';
 
 const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: preloadedBggDataProp = null, preloadedBggDataPayload, isOpen, onClose, eventMembers = null, memberNames = {}, eventId = null, owners = [], onProposeGame = null, userProposals = [], userProposalLimit = 5, proposalId = null, selectedDate = null }) => {
   const navigation = useNavigation();
@@ -474,7 +475,7 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
 
   // Handle submitting a comment
   const handleSubmitComment = async () => {
-    console.log('[GameDetailsModal] handleSubmitComment called', {
+    logger.debug('[GameDetailsModal] handleSubmitComment called', {
       proposalId,
       eventId,
       userId,
@@ -503,7 +504,7 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
         updatedAt: firebase.firestore.Timestamp.now(),
       };
 
-      console.log('[GameDetailsModal] Attempting to submit comment', {
+      logger.debug('[GameDetailsModal] Attempting to submit comment', {
         eventId,
         proposalId,
         userId,
@@ -520,7 +521,7 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
       try {
         const memberDoc = await db.collection('gamingGroups').doc(eventId)
           .collection('members').doc(userId).get();
-        console.log('[GameDetailsModal] Member document check', {
+        logger.debug('[GameDetailsModal] Member document check', {
           exists: memberDoc.exists,
           data: memberDoc.exists ? memberDoc.data() : null,
         });
@@ -544,7 +545,7 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
             organizerId: groupData.organizerId,
             memberIds: memberIds.slice(0, 5), // First 5 for logging
           };
-          console.log('[GameDetailsModal] Group membership check', groupMembershipInfo);
+          logger.debug('[GameDetailsModal] Group membership check', groupMembershipInfo);
         } else {
           console.warn('[GameDetailsModal] Group document does not exist!', { eventId });
         }
@@ -552,7 +553,7 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
         console.warn('[GameDetailsModal] Error checking group data:', groupCheckError);
       }
 
-      console.log('[GameDetailsModal] About to submit comment to Firestore', {
+      logger.debug('[GameDetailsModal] About to submit comment to Firestore', {
         path: `gamingGroups/${eventId}/nominations/${proposalId}/comments`,
         commentData: {
           userId,
@@ -567,7 +568,7 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
         .collection('comments')
         .add(commentData);
 
-      console.log('[GameDetailsModal] Comment submitted successfully', {
+      logger.debug('[GameDetailsModal] Comment submitted successfully', {
         commentId: commentRef.id,
       });
 
@@ -590,13 +591,13 @@ const GameDetailsModal = ({ game: gameProp, gamePayload, preloadedBggData: prelo
 
   // Guard against invalid game data
   if (!game || (typeof game !== 'object')) {
-    console.log('[GameDetailsModal] Guard clause: game is invalid', { game, isOpen });
+    logger.debug('[GameDetailsModal] Guard clause: game is invalid', { game, isOpen });
     return null;
   }
 
   // Ensure isOpen is a boolean
   const modalVisible = Boolean(isOpen);
-  console.log('[GameDetailsModal] Rendering modal', { 
+  logger.debug('[GameDetailsModal] Rendering modal', { 
     gameTitle: game?.title, 
     isOpen, 
     modalVisible,

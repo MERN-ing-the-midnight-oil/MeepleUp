@@ -23,10 +23,13 @@
     },
     "production": {
       "distribution": "store",
+      "autoIncrement": true,
       "ios": {
         "buildConfiguration": "Release",
         "simulator": false,
-        "cache": { "key": "pods-2025-02" },
+        "cache": {
+          "key": "pods-2025-02"
+        },
         "cocoapods": "1.16.2"
       },
       "android": {
@@ -38,10 +41,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "rhyssmoker",
+        "appleId": "r.smoker@gmail.com",
         "appleTeamId": "5C646HCA5F"
       }
     }
   }
 }
-

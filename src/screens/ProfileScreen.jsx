@@ -10,6 +10,7 @@ import PersonalMatchSettings from '../components/PersonalMatchSettings';
 import { pickAndUploadImage, deleteImageFromFirebase } from '../utils/imageUpload';
 import { theme, commonStyles } from '../utils/theme';
 import { useResponsive, getResponsiveValue } from '../utils/responsive';
+import logger from '../utils/logger';
 
 const ProfileScreen = () => {
   const { width } = useWindowDimensions();
@@ -159,8 +160,8 @@ const ProfileScreen = () => {
 
   const handleSubmit = async () => {
     if (__DEV__) {
-      console.log('[ProfileScreen] handleSubmit called');
-      console.log('[ProfileScreen] Current userData:', {
+      logger.debug('[ProfileScreen] handleSubmit called');
+      logger.debug('[ProfileScreen] Current userData:', {
         bio: userData.bio?.substring(0, 50) + '...',
         bggUsername: userData.bggUsername,
         zipcode: userData.zipcode,
@@ -170,23 +171,23 @@ const ProfileScreen = () => {
 
     // Validate zipcode before submitting
     if (__DEV__) {
-      console.log('[ProfileScreen] Validating zipcode...');
+      logger.debug('[ProfileScreen] Validating zipcode...');
     }
     const zipcodeValidationError = validateZipcode(userData.zipcode);
     if (zipcodeValidationError) {
       if (__DEV__) {
-        console.log('[ProfileScreen] Zipcode validation failed:', zipcodeValidationError);
+        logger.debug('[ProfileScreen] Zipcode validation failed:', zipcodeValidationError);
       }
       setZipcodeError(zipcodeValidationError);
       setMessage('');
       return;
     }
     if (__DEV__) {
-      console.log('[ProfileScreen] Zipcode validation passed');
+      logger.debug('[ProfileScreen] Zipcode validation passed');
     }
 
     if (__DEV__) {
-      console.log('[ProfileScreen] Setting saving state to true');
+      logger.debug('[ProfileScreen] Setting saving state to true');
     }
     setSaving(true);
     setMessage('');
@@ -199,7 +200,7 @@ const ProfileScreen = () => {
         zipcode: userData.zipcode.trim() || '', // Save as zipcode, trim whitespace
       };
       if (__DEV__) {
-        console.log('[ProfileScreen] Calling updateUser with data:', {
+        logger.debug('[ProfileScreen] Calling updateUser with data:', {
           ...updateData,
           bio: updateData.bio?.substring(0, 50) + '...',
           bioLength: updateData.bio?.length || 0,
@@ -210,21 +211,21 @@ const ProfileScreen = () => {
       await updateUser(updateData);
       const updateDuration = Date.now() - updateStartTime;
       if (__DEV__) {
-        console.log('[ProfileScreen] updateUser completed in', updateDuration, 'ms');
+        logger.debug('[ProfileScreen] updateUser completed in', updateDuration, 'ms');
       }
 
       if (__DEV__) {
-        console.log('[ProfileScreen] Calling refreshUser...');
+        logger.debug('[ProfileScreen] Calling refreshUser...');
       }
       const refreshStartTime = Date.now();
       await refreshUser();
       const refreshDuration = Date.now() - refreshStartTime;
       if (__DEV__) {
-        console.log('[ProfileScreen] refreshUser completed in', refreshDuration, 'ms');
+        logger.debug('[ProfileScreen] refreshUser completed in', refreshDuration, 'ms');
       }
 
       if (__DEV__) {
-        console.log('[ProfileScreen] Profile update successful');
+        logger.debug('[ProfileScreen] Profile update successful');
       }
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
@@ -237,11 +238,11 @@ const ProfileScreen = () => {
       setMessage(error.message || 'Failed to update profile. Please try again.');
     } finally {
       if (__DEV__) {
-        console.log('[ProfileScreen] Setting saving state to false');
+        logger.debug('[ProfileScreen] Setting saving state to false');
       }
       setSaving(false);
       if (__DEV__) {
-        console.log('[ProfileScreen] handleSubmit completed');
+        logger.debug('[ProfileScreen] handleSubmit completed');
       }
     }
   };
@@ -368,12 +369,12 @@ const ProfileScreen = () => {
     try {
       // Show a message that this may take a moment
       if (__DEV__) {
-        console.log('Starting account deletion...');
+        logger.debug('Starting account deletion...');
       }
       await deleteAccount();
       // User will be logged out automatically
       if (__DEV__) {
-        console.log('Account deletion successful');
+        logger.debug('Account deletion successful');
       }
     } catch (error) {
       setDeleting(false);

@@ -3,6 +3,8 @@
  * Pre-calculates all matches once, then applies weights quickly on slider changes
  */
 
+import logger from './logger';
+
 /**
  * Decode HTML entities in text
  * Converts entities like &#039; to '
@@ -42,8 +44,8 @@ const decodeHTML = (text) => {
  */
 export const preCalculateAllMatches = async (games, userCollection, onProgress = null) => {
   const startTime = performance.now();
-  console.log('[optimizedRecommendations] ========== preCalculateAllMatches START ==========');
-  console.log('[optimizedRecommendations] Input:', {
+  logger.debug('[optimizedRecommendations] ========== preCalculateAllMatches START ==========');
+  logger.debug('[optimizedRecommendations] Input:', {
     gamesCount: games.length,
     userCollectionCount: userCollection.length,
     timestamp: new Date().toISOString(),
@@ -96,11 +98,11 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
       const allUnknown = favorited.every(g => g.title === 'Unknown Game');
       if (allUnknown) {
         console.warn('[optimizedRecommendations] All favorited games are "Unknown Game" - collection data may not be loaded properly');
-        console.log('[optimizedRecommendations] Sample favorite game data:', favorited[0]);
+        logger.debug('[optimizedRecommendations] Sample favorite game data:', favorited[0]);
       } else {
-        console.log('[optimizedRecommendations] Normalized favorited games:', favorited.length);
+        logger.debug('[optimizedRecommendations] Normalized favorited games:', favorited.length);
         favorited.slice(0, 3).forEach((game, idx) => {
-          console.log(`[optimizedRecommendations] Normalized favorite ${idx + 1}:`, {
+          logger.debug(`[optimizedRecommendations] Normalized favorite ${idx + 1}:`, {
             title: game.title,
             publisher: game.publisher || '(none)',
             mechanicsCount: game.mechanics.length,
@@ -116,7 +118,7 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
   }
 
   const normalizationDuration = performance.now() - normalizationStartTime;
-  console.log('[optimizedRecommendations] Normalization complete:', {
+  logger.debug('[optimizedRecommendations] Normalization complete:', {
     normalizedCount: normalizedUserCollection.length,
     favoritedCount: normalizedUserCollection.filter(g => g.isFavorite).length,
     timeMs: normalizationDuration.toFixed(2),
@@ -127,7 +129,7 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
   const CHUNK_SIZE = 50; // Process 50 games at a time
   const totalGames = games.length;
   
-  console.log('[optimizedRecommendations] Starting chunk processing:', {
+  logger.debug('[optimizedRecommendations] Starting chunk processing:', {
     totalGames,
     chunkSize: CHUNK_SIZE,
     totalChunks: Math.ceil(totalGames / CHUNK_SIZE),
@@ -149,7 +151,7 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
     
     // Log first few game IDs being calculated for debugging
     if (index < 3) {
-      console.log(`[optimizedRecommendations] Pre-calculating for game ${index}:`, {
+      logger.debug(`[optimizedRecommendations] Pre-calculating for game ${index}:`, {
         gameId: String(gameId),
         bggId: game.bggId,
         id: game.id,
@@ -262,7 +264,7 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
     
     // Log every chunk or every 10%
     if (chunkIndex % 10 === 0 || progressPercent % 10 === 0 || chunkProcessDuration > 1000) {
-      console.log('[optimizedRecommendations] Chunk processed:', {
+      logger.debug('[optimizedRecommendations] Chunk processed:', {
         chunkIndex,
         totalChunks,
         gamesProcessed,
@@ -304,8 +306,8 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
   }
   
   const totalDuration = performance.now() - startTime;
-  console.log('[optimizedRecommendations] ========== preCalculateAllMatches COMPLETE ==========');
-  console.log('[optimizedRecommendations] Summary:', {
+  logger.debug('[optimizedRecommendations] ========== preCalculateAllMatches COMPLETE ==========');
+  logger.debug('[optimizedRecommendations] Summary:', {
     totalGames,
     totalUserGames: normalizedUserCollection.length,
     totalTimeMs: totalDuration.toFixed(2),
@@ -325,7 +327,7 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
     ).length;
     
     // Always log to help debug matching issues
-    console.log('[optimizedRecommendations] Pre-calculated matches:', {
+    logger.debug('[optimizedRecommendations] Pre-calculated matches:', {
       totalGames: games.length,
       totalUserGames: normalizedUserCollection.length,
       favoritedUserGames: normalizedUserCollection.filter(g => g.isFavorite).length,
@@ -334,12 +336,12 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
     
     // If no matches found, log sample data to debug
     if (gamesWithMatches === 0 && normalizedUserCollection.length > 0 && games.length > 0) {
-      console.log('[optimizedRecommendations] No matches found - debugging sample data:');
+      logger.debug('[optimizedRecommendations] No matches found - debugging sample data:');
       
       // Sample a few user games
       const sampleUserGames = normalizedUserCollection.slice(0, 3);
       sampleUserGames.forEach((userGame, idx) => {
-        console.log(`[optimizedRecommendations] Sample user game ${idx + 1}:`, {
+        logger.debug(`[optimizedRecommendations] Sample user game ${idx + 1}:`, {
           title: userGame.title,
           isFavorite: userGame.isFavorite,
           publisher: userGame.publisher || '(none)',
@@ -364,7 +366,7 @@ export const preCalculateAllMatches = async (games, userCollection, onProgress =
         const proposedMechanics = normalizeArray(bggData.mechanics || game.mechanics || []);
         const proposedCategories = normalizeArray(bggData.categories || game.categories || []);
         
-        console.log(`[optimizedRecommendations] Sample game ${idx + 1} being matched:`, {
+        logger.debug(`[optimizedRecommendations] Sample game ${idx + 1} being matched:`, {
           title: game.title || game.name,
           publisher: proposedPublisher || '(none)',
           mechanicsCount: proposedMechanics.length,

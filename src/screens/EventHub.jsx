@@ -42,6 +42,7 @@ import { getBlockedUsers } from '../services/blocking';
 import { pickAndUploadImage } from '../utils/imageUpload';
 import { checkPhotoUploadLimit, incrementPhotoUploadCount } from '../utils/photoUploadTracking';
 import { theme, commonStyles } from '../utils/theme';
+import logger from '../utils/logger';
 import GearIcon from '../components/GearIcon';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -264,13 +265,13 @@ const EventHub = () => {
   
   // Wrap setCollapsedEventCards with logging
   const setCollapsedEventCardsWithLogging = (updater) => {
-    console.log('[EventHub] setCollapsedEventCards called', {
+    logger.debug('[EventHub] setCollapsedEventCards called', {
       currentState: collapsedEventCards,
       updaterType: typeof updater,
     });
     setCollapsedEventCards((prev) => {
       const newState = typeof updater === 'function' ? updater(prev) : updater;
-      console.log('[EventHub] collapsedEventCards state updated', {
+      logger.debug('[EventHub] collapsedEventCards state updated', {
         prevState: prev,
         newState,
       });
@@ -340,14 +341,14 @@ const EventHub = () => {
   
   // Log when announcementForm.content changes
   useEffect(() => {
-    console.log('[ANNOUNCEMENT] announcementForm.content changed to:', JSON.stringify(announcementForm.content), 'length:', announcementForm.content.length);
+    logger.debug('[ANNOUNCEMENT] announcementForm.content changed to:', JSON.stringify(announcementForm.content), 'length:', announcementForm.content.length);
   }, [announcementForm.content]);
   
   // Log when component re-renders (disabled to prevent excessive logging)
   // useEffect(() => {
-  //   console.log('[ANNOUNCEMENT] EventHub component rendered/re-rendered');
-  //   console.log('[ANNOUNCEMENT] announcementForm.content:', JSON.stringify(announcementForm.content));
-  //   console.log('[ANNOUNCEMENT] showAnnouncementModal:', showAnnouncementModal);
+  //   logger.debug('[ANNOUNCEMENT] EventHub component rendered/re-rendered');
+  //   logger.debug('[ANNOUNCEMENT] announcementForm.content:', JSON.stringify(announcementForm.content));
+  //   logger.debug('[ANNOUNCEMENT] showAnnouncementModal:', showAnnouncementModal);
   // });
 
   // Render announcement modal content - NO memoization, just like DiscussionTab
@@ -402,31 +403,31 @@ const EventHub = () => {
           ref={announcementInputRef}
           value={announcementForm.content}
           onChangeText={(text) => {
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.log('[ANNOUNCEMENT INPUT] onChangeText called');
-            console.log('[ANNOUNCEMENT INPUT] Previous value:', JSON.stringify(announcementForm.content));
-            console.log('[ANNOUNCEMENT INPUT] New value:', JSON.stringify(text));
-            console.log('[ANNOUNCEMENT INPUT] Previous length:', announcementForm.content.length);
-            console.log('[ANNOUNCEMENT INPUT] New length:', text.length);
+            logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            logger.debug('[ANNOUNCEMENT INPUT] onChangeText called');
+            logger.debug('[ANNOUNCEMENT INPUT] Previous value:', JSON.stringify(announcementForm.content));
+            logger.debug('[ANNOUNCEMENT INPUT] New value:', JSON.stringify(text));
+            logger.debug('[ANNOUNCEMENT INPUT] Previous length:', announcementForm.content.length);
+            logger.debug('[ANNOUNCEMENT INPUT] New length:', text.length);
             setAnnouncementForm(prev => {
-              console.log('[ANNOUNCEMENT INPUT] setAnnouncementForm called');
+              logger.debug('[ANNOUNCEMENT INPUT] setAnnouncementForm called');
               return { ...prev, content: text };
             });
           }}
           onFocus={() => {
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.log('[ANNOUNCEMENT INPUT] ⭐ FOCUS GAINED ⭐');
-            console.log('[ANNOUNCEMENT INPUT] Current value:', JSON.stringify(announcementForm.content));
-            console.log('[ANNOUNCEMENT INPUT] Ref exists:', !!announcementInputRef.current);
-            console.log('[ANNOUNCEMENT INPUT] Timestamp:', new Date().toISOString());
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            logger.debug('[ANNOUNCEMENT INPUT] ⭐ FOCUS GAINED ⭐');
+            logger.debug('[ANNOUNCEMENT INPUT] Current value:', JSON.stringify(announcementForm.content));
+            logger.debug('[ANNOUNCEMENT INPUT] Ref exists:', !!announcementInputRef.current);
+            logger.debug('[ANNOUNCEMENT INPUT] Timestamp:', new Date().toISOString());
+            logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           }}
           onBlur={() => {
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.log('[ANNOUNCEMENT INPUT] ❌ FOCUS LOST ❌');
-            console.log('[ANNOUNCEMENT INPUT] Current value:', JSON.stringify(announcementForm.content));
-            console.log('[ANNOUNCEMENT INPUT] Timestamp:', new Date().toISOString());
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            logger.debug('[ANNOUNCEMENT INPUT] ❌ FOCUS LOST ❌');
+            logger.debug('[ANNOUNCEMENT INPUT] Current value:', JSON.stringify(announcementForm.content));
+            logger.debug('[ANNOUNCEMENT INPUT] Timestamp:', new Date().toISOString());
+            logger.debug('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           }}
           placeholder="Write your announcement..."
           multiline
@@ -723,8 +724,8 @@ const EventHub = () => {
   
   // Initialize schedule form when event loads (only once per eventId)
   useEffect(() => {
-    console.log('[EventHub] ========== scheduleForm INITIALIZATION useEffect RUNNING ==========');
-    console.log('[EventHub] useEffect trigger - event:', {
+    logger.debug('[EventHub] ========== scheduleForm INITIALIZATION useEffect RUNNING ==========');
+    logger.debug('[EventHub] useEffect trigger - event:', {
       id: event?.id,
       lastInitializedId: lastInitializedEventIdRef.current,
       shouldInitialize: event?.id && event.id !== lastInitializedEventIdRef.current,
@@ -735,9 +736,9 @@ const EventHub = () => {
     });
     
     if (event && event.id && event.id !== lastInitializedEventIdRef.current) {
-      console.log('[EventHub] Initializing scheduleForm for new eventId:', event.id);
+      logger.debug('[EventHub] Initializing scheduleForm for new eventId:', event.id);
       lastInitializedEventIdRef.current = event.id;
-      console.log('[EventHub] Event exists, initializing scheduleForm from event data...');
+      logger.debug('[EventHub] Event exists, initializing scheduleForm from event data...');
       // Parse existing scheduledFor or eventDates
       let selectedDates = [];
       const defaultStartTime = new Date(new Date().setHours(18, 0, 0, 0));
@@ -940,7 +941,7 @@ const EventHub = () => {
           
           // Fallback to users collection if we didn't find avatar in member doc
           if (!avatarFound || !names[member.userId]) {
-            console.log(`[EventHub] Attempting to fetch user document for ${member.userId}`, {
+            logger.debug(`[EventHub] Attempting to fetch user document for ${member.userId}`, {
               needsName: !names[member.userId],
               needsAvatar: !avatarFound,
               currentUser: user?.uid || user?.id,
@@ -953,10 +954,10 @@ const EventHub = () => {
                 console.warn(`[EventHub] User not authenticated, cannot fetch user document for ${member.userId}`);
               }
               
-              console.log(`[EventHub] Fetching from users collection: users/${member.userId}`);
+              logger.debug(`[EventHub] Fetching from users collection: users/${member.userId}`);
               const userDoc = await db.collection('users').doc(member.userId).get();
               
-              console.log(`[EventHub] User document fetch result for ${member.userId}:`, {
+              logger.debug(`[EventHub] User document fetch result for ${member.userId}:`, {
                 exists: userDoc.exists,
                 hasData: !!userDoc.data(),
                 error: null,
@@ -964,7 +965,7 @@ const EventHub = () => {
               
               if (userDoc.exists) {
                 const userData = userDoc.data();
-                console.log(`[EventHub] User document data for ${member.userId}:`, {
+                logger.debug(`[EventHub] User document data for ${member.userId}:`, {
                   hasName: !!userData.name,
                   hasEmail: !!userData.email,
                   hasAvatarUrl: !!userData.avatarUrl,
@@ -973,12 +974,12 @@ const EventHub = () => {
                 
                 if (!names[member.userId]) {
                   names[member.userId] = userData.name || userData.email || member.userId;
-                  console.log(`[EventHub] Set name for ${member.userId}: ${names[member.userId]}`);
+                  logger.debug(`[EventHub] Set name for ${member.userId}: ${names[member.userId]}`);
                 }
                 if (!avatarFound) {
                   if (userData.avatarUrl && userData.avatarUrl.trim() !== '') {
                     avatars[member.userId] = userData.avatarUrl;
-                    console.log(`[EventHub] Found avatar URL for ${member.userId}: ${userData.avatarUrl.substring(0, 50)}...`);
+                    logger.debug(`[EventHub] Found avatar URL for ${member.userId}: ${userData.avatarUrl.substring(0, 50)}...`);
                     
                     // Update member document to cache the avatar URL for future fetches
                     if (event.id) {
@@ -988,7 +989,7 @@ const EventHub = () => {
                         await memberDocRef.set({
                           userAvatarUrl: userData.avatarUrl,
                         }, { merge: true });
-                        console.log(`[EventHub] Cached avatar URL in member document for ${member.userId}`);
+                        logger.debug(`[EventHub] Cached avatar URL in member document for ${member.userId}`);
                       } catch (updateError) {
                         // Silently fail - this is just a cache optimization
                         // Only log if it's not a permission error (permission errors are expected if user is not organizer)
@@ -999,7 +1000,7 @@ const EventHub = () => {
                     }
                   } else {
                     avatars[member.userId] = null;
-                    console.log(`[EventHub] No avatar URL found in user document for ${member.userId}`);
+                    logger.debug(`[EventHub] No avatar URL found in user document for ${member.userId}`);
                   }
                 }
               } else {
@@ -1245,7 +1246,7 @@ const EventHub = () => {
 
     // Check if the status is actually changing
     if (previousStatus === status) {
-      console.log('[EventHub] RSVP status unchanged, skipping update');
+      logger.debug('[EventHub] RSVP status unchanged, skipping update');
       return; // No change, exit early to prevent unnecessary updates
     }
 
@@ -1372,7 +1373,7 @@ const EventHub = () => {
               return getDateKey(sdDate) === getDateKey(newDate);
             });
             
-            console.log('[EventHub] Date changed in Edit Schedule context:', {
+            logger.debug('[EventHub] Date changed in Edit Schedule context:', {
               oldDate: oldDate.toISOString(),
               newDate: newDate.toISOString(),
               oldIndex: selectedDateDetail.index,
@@ -1509,7 +1510,7 @@ const EventHub = () => {
               }
             }
             
-            console.log('[EventHub] Updating scheduleForm.selectedDates after date edit:', {
+            logger.debug('[EventHub] Updating scheduleForm.selectedDates after date edit:', {
               dateChanged,
               oldDate: oldDate?.toISOString(),
               newDate: newDateObj instanceof Date ? newDateObj.toISOString() : newDateObj,
@@ -1578,7 +1579,7 @@ const EventHub = () => {
                 // Remove from scheduleForm.selectedDates (Edit Schedule context)
                 const updatedDates = scheduleForm.selectedDates.filter((_, index) => index !== selectedDateDetail.index);
                 setScheduleForm({ ...scheduleForm, selectedDates: updatedDates });
-                console.log('[EventHub] Deleted date from scheduleForm:', {
+                logger.debug('[EventHub] Deleted date from scheduleForm:', {
                   deletedIndex: selectedDateDetail.index,
                   remainingDates: updatedDates.length,
                 });
@@ -1603,7 +1604,7 @@ const EventHub = () => {
                     return getDateKey(sdDate) !== dateKey;
                   });
                   
-                  console.log('[EventHub] Deleted date from event and scheduleForm:', {
+                  logger.debug('[EventHub] Deleted date from event and scheduleForm:', {
                     deletedDate: dateToDelete.toISOString(),
                     deletedDateKey: dateKey,
                     remainingEventDates: updatedEventDates.length,
@@ -1697,8 +1698,8 @@ const EventHub = () => {
   };
 
   const handleDatesChange = async (dates) => {
-    console.log('[EventHub] ========== handleDatesChange CALLED ==========');
-    console.log('[EventHub] handleDatesChange - input dates:', {
+    logger.debug('[EventHub] ========== handleDatesChange CALLED ==========');
+    logger.debug('[EventHub] handleDatesChange - input dates:', {
       count: dates.length,
       dates: dates.map(d => ({
         date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -1710,7 +1711,7 @@ const EventHub = () => {
       })),
     });
     
-    console.log('[EventHub] Current scheduleForm state:', {
+    logger.debug('[EventHub] Current scheduleForm state:', {
       selectedDatesCount: scheduleForm.selectedDates.length,
       location: scheduleForm.location,
       address: scheduleForm.address,
@@ -1728,7 +1729,7 @@ const EventHub = () => {
       note: d.note !== undefined ? d.note : '',
     }));
     
-    console.log('[EventHub] Dates with locations applied:', {
+    logger.debug('[EventHub] Dates with locations applied:', {
       count: datesWithLocations.length,
       dates: datesWithLocations.map(d => ({
         date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -1740,18 +1741,18 @@ const EventHub = () => {
       })),
     });
     
-    console.log('[EventHub] Updating scheduleForm state with new dates...');
-    console.log('[EventHub] BEFORE setScheduleForm - isOrganizerOrCoOrganizer:', isOrganizerOrCoOrganizer);
-    console.log('[EventHub] BEFORE setScheduleForm - event?.id:', event?.id);
-    console.log('[EventHub] BEFORE setScheduleForm - userId:', userId);
+    logger.debug('[EventHub] Updating scheduleForm state with new dates...');
+    logger.debug('[EventHub] BEFORE setScheduleForm - isOrganizerOrCoOrganizer:', isOrganizerOrCoOrganizer);
+    logger.debug('[EventHub] BEFORE setScheduleForm - event?.id:', event?.id);
+    logger.debug('[EventHub] BEFORE setScheduleForm - userId:', userId);
     
     // CRITICAL: Save scroll position BEFORE state update to prevent scroll reset
     const savedScrollY = scrollPositionRef.current;
-    console.log('[EventHub] Saved scroll position before state update:', savedScrollY);
+    logger.debug('[EventHub] Saved scroll position before state update:', savedScrollY);
     
     setScheduleForm({ ...scheduleForm, selectedDates: datesWithLocations });
     
-    console.log('[EventHub] ✅ scheduleForm state updated (dates should appear green in calendar)');
+    logger.debug('[EventHub] ✅ scheduleForm state updated (dates should appear green in calendar)');
     
     // Restore scroll position immediately using useLayoutEffect-like approach
     // Use a ref to track if we need to restore after this update
@@ -1760,7 +1761,7 @@ const EventHub = () => {
       // in the next frame to minimize the visible jump
       requestAnimationFrame(() => {
         if (scheduleScrollRef.current) {
-          console.log('[EventHub] Restoring scroll position immediately to:', savedScrollY);
+          logger.debug('[EventHub] Restoring scroll position immediately to:', savedScrollY);
           scheduleScrollRef.current.scrollTo({
             y: savedScrollY,
             animated: false,
@@ -1771,7 +1772,7 @@ const EventHub = () => {
     
     // Save to Firestore if user is organizer/co-organizer
     if (isOrganizerOrCoOrganizer && event?.id) {
-      console.log('[EventHub] 🚀 Starting backend save to Firestore...');
+      logger.debug('[EventHub] 🚀 Starting backend save to Firestore...');
       try {
         // Convert dates to ISO string format for Firestore
         const eventDates = datesWithLocations.map(d => ({
@@ -1783,7 +1784,7 @@ const EventHub = () => {
           note: d.note || '',
         }));
         
-        console.log('[EventHub] Calling updateEventSchedule with:', {
+        logger.debug('[EventHub] Calling updateEventSchedule with:', {
           eventId: event.id,
           eventDatesCount: eventDates.length,
           eventDates: eventDates,
@@ -1796,8 +1797,8 @@ const EventHub = () => {
           eventDates: eventDates,
         });
         
-        console.log('[EventHub] ✅ Backend save completed successfully!');
-        console.log('[EventHub] ⚠️  Note: Event object will update, causing re-render, but scheduleForm should not reset');
+        logger.debug('[EventHub] ✅ Backend save completed successfully!');
+        logger.debug('[EventHub] ⚠️  Note: Event object will update, causing re-render, but scheduleForm should not reset');
       } catch (error) {
         console.error('[EventHub] ❌ Error saving to Firestore:', error);
         console.error('[EventHub] Error details:', {
@@ -1808,13 +1809,13 @@ const EventHub = () => {
         // The dates are still in local state, so user can try again
       }
     } else {
-      console.log('[EventHub] ⚠️  Skipping backend save - conditions not met:', {
+      logger.debug('[EventHub] ⚠️  Skipping backend save - conditions not met:', {
         isOrganizerOrCoOrganizer,
         hasEventId: !!event?.id,
       });
     }
     
-    console.log('[EventHub] ========== handleDatesChange COMPLETE ==========');
+    logger.debug('[EventHub] ========== handleDatesChange COMPLETE ==========');
     
     // Restore scroll position immediately - use multiple strategies to ensure it works
     // Strategy 1: Immediate restore (if ScrollView is still mounted)
@@ -1825,7 +1826,7 @@ const EventHub = () => {
           y: savedScroll,
           animated: false,
         });
-        console.log('[EventHub] Immediate scroll restore attempted to:', savedScroll);
+        logger.debug('[EventHub] Immediate scroll restore attempted to:', savedScroll);
       } catch (e) {
         console.warn('[EventHub] Immediate scroll restore failed:', e);
       }
@@ -1838,7 +1839,7 @@ const EventHub = () => {
           y: savedScroll,
           animated: false,
         });
-        console.log('[EventHub] Backup scroll restore to:', savedScroll);
+        logger.debug('[EventHub] Backup scroll restore to:', savedScroll);
       }
     });
   };
@@ -1856,7 +1857,7 @@ const EventHub = () => {
     if (dateCountChanged) {
       const savedScroll = scrollPositionRef.current;
       if (scheduleScrollRef.current && savedScroll > 0) {
-        console.log('[EventHub] useLayoutEffect: Date count changed, restoring scroll to:', savedScroll);
+        logger.debug('[EventHub] useLayoutEffect: Date count changed, restoring scroll to:', savedScroll);
         // Restore synchronously before paint to prevent visible jump
         scheduleScrollRef.current.scrollTo({
           y: savedScroll,
@@ -3641,25 +3642,25 @@ const EventHub = () => {
           // Only update posts if data actually changed to prevent re-render loops
           setPosts(prev => {
             if (prev.length !== postsData.length) {
-              if (__DEV__) console.log('[Tabletalk] Posts count changed:', prev.length, '->', postsData.length);
+              if (__DEV__) logger.debug('[Tabletalk] Posts count changed:', prev.length, '->', postsData.length);
               return postsData;
             }
             // Compare by IDs and serialized data to detect changes
             const prevIds = prev.map(p => p.id).sort().join(',');
             const newIds = postsData.map(p => p.id).sort().join(',');
             if (prevIds !== newIds) {
-              if (__DEV__) console.log('[Tabletalk] Posts IDs changed');
+              if (__DEV__) logger.debug('[Tabletalk] Posts IDs changed');
               return postsData;
             }
             // Compare data by serializing (for detecting content changes)
             const prevKey = JSON.stringify(prev.map(p => ({ id: p.id, content: p.content, commentCount: p.commentCount })).sort((a, b) => a.id.localeCompare(b.id)));
             const newKey = JSON.stringify(postsData.map(p => ({ id: p.id, content: p.content, commentCount: p.commentCount })).sort((a, b) => a.id.localeCompare(b.id)));
             if (prevKey !== newKey) {
-              if (__DEV__) console.log('[Tabletalk] Posts data changed');
+              if (__DEV__) logger.debug('[Tabletalk] Posts data changed');
               return postsData;
             }
             // No change, return previous to prevent re-render
-            if (__DEV__) console.log('[Tabletalk] Posts unchanged, skipping update');
+            if (__DEV__) logger.debug('[Tabletalk] Posts unchanged, skipping update');
             return prev;
           });
           setLoadingPosts(false);
@@ -3719,7 +3720,7 @@ const EventHub = () => {
               setCommentsByPost(prev => {
                 const prevComments = prev[post.id] || [];
                 if (prevComments.length !== commentsData.length) {
-                  if (__DEV__) console.log(`[Tabletalk] Comments count changed for post ${post.id}:`, prevComments.length, '->', commentsData.length);
+                  if (__DEV__) logger.debug(`[Tabletalk] Comments count changed for post ${post.id}:`, prevComments.length, '->', commentsData.length);
                   return {
                     ...prev,
                     [post.id]: commentsData,
@@ -3729,14 +3730,14 @@ const EventHub = () => {
                 const prevKey = JSON.stringify(prevComments.map(c => ({ id: c.id, content: c.content })).sort((a, b) => a.id.localeCompare(b.id)));
                 const newKey = JSON.stringify(commentsData.map(c => ({ id: c.id, content: c.content })).sort((a, b) => a.id.localeCompare(b.id)));
                 if (prevKey !== newKey) {
-                  if (__DEV__) console.log(`[Tabletalk] Comments data changed for post ${post.id}`);
+                  if (__DEV__) logger.debug(`[Tabletalk] Comments data changed for post ${post.id}`);
                   return {
                     ...prev,
                     [post.id]: commentsData,
                   };
                 }
                 // No change, return previous to prevent re-render
-                if (__DEV__) console.log(`[Tabletalk] Comments unchanged for post ${post.id}, skipping update`);
+                if (__DEV__) logger.debug(`[Tabletalk] Comments unchanged for post ${post.id}, skipping update`);
                 return prev;
               });
             },

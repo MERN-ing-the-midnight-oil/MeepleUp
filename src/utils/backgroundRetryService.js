@@ -9,6 +9,7 @@
 import { AppState, Platform } from 'react-native';
 import { getGamesReadyForRetry, markGameRetried, removePendingRetries, getRetryMetadata, hasExceededMaxRetries } from './pendingGameRetries';
 import { retryPendingGameSearches } from './retryPendingGames';
+import logger from './logger';
 
 const CHECK_INTERVAL_MS = 10 * 1000; // Check every 10 seconds for games ready to retry
 let retryServiceActive = false;
@@ -27,7 +28,7 @@ let getUserCollectionFn = null;
 export const startBackgroundRetryService = (addGameToCollection, userId, getUserCollection = null) => {
   if (retryServiceActive) {
     if (__DEV__) {
-      console.log('[BackgroundRetryService] Service already active');
+      logger.debug('[BackgroundRetryService] Service already active');
     }
     return;
   }
@@ -45,7 +46,7 @@ export const startBackgroundRetryService = (addGameToCollection, userId, getUser
   retryServiceActive = true;
 
   if (__DEV__) {
-    console.log('[BackgroundRetryService] Starting background retry service');
+    logger.debug('[BackgroundRetryService] Starting background retry service');
   }
 
   // Check immediately when service starts
@@ -66,7 +67,7 @@ export const startBackgroundRetryService = (addGameToCollection, userId, getUser
   }
 
   if (__DEV__) {
-    console.log('[BackgroundRetryService] Service started (checking every', CHECK_INTERVAL_MS / 1000, 'seconds when app is active)');
+    logger.debug('[BackgroundRetryService] Service started (checking every', CHECK_INTERVAL_MS / 1000, 'seconds when app is active)');
   }
 };
 
@@ -95,7 +96,7 @@ export const stopBackgroundRetryService = () => {
   getUserCollectionFn = null;
 
   if (__DEV__) {
-    console.log('[BackgroundRetryService] Service stopped');
+    logger.debug('[BackgroundRetryService] Service stopped');
   }
 };
 
@@ -104,7 +105,7 @@ export const stopBackgroundRetryService = () => {
  */
 const handleAppStateChange = (nextAppState) => {
   if (__DEV__) {
-    console.log('[BackgroundRetryService] App state changed to:', nextAppState);
+    logger.debug('[BackgroundRetryService] App state changed to:', nextAppState);
   }
 
   if (nextAppState === 'active') {
@@ -140,7 +141,7 @@ const checkAndRetryReadyGames = async () => {
     
     if (gamesToRemove.length > 0) {
       if (__DEV__) {
-        console.log('[BackgroundRetryService] Removing', gamesToRemove.length, 'games that exceeded max retries:', gamesToRemove);
+        logger.debug('[BackgroundRetryService] Removing', gamesToRemove.length, 'games that exceeded max retries:', gamesToRemove);
       }
       await removePendingRetries(gamesToRemove);
     }
@@ -153,7 +154,7 @@ const checkAndRetryReadyGames = async () => {
     }
 
     if (__DEV__) {
-      console.log('[BackgroundRetryService] Found', readyGames.length, 'games ready for retry:', readyGames);
+      logger.debug('[BackgroundRetryService] Found', readyGames.length, 'games ready for retry:', readyGames);
     }
 
     // Mark all ready games as retried (update metadata before attempting)
@@ -168,13 +169,13 @@ const checkAndRetryReadyGames = async () => {
 
     if (result.successCount > 0) {
       if (__DEV__) {
-        console.log('[BackgroundRetryService] Successfully retried', result.successCount, 'games:', result.addedGames);
+        logger.debug('[BackgroundRetryService] Successfully retried', result.successCount, 'games:', result.addedGames);
       }
     }
 
     if (result.failedCount > 0) {
       if (__DEV__) {
-        console.log('[BackgroundRetryService]', result.failedCount, 'games still pending after retry');
+        logger.debug('[BackgroundRetryService]', result.failedCount, 'games still pending after retry');
       }
     }
   } catch (error) {
@@ -272,7 +273,7 @@ const retryPendingGameSearchesFiltered = async (addGameToCollection, gameTitles 
           
           if (alreadyInCollection) {
             if (__DEV__) {
-              console.log('[BackgroundRetryService] Game already in collection, removing from pending retries:', gameTitle, 'BGG ID:', bestMatch.id);
+              logger.debug('[BackgroundRetryService] Game already in collection, removing from pending retries:', gameTitle, 'BGG ID:', bestMatch.id);
             }
             // Remove from pending retries since it's already in collection
             await removePendingRetries([gameTitle]);

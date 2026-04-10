@@ -280,7 +280,7 @@ export const AuthProvider = ({ children }) => {
         // Email was just verified - clear tour completion so user sees the tour
         try {
           await storage.removeItem('meepleup_tour_completed');
-          console.log('[AuthContext] Email verified - cleared tour completion status');
+          logger.debug('[AuthContext] Email verified - cleared tour completion status');
         } catch (error) {
           console.error('[AuthContext] Error clearing tour status:', error);
         }
@@ -310,7 +310,7 @@ export const AuthProvider = ({ children }) => {
         const actionCode = urlParams.get('oobCode');
 
         if (mode === 'verifyEmail' && actionCode) {
-          console.log('Processing email verification callback...');
+          logger.debug('Processing email verification callback...');
           
           // Apply the verification code (works even if user is not logged in)
           await applyActionCode(auth, actionCode);
@@ -322,7 +322,7 @@ export const AuthProvider = ({ children }) => {
             // Clear tour completion status when email is verified
             try {
               await storage.removeItem('meepleup_tour_completed');
-              console.log('[AuthContext] Email verified - cleared tour completion status');
+              logger.debug('[AuthContext] Email verified - cleared tour completion status');
             } catch (error) {
               console.error('[AuthContext] Error clearing tour status:', error);
             }
@@ -332,7 +332,7 @@ export const AuthProvider = ({ children }) => {
           // Clean up URL by removing query parameters
           window.history.replaceState({}, document.title, window.location.pathname);
           
-          console.log('Email verification successful!');
+          logger.debug('Email verification successful!');
         }
       } catch (error) {
         console.error('Error processing email verification:', error);
@@ -366,9 +366,9 @@ export const AuthProvider = ({ children }) => {
     // Check if there's a current user immediately (for debugging)
     const initialUser = auth.currentUser;
     if (initialUser) {
-      console.log('[AuthContext] Initial auth.currentUser found:', initialUser.email);
+      logger.debug('[AuthContext] Initial auth.currentUser found:', initialUser.email);
     } else {
-      console.log('[AuthContext] No initial auth.currentUser - waiting for onAuthStateChanged');
+      logger.debug('[AuthContext] No initial auth.currentUser - waiting for onAuthStateChanged');
     }
 
     // Set up auth state listener
@@ -382,13 +382,13 @@ export const AuthProvider = ({ children }) => {
 
         try {
           if (!firebaseUser) {
-            console.log('[AuthContext] Auth state: No user (user logged out or no persisted session)');
+            logger.debug('[AuthContext] Auth state: No user (user logged out or no persisted session)');
             setUser(null);
             setLoading(false);
             return;
           }
 
-          console.log('[AuthContext] Auth state changed: User found', firebaseUser.email, firebaseUser.uid);
+          logger.debug('[AuthContext] Auth state changed: User found', firebaseUser.email, firebaseUser.uid);
           await loadUserProfile(firebaseUser);
         } catch (error) {
           console.error('[AuthContext] Auth state change error:', error);
@@ -412,14 +412,14 @@ export const AuthProvider = ({ children }) => {
     // This handles edge cases where the listener might not fire immediately
     const timeoutId = setTimeout(async () => {
       if (!authStateResolved && isMounted) {
-        console.log('[AuthContext] Auth state listener timeout, checking currentUser directly...');
+        logger.debug('[AuthContext] Auth state listener timeout, checking currentUser directly...');
         try {
           const currentUser = auth.currentUser;
           if (currentUser) {
-            console.log('[AuthContext] Found currentUser after timeout:', currentUser.email);
+            logger.debug('[AuthContext] Found currentUser after timeout:', currentUser.email);
             await loadUserProfile(currentUser);
           } else {
-            console.log('[AuthContext] No currentUser found after timeout');
+            logger.debug('[AuthContext] No currentUser found after timeout');
             setUser(null);
           }
         } catch (error) {
@@ -556,25 +556,25 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signInWithGoogle = async () => {
-    console.log('🔵 [Google OAuth] Starting Google sign-in flow...');
-    console.log('🔵 [Google OAuth] Platform:', Platform.OS);
+    logger.debug('🔵 [Google OAuth] Starting Google sign-in flow...');
+    logger.debug('🔵 [Google OAuth] Platform:', Platform.OS);
     
     try {
       let credential;
 
       if (Platform.OS === 'web') {
-        console.log('🔵 [Google OAuth] Using web popup method');
+        logger.debug('🔵 [Google OAuth] Using web popup method');
         // Web: Use Firebase's Google Auth Provider with popup
         const provider = new firebase.auth.GoogleAuthProvider();
         // Request additional scopes if needed
         provider.addScope('profile');
         provider.addScope('email');
         
-        console.log('🔵 [Google OAuth] Opening Google sign-in popup...');
+        logger.debug('🔵 [Google OAuth] Opening Google sign-in popup...');
         credential = await signInWithPopup(auth, provider);
-        console.log('🔵 [Google OAuth] Popup completed, credential received');
+        logger.debug('🔵 [Google OAuth] Popup completed, credential received');
       } else {
-        console.log('🔵 [Google OAuth] Using @react-native-google-signin/google-signin (native SDK)');
+        logger.debug('🔵 [Google OAuth] Using @react-native-google-signin/google-signin (native SDK)');
         // Native: Use Google's official React Native SDK
         // This handles all OAuth complexity internally and works with Firebase
         
@@ -589,9 +589,9 @@ export const AuthProvider = ({ children }) => {
         const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_IOS_CLIENT_ID || 
                             '177622732549-7b4p8i1c5gopt58uamjlbrmlo56vtppf.apps.googleusercontent.com';
         
-        console.log('🔵 [Google OAuth] Configuring GoogleSignin:');
-        console.log('🔵 [Google OAuth]   Web Client ID:', webClientId);
-        console.log('🔵 [Google OAuth]   iOS Client ID:', iosClientId, '(also in GoogleService-Info.plist)');
+        logger.debug('🔵 [Google OAuth] Configuring GoogleSignin:');
+        logger.debug('🔵 [Google OAuth]   Web Client ID:', webClientId);
+        logger.debug('🔵 [Google OAuth]   iOS Client ID:', iosClientId, '(also in GoogleService-Info.plist)');
         
         GoogleSignin.configure({
           webClientId: webClientId, // Required for Firebase
@@ -599,21 +599,21 @@ export const AuthProvider = ({ children }) => {
           offlineAccess: true, // Get refresh token
         });
         
-        console.log('🔵 [Google OAuth] GoogleSignin configured');
+        logger.debug('🔵 [Google OAuth] GoogleSignin configured');
         
         // Check if Google Play Services is available (Android only)
         if (Platform.OS === 'android') {
-          console.log('🔵 [Google OAuth] Checking Google Play Services...');
+          logger.debug('🔵 [Google OAuth] Checking Google Play Services...');
           await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-          console.log('🔵 [Google OAuth] Google Play Services available');
+          logger.debug('🔵 [Google OAuth] Google Play Services available');
         }
         
-        console.log('🔵 [Google OAuth] Starting native Google sign-in...');
+        logger.debug('🔵 [Google OAuth] Starting native Google sign-in...');
         
         // Sign in with Google - this opens native Google sign-in UI
         const signInResult = await GoogleSignin.signIn();
         
-        console.log('🔵 [Google OAuth] Sign-in result received:', {
+        logger.debug('🔵 [Google OAuth] Sign-in result received:', {
           hasIdToken: !!signInResult.data?.idToken,
           hasUser: !!signInResult.data?.user,
         });
@@ -626,13 +626,13 @@ export const AuthProvider = ({ children }) => {
           throw new Error('No ID token received from Google sign-in');
         }
         
-        console.log('🔵 [Google OAuth] ID token received, signing in with Firebase...');
+        logger.debug('🔵 [Google OAuth] ID token received, signing in with Firebase...');
         
         // Sign in with Firebase using the Google ID token
         const googleCredential = firebase.auth.GoogleAuthProvider.credential(idToken);
         credential = await signInWithCredential(auth, googleCredential);
         
-        console.log('🔵 [Google OAuth] ✅ Firebase sign-in successful');
+        logger.debug('🔵 [Google OAuth] ✅ Firebase sign-in successful');
       }
 
       if (!credential || !credential.user) {
@@ -642,7 +642,7 @@ export const AuthProvider = ({ children }) => {
 
       // Check if this is a new user or existing user
       const isNewUser = credential.additionalUserInfo?.isNewUser || false;
-      console.log('🔵 [Google OAuth] User info:', {
+      logger.debug('🔵 [Google OAuth] User info:', {
         uid: credential.user.uid,
         email: credential.user.email,
         displayName: credential.user.displayName,
@@ -655,10 +655,10 @@ export const AuthProvider = ({ children }) => {
       let profile = null;
       if (db) {
         try {
-          console.log('🔵 [Google OAuth] Loading user profile from Firestore...');
+          logger.debug('🔵 [Google OAuth] Loading user profile from Firestore...');
           const userDoc = await db.collection('users').doc(credential.user.uid).get();
           if (userDoc.exists) {
-            console.log('🔵 [Google OAuth] Existing user profile found in Firestore');
+            logger.debug('🔵 [Google OAuth] Existing user profile found in Firestore');
             const userData = userDoc.data();
             profile = {
               name: userData.name || credential.user.displayName || '',
@@ -675,9 +675,9 @@ export const AuthProvider = ({ children }) => {
             };
             // Save to local storage as backup
             await storage.setItem(PROFILE_STORAGE_KEY(credential.user.uid), JSON.stringify(profile));
-            console.log('🔵 [Google OAuth] Profile loaded and saved to local storage');
+            logger.debug('🔵 [Google OAuth] Profile loaded and saved to local storage');
           } else {
-            console.log('🔵 [Google OAuth] No existing profile in Firestore');
+            logger.debug('🔵 [Google OAuth] No existing profile in Firestore');
           }
         } catch (firestoreError) {
           console.error('🔵 [Google OAuth] Error loading from Firestore:', firestoreError);
@@ -687,7 +687,7 @@ export const AuthProvider = ({ children }) => {
       // If new user, create profile in Firestore
       if (isNewUser && db) {
         try {
-          console.log('🔵 [Google OAuth] 🆕 NEW USER - Creating profile in Firestore...');
+          logger.debug('🔵 [Google OAuth] 🆕 NEW USER - Creating profile in Firestore...');
           const userRef = db.collection('users').doc(credential.user.uid);
           const defaultProfile = {
             id: credential.user.uid,
@@ -707,7 +707,7 @@ export const AuthProvider = ({ children }) => {
             },
           };
           await userRef.set(defaultProfile);
-          console.log('🔵 [Google OAuth] ✅ New user profile created in Firestore');
+          logger.debug('🔵 [Google OAuth] ✅ New user profile created in Firestore');
           
           // Also save to local storage
           await saveProfile(credential.user.uid, {
@@ -718,29 +718,29 @@ export const AuthProvider = ({ children }) => {
             zipcode: '',
             notificationPreferences: defaultProfile.notificationPreferences,
           });
-          console.log('🔵 [Google OAuth] Profile saved to local storage');
+          logger.debug('🔵 [Google OAuth] Profile saved to local storage');
         } catch (error) {
           console.error('🔵 [Google OAuth] ❌ Error creating Firestore user:', error);
         }
       } else if (!isNewUser) {
-        console.log('🔵 [Google OAuth] ✅ EXISTING USER - Logging in');
+        logger.debug('🔵 [Google OAuth] ✅ EXISTING USER - Logging in');
       }
 
       // Fall back to local storage if Firestore doesn't have it
       if (!profile) {
-        console.log('🔵 [Google OAuth] Loading profile from local storage fallback...');
+        logger.debug('🔵 [Google OAuth] Loading profile from local storage fallback...');
         const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
         profile = stored ? JSON.parse(stored) : {};
         if (stored) {
-          console.log('🔵 [Google OAuth] Profile loaded from local storage');
+          logger.debug('🔵 [Google OAuth] Profile loaded from local storage');
         } else {
-          console.log('🔵 [Google OAuth] No profile found in local storage either');
+          logger.debug('🔵 [Google OAuth] No profile found in local storage either');
         }
       }
 
       const mappedUser = mapUser(credential.user, profile);
       setUser(mappedUser);
-      console.log('🔵 [Google OAuth] ✅ Sign-in complete! User state updated:', {
+      logger.debug('🔵 [Google OAuth] ✅ Sign-in complete! User state updated:', {
         uid: mappedUser.uid,
         email: mappedUser.email,
         name: mappedUser.name,
@@ -759,24 +759,24 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signInWithApple = async () => {
-    console.log('🍎 [Apple OAuth] Starting Apple sign-in flow...');
-    console.log('🍎 [Apple OAuth] Platform:', Platform.OS);
+    logger.debug('🍎 [Apple OAuth] Starting Apple sign-in flow...');
+    logger.debug('🍎 [Apple OAuth] Platform:', Platform.OS);
     
     try {
       let credential;
 
       if (Platform.OS === 'web') {
-        console.log('🍎 [Apple OAuth] Using web popup method');
+        logger.debug('🍎 [Apple OAuth] Using web popup method');
         // Web: Use Firebase's Apple Auth Provider with popup
         const provider = new firebase.auth.OAuthProvider('apple.com');
         provider.addScope('email');
         provider.addScope('name');
         
-        console.log('🍎 [Apple OAuth] Opening Apple sign-in popup...');
+        logger.debug('🍎 [Apple OAuth] Opening Apple sign-in popup...');
         credential = await signInWithPopup(auth, provider);
-        console.log('🍎 [Apple OAuth] Popup completed, credential received');
+        logger.debug('🍎 [Apple OAuth] Popup completed, credential received');
       } else {
-        console.log('🍎 [Apple OAuth] Using native Apple Authentication');
+        logger.debug('🍎 [Apple OAuth] Using native Apple Authentication');
         // Native: Use expo-apple-authentication
         let AppleAuthentication;
         try {
@@ -788,9 +788,9 @@ export const AuthProvider = ({ children }) => {
         }
         
         // Check if Apple Authentication is available
-        console.log('🍎 [Apple OAuth] Checking if Apple Authentication is available...');
+        logger.debug('🍎 [Apple OAuth] Checking if Apple Authentication is available...');
         const isAvailable = await AppleAuthentication.isAvailableAsync();
-        console.log('🍎 [Apple OAuth] Apple Authentication available:', isAvailable);
+        logger.debug('🍎 [Apple OAuth] Apple Authentication available:', isAvailable);
         
         if (!isAvailable) {
           console.error('🍎 [Apple OAuth] ❌ Apple Sign-In not available on this device');
@@ -798,7 +798,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         // Request authentication
-        console.log('🍎 [Apple OAuth] Requesting Apple authentication...');
+        logger.debug('🍎 [Apple OAuth] Requesting Apple authentication...');
         let appleCredential;
         try {
           appleCredential = await AppleAuthentication.signInAsync({
@@ -810,14 +810,14 @@ export const AuthProvider = ({ children }) => {
         } catch (signInError) {
           // Handle user cancellation
           if (signInError.code === 'ERR_CANCELED' || signInError.code === 'ERR_REQUEST_CANCELED') {
-            console.log('🍎 [Apple OAuth] User canceled Apple Sign-In');
+            logger.debug('🍎 [Apple OAuth] User canceled Apple Sign-In');
             throw new Error('Sign-in was canceled');
           }
           console.error('🍎 [Apple OAuth] ❌ Apple Sign-In error:', signInError);
           throw signInError;
         }
         
-        console.log('🍎 [Apple OAuth] Apple authentication response received:', {
+        logger.debug('🍎 [Apple OAuth] Apple authentication response received:', {
           hasIdentityToken: !!appleCredential.identityToken,
           hasAuthorizationCode: !!appleCredential.authorizationCode,
           hasFullName: !!appleCredential.fullName,
@@ -831,8 +831,8 @@ export const AuthProvider = ({ children }) => {
 
         // For native Apple Sign-In, Firebase compat mode's OAuthProvider.credential() doesn't work
         // We need to use a Cloud Function to verify the token and get a custom Firebase token
-        console.log('🍎 [Apple OAuth] Verifying Apple token with Cloud Function...');
-        console.log('🍎 [Apple OAuth] Token details:', {
+        logger.debug('🍎 [Apple OAuth] Verifying Apple token with Cloud Function...');
+        logger.debug('🍎 [Apple OAuth] Token details:', {
           identityTokenLength: appleCredential.identityToken?.length,
           hasAuthorizationCode: !!appleCredential.authorizationCode,
           authorizationCodeLength: appleCredential.authorizationCode?.length,
@@ -856,12 +856,12 @@ export const AuthProvider = ({ children }) => {
           throw new Error('Failed to get custom token from Cloud Function');
         }
         
-        console.log('🍎 [Apple OAuth] ✅ Custom token received from Cloud Function');
-        console.log('🍎 [Apple OAuth] Signing in with custom token...');
+        logger.debug('🍎 [Apple OAuth] ✅ Custom token received from Cloud Function');
+        logger.debug('🍎 [Apple OAuth] Signing in with custom token...');
         
         // Sign in with the custom token
         credential = await signInWithCustomToken(auth, customToken);
-        console.log('🍎 [Apple OAuth] Firebase sign-in successful');
+        logger.debug('🍎 [Apple OAuth] Firebase sign-in successful');
         
         // Update email if provided and not already set
         if (email && !credential.user.email) {
@@ -878,7 +878,7 @@ export const AuthProvider = ({ children }) => {
             : appleCredential.fullName.givenName || appleCredential.fullName.familyName || '';
           
           if (displayName && !credential.user.displayName) {
-            console.log('🍎 [Apple OAuth] Updating user display name:', displayName);
+            logger.debug('🍎 [Apple OAuth] Updating user display name:', displayName);
             await credential.user.updateProfile({ displayName });
           }
         }
@@ -905,7 +905,7 @@ export const AuthProvider = ({ children }) => {
         // Fallback to additionalUserInfo if available
         isNewUser = credential.additionalUserInfo?.isNewUser || false;
       }
-      console.log('🍎 [Apple OAuth] User info:', {
+      logger.debug('🍎 [Apple OAuth] User info:', {
         uid: credential.user.uid,
         email: credential.user.email,
         displayName: credential.user.displayName,
@@ -918,10 +918,10 @@ export const AuthProvider = ({ children }) => {
       let profile = null;
       if (db) {
         try {
-          console.log('🍎 [Apple OAuth] Loading user profile from Firestore...');
+          logger.debug('🍎 [Apple OAuth] Loading user profile from Firestore...');
           const userDoc = await db.collection('users').doc(credential.user.uid).get();
           if (userDoc.exists) {
-            console.log('🍎 [Apple OAuth] Existing user profile found in Firestore');
+            logger.debug('🍎 [Apple OAuth] Existing user profile found in Firestore');
             const userData = userDoc.data();
             profile = {
               name: userData.name || credential.user.displayName || '',
@@ -938,9 +938,9 @@ export const AuthProvider = ({ children }) => {
             };
             // Save to local storage as backup
             await storage.setItem(PROFILE_STORAGE_KEY(credential.user.uid), JSON.stringify(profile));
-            console.log('🍎 [Apple OAuth] Profile loaded and saved to local storage');
+            logger.debug('🍎 [Apple OAuth] Profile loaded and saved to local storage');
           } else {
-            console.log('🍎 [Apple OAuth] No existing profile in Firestore');
+            logger.debug('🍎 [Apple OAuth] No existing profile in Firestore');
           }
         } catch (firestoreError) {
           console.error('🍎 [Apple OAuth] Error loading from Firestore:', firestoreError);
@@ -950,7 +950,7 @@ export const AuthProvider = ({ children }) => {
       // If new user, create profile in Firestore
       if (isNewUser && db) {
         try {
-          console.log('🍎 [Apple OAuth] 🆕 NEW USER - Creating profile in Firestore...');
+          logger.debug('🍎 [Apple OAuth] 🆕 NEW USER - Creating profile in Firestore...');
           const userRef = db.collection('users').doc(credential.user.uid);
           const defaultProfile = {
             id: credential.user.uid,
@@ -970,7 +970,7 @@ export const AuthProvider = ({ children }) => {
             },
           };
           await userRef.set(defaultProfile);
-          console.log('🍎 [Apple OAuth] ✅ New user profile created in Firestore');
+          logger.debug('🍎 [Apple OAuth] ✅ New user profile created in Firestore');
           
           // Also save to local storage
           await saveProfile(credential.user.uid, {
@@ -981,29 +981,29 @@ export const AuthProvider = ({ children }) => {
             zipcode: '',
             notificationPreferences: defaultProfile.notificationPreferences,
           });
-          console.log('🍎 [Apple OAuth] Profile saved to local storage');
+          logger.debug('🍎 [Apple OAuth] Profile saved to local storage');
         } catch (error) {
           console.error('🍎 [Apple OAuth] ❌ Error creating Firestore user:', error);
         }
       } else if (!isNewUser) {
-        console.log('🍎 [Apple OAuth] ✅ EXISTING USER - Logging in');
+        logger.debug('🍎 [Apple OAuth] ✅ EXISTING USER - Logging in');
       }
 
       // Fall back to local storage if Firestore doesn't have it
       if (!profile) {
-        console.log('🍎 [Apple OAuth] Loading profile from local storage fallback...');
+        logger.debug('🍎 [Apple OAuth] Loading profile from local storage fallback...');
         const stored = await storage.getItem(PROFILE_STORAGE_KEY(credential.user.uid));
         profile = stored ? JSON.parse(stored) : {};
         if (stored) {
-          console.log('🍎 [Apple OAuth] Profile loaded from local storage');
+          logger.debug('🍎 [Apple OAuth] Profile loaded from local storage');
         } else {
-          console.log('🍎 [Apple OAuth] No profile found in local storage either');
+          logger.debug('🍎 [Apple OAuth] No profile found in local storage either');
         }
       }
 
       const mappedUser = mapUser(credential.user, profile);
       setUser(mappedUser);
-      console.log('🍎 [Apple OAuth] ✅ Sign-in complete! User state updated:', {
+      logger.debug('🍎 [Apple OAuth] ✅ Sign-in complete! User state updated:', {
         uid: mappedUser.uid,
         email: mappedUser.email,
         name: mappedUser.name,
@@ -1064,21 +1064,21 @@ export const AuthProvider = ({ children }) => {
   };
 
   const refreshUser = async () => {
-    console.log('[AuthContext] refreshUser called');
+    logger.debug('[AuthContext] refreshUser called');
     if (!auth.currentUser) {
-      console.log('[AuthContext] refreshUser: No current user, returning null');
+      logger.debug('[AuthContext] refreshUser: No current user, returning null');
       return null;
     }
 
     // Try to reload auth user, but don't fail if it doesn't work (e.g., when offline)
-    console.log('[AuthContext] Attempting to reload auth user...');
+    logger.debug('[AuthContext] Attempting to reload auth user...');
     const reloadStartTime = Date.now();
     try {
       await Promise.race([
         auth.currentUser.reload(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Auth reload timeout')), 5000))
       ]);
-      console.log('[AuthContext] Auth user reloaded in', Date.now() - reloadStartTime, 'ms');
+      logger.debug('[AuthContext] Auth user reloaded in', Date.now() - reloadStartTime, 'ms');
     } catch (reloadError) {
       const elapsed = Date.now() - reloadStartTime;
       console.warn('[AuthContext] Auth user reload failed or timed out after', elapsed, 'ms:', reloadError);
@@ -1086,13 +1086,13 @@ export const AuthProvider = ({ children }) => {
       // Don't throw - continue with existing auth.currentUser data
     }
 
-    console.log('[AuthContext] Getting profile from storage...');
+    logger.debug('[AuthContext] Getting profile from storage...');
     const storageStartTime = Date.now();
     const stored = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const profile = stored ? JSON.parse(stored) : {};
-    console.log('[AuthContext] Got profile from storage in', Date.now() - storageStartTime, 'ms');
+    logger.debug('[AuthContext] Got profile from storage in', Date.now() - storageStartTime, 'ms');
 
-    console.log('[AuthContext] Mapping and setting user...');
+    logger.debug('[AuthContext] Mapping and setting user...');
     const mappedUser = mapUser(auth.currentUser, profile);
     
     // Check if email was just verified (changed from false to true)
@@ -1103,7 +1103,7 @@ export const AuthProvider = ({ children }) => {
       // Email was just verified - clear tour completion so user sees the tour
       try {
         await storage.removeItem('meepleup_tour_completed');
-        console.log('[AuthContext] Email verified - cleared tour completion status');
+        logger.debug('[AuthContext] Email verified - cleared tour completion status');
       } catch (error) {
         console.error('[AuthContext] Error clearing tour status:', error);
       }
@@ -1111,12 +1111,12 @@ export const AuthProvider = ({ children }) => {
     
     previousEmailVerifiedRef.current = isEmailVerified;
     setUser(mappedUser);
-    console.log('[AuthContext] refreshUser completed');
+    logger.debug('[AuthContext] refreshUser completed');
     return mappedUser;
   };
 
   const updateUser = async (updates = {}) => {
-    console.log('[AuthContext] updateUser called with updates:', {
+    logger.debug('[AuthContext] updateUser called with updates:', {
       ...updates,
       bio: updates.bio ? updates.bio.substring(0, 50) + '...' : updates.bio,
       bioLength: updates.bio?.length || 0,
@@ -1127,42 +1127,42 @@ export const AuthProvider = ({ children }) => {
       throw new Error('No authenticated user');
     }
 
-    console.log('[AuthContext] Getting current profile from storage...');
+    logger.debug('[AuthContext] Getting current profile from storage...');
     const storageStartTime = Date.now();
     const currentProfileRaw = await storage.getItem(PROFILE_STORAGE_KEY(auth.currentUser.uid));
     const currentProfile = currentProfileRaw ? JSON.parse(currentProfileRaw) : {};
-    console.log('[AuthContext] Got current profile in', Date.now() - storageStartTime, 'ms');
+    logger.debug('[AuthContext] Got current profile in', Date.now() - storageStartTime, 'ms');
 
     const nextProfile = {
       ...currentProfile,
       ...updates,
     };
-    console.log('[AuthContext] Merged profile created');
+    logger.debug('[AuthContext] Merged profile created');
 
     // Update Firebase Auth profile if name or photoURL changed
     const authUpdates = {};
     if (typeof updates.name === 'string' && updates.name.trim() !== auth.currentUser.displayName) {
       authUpdates.displayName = updates.name.trim();
-      console.log('[AuthContext] Will update displayName');
+      logger.debug('[AuthContext] Will update displayName');
     }
     if (typeof updates.photoURL === 'string' && updates.photoURL !== auth.currentUser.photoURL) {
       authUpdates.photoURL = updates.photoURL;
-      console.log('[AuthContext] Will update photoURL');
+      logger.debug('[AuthContext] Will update photoURL');
     }
     
     if (Object.keys(authUpdates).length > 0) {
-      console.log('[AuthContext] Updating Firebase Auth profile...');
+      logger.debug('[AuthContext] Updating Firebase Auth profile...');
       const authUpdateStartTime = Date.now();
       await auth.currentUser.updateProfile(authUpdates);
-      console.log('[AuthContext] Firebase Auth profile updated in', Date.now() - authUpdateStartTime, 'ms');
+      logger.debug('[AuthContext] Firebase Auth profile updated in', Date.now() - authUpdateStartTime, 'ms');
     } else {
-      console.log('[AuthContext] No Firebase Auth updates needed');
+      logger.debug('[AuthContext] No Firebase Auth updates needed');
     }
 
     // Save to Firestore
     if (db) {
       try {
-        console.log('[AuthContext] Preparing Firestore update...');
+        logger.debug('[AuthContext] Preparing Firestore update...');
         const userRef = db.collection('users').doc(auth.currentUser.uid);
         const userData = {
           id: auth.currentUser.uid,
@@ -1185,7 +1185,7 @@ export const AuthProvider = ({ children }) => {
           userData.personalMatchWeights = nextProfile.personalMatchWeights;
         }
 
-        console.log('[AuthContext] Saving to Firestore...', {
+        logger.debug('[AuthContext] Saving to Firestore...', {
           ...userData,
           bio: userData.bio?.substring(0, 50) + '...',
           bioLength: userData.bio?.length || 0,
@@ -1203,7 +1203,7 @@ export const AuthProvider = ({ children }) => {
         
         try {
           await Promise.race([firestorePromise, timeoutPromise]);
-          console.log('[AuthContext] Firestore update completed in', Date.now() - firestoreStartTime, 'ms');
+          logger.debug('[AuthContext] Firestore update completed in', Date.now() - firestoreStartTime, 'ms');
         } catch (firestoreError) {
           const elapsed = Date.now() - firestoreStartTime;
           console.error('[AuthContext] Firestore update failed or timed out after', elapsed, 'ms:', firestoreError);
@@ -1227,23 +1227,23 @@ export const AuthProvider = ({ children }) => {
         // Continue anyway, we still saved to local storage
       }
     } else {
-      console.log('[AuthContext] No db instance, skipping Firestore update');
+      logger.debug('[AuthContext] No db instance, skipping Firestore update');
     }
 
-    console.log('[AuthContext] Saving profile to local storage...');
+    logger.debug('[AuthContext] Saving profile to local storage...');
     const saveProfileStartTime = Date.now();
     const savedProfile = await saveProfile(auth.currentUser.uid, nextProfile);
-    console.log('[AuthContext] Profile saved to local storage in', Date.now() - saveProfileStartTime, 'ms');
+    logger.debug('[AuthContext] Profile saved to local storage in', Date.now() - saveProfileStartTime, 'ms');
 
     // Try to reload auth user, but don't fail if it doesn't work (e.g., when offline)
-    console.log('[AuthContext] Attempting to reload auth user...');
+    logger.debug('[AuthContext] Attempting to reload auth user...');
     const reloadStartTime = Date.now();
     try {
       await Promise.race([
         auth.currentUser.reload(),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Auth reload timeout')), 5000))
       ]);
-      console.log('[AuthContext] Auth user reloaded in', Date.now() - reloadStartTime, 'ms');
+      logger.debug('[AuthContext] Auth user reloaded in', Date.now() - reloadStartTime, 'ms');
     } catch (reloadError) {
       const elapsed = Date.now() - reloadStartTime;
       console.warn('[AuthContext] Auth user reload failed or timed out after', elapsed, 'ms:', reloadError);
@@ -1251,10 +1251,10 @@ export const AuthProvider = ({ children }) => {
       // Don't throw - the profile is already saved to local storage
     }
 
-    console.log('[AuthContext] Mapping and setting user...');
+    logger.debug('[AuthContext] Mapping and setting user...');
     const updatedUser = mapUser(auth.currentUser, savedProfile);
     setUser(updatedUser);
-    console.log('[AuthContext] updateUser completed successfully');
+    logger.debug('[AuthContext] updateUser completed successfully');
     return updatedUser;
   };
 
@@ -1303,7 +1303,7 @@ export const AuthProvider = ({ children }) => {
 
     const deleteOperation = async () => {
       try {
-        console.log('[deleteAccount] Starting account deletion for user:', userId);
+        logger.debug('[deleteAccount] Starting account deletion for user:', userId);
 
       // 1. Delete all Firestore data
       if (db) {
@@ -1353,7 +1353,7 @@ export const AuthProvider = ({ children }) => {
         );
 
         await Promise.all(deletePromises);
-        console.log('[deleteAccount] Deleted user profile, games, and availability');
+        logger.debug('[deleteAccount] Deleted user profile, games, and availability');
 
         // Find all gaming groups where user is a member or organizer
         const [groupsByMemberQuery, groupsByOrganizerQuery] = await Promise.all([
@@ -1379,7 +1379,7 @@ export const AuthProvider = ({ children }) => {
         });
 
         const groupDocs = Array.from(allGroupDocs.values());
-        console.log(`[deleteAccount] Found ${groupDocs.length} groups to update`);
+        logger.debug(`[deleteAccount] Found ${groupDocs.length} groups to update`);
 
         if (groupDocs.length > 0) {
           // Process groups in smaller batches to avoid timeout
@@ -1434,7 +1434,7 @@ export const AuthProvider = ({ children }) => {
             });
           }
 
-          console.log('[deleteAccount] Updated all gaming groups');
+          logger.debug('[deleteAccount] Updated all gaming groups');
 
           // Clean up posts, comments, and game interests in parallel for each group
           // But limit concurrency to avoid overwhelming Firestore
@@ -1531,7 +1531,7 @@ export const AuthProvider = ({ children }) => {
             );
           }
 
-          console.log('[deleteAccount] Cleaned up posts, comments, and interests');
+          logger.debug('[deleteAccount] Cleaned up posts, comments, and interests');
         }
       }
 
@@ -1540,18 +1540,18 @@ export const AuthProvider = ({ children }) => {
         await storage.removeItem(PROFILE_STORAGE_KEY(userId));
         await storage.removeItem('meepleup_collections');
         await storage.removeItem('meepleup_events');
-        console.log('[deleteAccount] Cleared local storage');
+        logger.debug('[deleteAccount] Cleared local storage');
       } catch (error) {
         console.error('Error clearing local storage:', error);
       }
 
       // 3. Delete Firebase Auth user
-      console.log('[deleteAccount] Deleting Firebase Auth user');
+      logger.debug('[deleteAccount] Deleting Firebase Auth user');
       await auth.currentUser.delete();
 
         // 4. Clear user state
         setUser(null);
-        console.log('[deleteAccount] Account deletion complete');
+        logger.debug('[deleteAccount] Account deletion complete');
       } catch (error) {
         console.error('[deleteAccount] Error deleting account:', error);
         throw error;

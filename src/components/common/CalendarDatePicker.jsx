@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable, ScrollView, Dimensions, Platform } from 'react-native';
 import { getHolidayForDate, HolidayIcon } from '../../utils/holidays';
 import storage from '../../utils/storage';
+import logger from '../../utils/logger';
+import { horizontalScrollViewProps } from '../../utils/horizontalScrollViewProps';
 
 // Module-level storage for restore position - persists across component instances
 // This ensures the position survives even if the component remounts
@@ -32,6 +34,8 @@ const CalendarDatePicker = ({
   onEditIconPress,
   memberRSVPs = {}, // { [userId]: { [dateKey]: status } }
   currentUserId = null, // Current user's ID to show their RSVP status
+  /** When false, do not use module-level scroll restore (avoids stale state from other screens, e.g. EventHub → Onboarding). */
+  persistScrollRestore = true,
 }) => {
   // Use local dates consistently - no UTC
   const today = new Date();
@@ -138,8 +142,8 @@ const CalendarDatePicker = ({
   };
 
   const toggleDate = (date) => {
-    console.log('[CalendarDatePicker] ========== LONG-PRESS DETECTED ==========');
-    console.log('[CalendarDatePicker] toggleDate START - date being toggled:', {
+    logger.debug('[CalendarDatePicker] ========== LONG-PRESS DETECTED ==========');
+    logger.debug('[CalendarDatePicker] toggleDate START - date being toggled:', {
       date: date instanceof Date ? date.toISOString() : date,
       dateKey: dateToKey(date),
       dateString: date.toString(),
@@ -148,7 +152,7 @@ const CalendarDatePicker = ({
     const dateKey = dateToKey(date);
     const newSelectedDates = [...selectedDates];
     
-    console.log('[CalendarDatePicker] Current selectedDates state:', {
+    logger.debug('[CalendarDatePicker] Current selectedDates state:', {
       count: selectedDates.length,
       dates: selectedDates.map(d => ({
         date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -161,7 +165,7 @@ const CalendarDatePicker = ({
     let monthToPreserve = currentMonthIndex;
     let scrollXToPreserve = savedScrollPositionRef.current;
     
-    console.log('[CalendarDatePicker] toggleDate - scroll position state:', {
+    logger.debug('[CalendarDatePicker] toggleDate - scroll position state:', {
       currentMonthIndex,
       monthIndexRef: monthIndexRef.current,
       savedScrollX: savedScrollPositionRef.current,
@@ -174,16 +178,16 @@ const CalendarDatePicker = ({
       scrollXToPreserve = savedScrollPositionRef.current > 0 
         ? savedScrollPositionRef.current 
         : monthToPreserve * screenWidth;
-      console.log('[CalendarDatePicker] toggleDate - using ref values:', { monthToPreserve, scrollXToPreserve });
+      logger.debug('[CalendarDatePicker] toggleDate - using ref values:', { monthToPreserve, scrollXToPreserve });
     } else if (currentMonthIndex > 0) {
       monthToPreserve = currentMonthIndex;
       scrollXToPreserve = monthToPreserve * screenWidth;
-      console.log('[CalendarDatePicker] toggleDate - using state value:', { monthToPreserve, scrollXToPreserve });
+      logger.debug('[CalendarDatePicker] toggleDate - using state value:', { monthToPreserve, scrollXToPreserve });
     } else {
       // Both are 0, user is on current month
       monthToPreserve = 0;
       scrollXToPreserve = 0;
-      console.log('[CalendarDatePicker] toggleDate - user is on current month (0)');
+      logger.debug('[CalendarDatePicker] toggleDate - user is on current month (0)');
     }
     
     // Store in BOTH ref AND module-level variable for maximum persistence
@@ -194,13 +198,15 @@ const CalendarDatePicker = ({
       timestamp: Date.now(), // Add timestamp for debugging
     };
     pendingRestoreRef.current = restoreData;
-    globalRestorePosition = restoreData; // Also store globally
+    if (persistScrollRestore) {
+      globalRestorePosition = restoreData;
+    }
     
     // Also update refs immediately to ensure they're in sync
     monthIndexRef.current = monthToPreserve;
     savedScrollPositionRef.current = scrollXToPreserve;
     
-    console.log('[CalendarDatePicker] toggleDate END - saved restore data:', {
+    logger.debug('[CalendarDatePicker] toggleDate END - saved restore data:', {
       monthToPreserve,
       scrollXToPreserve,
       restoreData: pendingRestoreRef.current,
@@ -209,23 +215,23 @@ const CalendarDatePicker = ({
     
     if (selectedDatesMap.has(dateKey)) {
       // Remove date
-      console.log('[CalendarDatePicker] Date already selected - REMOVING date');
+      logger.debug('[CalendarDatePicker] Date already selected - REMOVING date');
       const index = newSelectedDates.findIndex(d => {
         const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
         return dKey === dateKey;
       });
       if (index !== -1) {
-        console.log('[CalendarDatePicker] Removing date at index:', index);
+        logger.debug('[CalendarDatePicker] Removing date at index:', index);
         newSelectedDates.splice(index, 1);
       }
     } else {
       // Add date with default times - use LOCAL time to prevent timezone shifts
-      console.log('[CalendarDatePicker] Date not selected - ADDING new date');
+      logger.debug('[CalendarDatePicker] Date not selected - ADDING new date');
       const year = date.getFullYear();
       const month = date.getMonth();
       const day = date.getDate();
       
-      console.log('[CalendarDatePicker] Creating date object with:', {
+      logger.debug('[CalendarDatePicker] Creating date object with:', {
         year,
         month,
         day,
@@ -258,25 +264,25 @@ const CalendarDatePicker = ({
         endTime,
       };
       
-      console.log('[CalendarDatePicker] New date object created:', {
+      logger.debug('[CalendarDatePicker] New date object created:', {
         date: newDateObj.date.toISOString(),
         startTime: newDateObj.startTime.toISOString(),
         endTime: newDateObj.endTime.toISOString(),
       });
       
       newSelectedDates.push(newDateObj);
-      console.log('[CalendarDatePicker] Added to newSelectedDates array, new count:', newSelectedDates.length);
+      logger.debug('[CalendarDatePicker] Added to newSelectedDates array, new count:', newSelectedDates.length);
     }
     
     // Sort dates
-    console.log('[CalendarDatePicker] Sorting dates before calling onDatesChange');
+    logger.debug('[CalendarDatePicker] Sorting dates before calling onDatesChange');
     newSelectedDates.sort((a, b) => {
       const dateA = a.date instanceof Date ? a.date : new Date(a.date);
       const dateB = b.date instanceof Date ? b.date : new Date(b.date);
       return dateA.getTime() - dateB.getTime();
     });
     
-    console.log('[CalendarDatePicker] Final newSelectedDates before onDatesChange:', {
+    logger.debug('[CalendarDatePicker] Final newSelectedDates before onDatesChange:', {
       count: newSelectedDates.length,
       dates: newSelectedDates.map(d => ({
         date: d.date instanceof Date ? d.date.toISOString() : d.date,
@@ -285,10 +291,10 @@ const CalendarDatePicker = ({
       })),
     });
     
-    console.log('[CalendarDatePicker] Calling onDatesChange callback...');
+    logger.debug('[CalendarDatePicker] Calling onDatesChange callback...');
     onDatesChange(newSelectedDates);
-    console.log('[CalendarDatePicker] onDatesChange callback completed');
-    console.log('[CalendarDatePicker] ========== LONG-PRESS HANDLING COMPLETE ==========');
+    logger.debug('[CalendarDatePicker] onDatesChange callback completed');
+    logger.debug('[CalendarDatePicker] ========== LONG-PRESS HANDLING COMPLETE ==========');
   };
 
   const isDateDisabled = (date) => {
@@ -335,11 +341,11 @@ const CalendarDatePicker = ({
   // Always start at current month (index 0) on initial load - don't restore from storage
   // This prevents flickering when users log in fresh
   useEffect(() => {
-    console.log('[CalendarDatePicker] Initial mount effect running, isInitialMount:', isInitialMountRef.current);
+    logger.debug('[CalendarDatePicker] Initial mount effect running, isInitialMount:', isInitialMountRef.current);
     if (isInitialMountRef.current) {
       // Mark initial mount as complete immediately - we always start at current month
       isInitialMountRef.current = false;
-      console.log('[CalendarDatePicker] Marked initial mount as complete');
+      logger.debug('[CalendarDatePicker] Marked initial mount as complete');
     }
   }, []); // Only run on mount
 
@@ -351,9 +357,9 @@ const CalendarDatePicker = ({
   // Preserve calendar scroll position when selectedDates changes (e.g., when user adds a date)
   // Use useLayoutEffect to capture ref values synchronously before React commits
   useLayoutEffect(() => {
-    const hasGlobalRestore = globalRestorePosition !== null;
+    const hasGlobalRestore = persistScrollRestore && globalRestorePosition !== null;
     
-    console.log('[CalendarDatePicker] useLayoutEffect triggered for selectedDates:', {
+    logger.debug('[CalendarDatePicker] useLayoutEffect triggered for selectedDates:', {
       selectedDatesCount: selectedDates.length,
       isInitialMount: isInitialMountRef.current,
       hasGlobalRestore,
@@ -362,8 +368,8 @@ const CalendarDatePicker = ({
     });
     
     // If globalRestorePosition is null but we have a pendingRestore, use that
-    if (!hasGlobalRestore && pendingRestoreRef.current) {
-      console.log('[CalendarDatePicker] globalRestorePosition is null, but pendingRestore exists - using it');
+    if (persistScrollRestore && !hasGlobalRestore && pendingRestoreRef.current) {
+      logger.debug('[CalendarDatePicker] globalRestorePosition is null, but pendingRestore exists - using it');
       globalRestorePosition = pendingRestoreRef.current;
     }
     
@@ -377,8 +383,8 @@ const CalendarDatePicker = ({
       const restoreData = pendingRestoreRef.current;
       
       // If globalRestorePosition was cleared but we have pendingRestoreRef, restore it
-      if (!hasGlobalRestore && restoreData) {
-        console.log('[CalendarDatePicker] Restoring globalRestorePosition from pendingRestoreRef');
+      if (persistScrollRestore && !hasGlobalRestore && restoreData) {
+        logger.debug('[CalendarDatePicker] Restoring globalRestorePosition from pendingRestoreRef');
         globalRestorePosition = restoreData;
       }
       
@@ -399,9 +405,9 @@ const CalendarDatePicker = ({
       // PRIORITY 2: Use pendingRestoreRef (component-level ref)
       // PRIORITY 3: Use ref values (updated immediately on scroll)
       // PRIORITY 4: Fall back to state if refs are 0
-      const globalRestore = globalRestorePosition;
+      const globalRestore = persistScrollRestore ? globalRestorePosition : null;
       
-      console.log('[CalendarDatePicker] selectedDates changed (layout) - checking restore position:', {
+      logger.debug('[CalendarDatePicker] selectedDates changed (layout) - checking restore position:', {
         globalRestore,
         restoreData,
         refMonth,
@@ -418,33 +424,33 @@ const CalendarDatePicker = ({
         // PRIORITY 1: globalRestorePosition (survives remounts)
         monthToRestore = globalRestore.monthIndex;
         scrollXToRestore = globalRestore.scrollX;
-        console.log('[CalendarDatePicker] Using globalRestorePosition:', globalRestore);
+        logger.debug('[CalendarDatePicker] Using globalRestorePosition:', globalRestore);
         // If we're restoring from global on initial mount, mark mount as complete
         if (isInitialMountRef.current) {
           isInitialMountRef.current = false;
-          console.log('[CalendarDatePicker] Restoring on initial mount, marking mount as complete');
+          logger.debug('[CalendarDatePicker] Restoring on initial mount, marking mount as complete');
         }
       } else if (restoreData && restoreData.monthIndex >= 0) {
         monthToRestore = restoreData.monthIndex;
         scrollXToRestore = restoreData.scrollX;
-        console.log('[CalendarDatePicker] Using pendingRestoreRef:', restoreData);
+        logger.debug('[CalendarDatePicker] Using pendingRestoreRef:', restoreData);
       } else if (refMonth > 0 || refScrollX > 0) {
         monthToRestore = refMonth;
         scrollXToRestore = refScrollX > 0 ? refScrollX : refMonth * screenWidth;
-        console.log('[CalendarDatePicker] Using ref values:', { refMonth, refScrollX });
+        logger.debug('[CalendarDatePicker] Using ref values:', { refMonth, refScrollX });
       } else if (stateMonth > 0) {
         monthToRestore = stateMonth;
         scrollXToRestore = stateMonth * screenWidth;
-        console.log('[CalendarDatePicker] Using state value:', stateMonth);
+        logger.debug('[CalendarDatePicker] Using state value:', stateMonth);
       } else {
-        console.log('[CalendarDatePicker] All values are 0, skipping restore');
+        logger.debug('[CalendarDatePicker] All values are 0, skipping restore');
         return;
       }
       
       // Calculate target scroll position
       const targetX = scrollXToRestore > 0 ? scrollXToRestore : monthToRestore * screenWidth;
       
-      console.log('[CalendarDatePicker] Final restore decision (layout):', {
+      logger.debug('[CalendarDatePicker] Final restore decision (layout):', {
         monthToRestore,
         scrollXToRestore,
         targetX,
@@ -464,7 +470,7 @@ const CalendarDatePicker = ({
         savedScrollPositionRef.current = targetX;
         
         // Restore synchronously in layout effect
-        console.log('[CalendarDatePicker] Restoring scroll in layout effect to:', targetX);
+        logger.debug('[CalendarDatePicker] Restoring scroll in layout effect to:', targetX);
         scrollViewRef.current.scrollTo({
           x: targetX,
           animated: false,
@@ -477,7 +483,7 @@ const CalendarDatePicker = ({
           // Clear pendingRestoreRef but keep globalRestorePosition for much longer
           // to survive re-renders/remounts that happen after async Firestore saves
           pendingRestoreRef.current = null;
-          console.log('[CalendarDatePicker] Restore complete, re-enabling scroll handlers (keeping globalRestorePosition)');
+          logger.debug('[CalendarDatePicker] Restore complete, re-enabling scroll handlers (keeping globalRestorePosition)');
           
           // Don't clear globalRestorePosition here - let it persist until user manually scrolls
           // This ensures it survives re-renders/remounts that happen after async Firestore saves
@@ -485,10 +491,10 @@ const CalendarDatePicker = ({
         }, 100);
       } else {
         // If we couldn't restore, keep the data for the backup effect
-        console.log('[CalendarDatePicker] Could not restore in layout effect, keeping restore data for backup');
+        logger.debug('[CalendarDatePicker] Could not restore in layout effect, keeping restore data for backup');
       }
     }
-  }, [selectedDates, screenWidth]); // Removed currentMonthIndex from deps to prevent loops
+  }, [selectedDates, screenWidth, persistScrollRestore]); // Removed currentMonthIndex from deps to prevent loops
   
   // Also use regular useEffect as backup for async restore
   useEffect(() => {
@@ -500,7 +506,7 @@ const CalendarDatePicker = ({
       requestAnimationFrame(() => {
         if (scrollViewRef.current && targetX >= 0) {
           isRestoringRef.current = true;
-          console.log('[CalendarDatePicker] Backup restore after paint to:', targetX);
+          logger.debug('[CalendarDatePicker] Backup restore after paint to:', targetX);
           
           // Update state and refs
           if (restoreData.monthIndex !== currentMonthIndex) {
@@ -549,8 +555,8 @@ const CalendarDatePicker = ({
     
     // Clear globalRestorePosition when user manually scrolls
     // This means the restore is complete and user has taken control
-    if (globalRestorePosition !== null) {
-      console.log('[CalendarDatePicker] User scrolled manually - clearing globalRestorePosition');
+    if (persistScrollRestore && globalRestorePosition !== null) {
+      logger.debug('[CalendarDatePicker] User scrolled manually - clearing globalRestorePosition');
       globalRestorePosition = null;
     }
     
@@ -563,7 +569,7 @@ const CalendarDatePicker = ({
     
     // Update state if index changed - this ensures state reflects actual scroll position
     if (newIndex >= 0 && newIndex < months.length && newIndex !== currentMonthIndex) {
-      console.log('[CalendarDatePicker] Scroll detected, updating month index:', { 
+      logger.debug('[CalendarDatePicker] Scroll detected, updating month index:', { 
         oldIndex: currentMonthIndex, 
         newIndex, 
         offsetX,
@@ -589,7 +595,7 @@ const CalendarDatePicker = ({
     }
     
     if (newIndex >= 0 && newIndex < months.length) {
-      console.log('[CalendarDatePicker] Momentum scroll ended, final position:', {
+      logger.debug('[CalendarDatePicker] Momentum scroll ended, final position:', {
         newIndex,
         offsetX,
         currentMonthIndex,
@@ -666,6 +672,7 @@ const CalendarDatePicker = ({
       onMomentumScrollEnd={handleMomentumScrollEnd}
       onScroll={handleScroll}
       scrollEventThrottle={16}
+      {...horizontalScrollViewProps}
     >
       {months.map(({ month, year }, monthIndex) => {
         const calendarDays = renderCalendar(month, year);
@@ -739,19 +746,20 @@ const CalendarDatePicker = ({
                 const rsvpIcon = getRSVPIcon(rsvpStatus);
 
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={dateToKey(date)}
-                    style={[
+                    style={({ pressed }) => [
                       styles.dayCellWrapper,
                       { width: dayWidth },
                       isToday && styles.todayCellWrapper,
                       isSelected && styles.selectedCellWrapper,
                       isDisabled && styles.disabledCellWrapper,
+                      pressed && !isDisabled && styles.dayCellPressed,
                     ]}
                     onPress={() => {
                       // If date is selected and onDatePress callback exists, call it
                       // This allows editing the date's time, location, and note
-                      console.log('[CalendarDatePicker] Date pressed:', {
+                      logger.debug('[CalendarDatePicker] Date pressed:', {
                         isDisabled,
                         isSelected,
                         hasDateInfo: !!dateInfo,
@@ -765,9 +773,9 @@ const CalendarDatePicker = ({
                           const dKey = dateToKey(d.date instanceof Date ? d.date : new Date(d.date));
                           return dKey === dateKey;
                         });
-                        console.log('[CalendarDatePicker] Found index:', index, 'for dateKey:', dateKey);
+                        logger.debug('[CalendarDatePicker] Found index:', index, 'for dateKey:', dateKey);
                         if (index !== -1) {
-                          console.log('[CalendarDatePicker] Calling onDatePress with index:', index);
+                          logger.debug('[CalendarDatePicker] Calling onDatePress with index:', index);
                           onDatePress(index, {
                             date: dateInfo.date,
                             startTime: dateInfo.startTime,
@@ -777,7 +785,7 @@ const CalendarDatePicker = ({
                           console.warn('[CalendarDatePicker] Could not find index for dateKey:', dateKey);
                         }
                       } else {
-                        console.log('[CalendarDatePicker] Conditions not met:', {
+                        logger.debug('[CalendarDatePicker] Conditions not met:', {
                           isDisabled,
                           isSelected,
                           hasDateInfo: !!dateInfo,
@@ -799,9 +807,8 @@ const CalendarDatePicker = ({
                         }
                       }
                     }}
-                    delayLongPress={300}
+                    delayLongPress={Platform.OS === 'ios' ? 420 : 300}
                     disabled={isDisabled}
-                    activeOpacity={0.7}
                   >
                     <View
                       style={[
@@ -858,7 +865,7 @@ const CalendarDatePicker = ({
                         </TouchableOpacity>
                       )}
                     </View>
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </View>
@@ -922,6 +929,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 0,
     marginHorizontal: 0,
+  },
+  dayCellPressed: {
+    opacity: 0.7,
   },
   dayCell: {
     flex: 1,

@@ -5,6 +5,7 @@
 
 import { searchGamesByName, getGames } from './api';
 import { getPendingRetries, removePendingRetries } from './pendingGameRetries';
+import logger from './logger';
 
 /**
  * Retry pending game searches and auto-add successful results to collection
@@ -12,16 +13,16 @@ import { getPendingRetries, removePendingRetries } from './pendingGameRetries';
  * @returns {Promise<{successCount: number, failedCount: number, addedGames: string[]}>}
  */
 export const retryPendingGameSearches = async (addGameToCollection) => {
-  console.log('[RetryPendingGames] Starting retry process for pending game searches');
+  logger.debug('[RetryPendingGames] Starting retry process for pending game searches');
   
   const pendingTitles = await getPendingRetries();
   
   if (pendingTitles.length === 0) {
-    console.log('[RetryPendingGames] No pending games to retry');
+    logger.debug('[RetryPendingGames] No pending games to retry');
     return { successCount: 0, failedCount: 0, addedGames: [] };
   }
   
-  console.log('[RetryPendingGames] Found', pendingTitles.length, 'pending games to retry:', pendingTitles);
+  logger.debug('[RetryPendingGames] Found', pendingTitles.length, 'pending games to retry:', pendingTitles);
   
   const addedGames = [];
   const failedGames = [];
@@ -40,7 +41,7 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
   
   for (const gameTitle of pendingTitles) {
     try {
-      console.log('[RetryPendingGames] Retrying search for:', gameTitle);
+      logger.debug('[RetryPendingGames] Retrying search for:', gameTitle);
       const cleanedTitle = cleanGameTitle(gameTitle);
       const searchQuery = cleanedTitle !== gameTitle ? cleanedTitle : gameTitle;
       
@@ -51,13 +52,13 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
         : (searchResponse || []);
       
       if (!searchResults || searchResults.length === 0) {
-        console.log('[RetryPendingGames] No results found for:', gameTitle);
+        logger.debug('[RetryPendingGames] No results found for:', gameTitle);
         failedGames.push(gameTitle);
         failedCount++;
         continue;
       }
       
-      console.log('[RetryPendingGames] Found', searchResults.length, 'results for:', gameTitle);
+      logger.debug('[RetryPendingGames] Found', searchResults.length, 'results for:', gameTitle);
       
       // Auto-select best match (same logic as gameSearch.js)
       const normalizedSearchTitle = gameTitle.toLowerCase().trim();
@@ -90,19 +91,19 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
       const bestMatch = scoredResults[0];
       
       if (!bestMatch || !bestMatch.id) {
-        console.log('[RetryPendingGames] No valid match found for:', gameTitle);
+        logger.debug('[RetryPendingGames] No valid match found for:', gameTitle);
         failedGames.push(gameTitle);
         failedCount++;
         continue;
       }
       
-      console.log('[RetryPendingGames] Auto-selected best match for', gameTitle, ':', bestMatch.name, '(BGG ID:', bestMatch.id, ')');
+      logger.debug('[RetryPendingGames] Auto-selected best match for', gameTitle, ':', bestMatch.name, '(BGG ID:', bestMatch.id, ')');
       
       // Get full game details
       const gameDetails = await getGames(bestMatch.id, 'pending_retry');
       
       if (!gameDetails) {
-        console.log('[RetryPendingGames] Failed to get game details for:', gameTitle, 'BGG ID:', bestMatch.id);
+        logger.debug('[RetryPendingGames] Failed to get game details for:', gameTitle, 'BGG ID:', bestMatch.id);
         failedGames.push(gameTitle);
         failedCount++;
         continue;
@@ -129,12 +130,12 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
       };
       
       // Add to collection
-      console.log('[RetryPendingGames] Adding game to collection:', gameData.title);
+      logger.debug('[RetryPendingGames] Adding game to collection:', gameData.title);
       await addGameToCollection(gameData);
       
       addedGames.push(gameTitle);
       successCount++;
-      console.log('[RetryPendingGames] Successfully added', gameTitle, 'to collection');
+      logger.debug('[RetryPendingGames] Successfully added', gameTitle, 'to collection');
       
     } catch (error) {
       console.error('[RetryPendingGames] Error retrying game:', gameTitle, error);
@@ -145,11 +146,11 @@ export const retryPendingGameSearches = async (addGameToCollection) => {
   
   // Remove successfully added games from pending retries
   if (addedGames.length > 0) {
-    console.log('[RetryPendingGames] Removing', addedGames.length, 'successfully added games from pending retries');
+    logger.debug('[RetryPendingGames] Removing', addedGames.length, 'successfully added games from pending retries');
     await removePendingRetries(addedGames);
   }
   
-  console.log('[RetryPendingGames] Retry process complete. Success:', successCount, 'Failed:', failedCount);
+  logger.debug('[RetryPendingGames] Retry process complete. Success:', successCount, 'Failed:', failedCount);
   
   return {
     successCount,

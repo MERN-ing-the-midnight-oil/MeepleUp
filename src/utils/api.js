@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { API_CONFIG } from '../config/api';
 import { ensureSerializableId, ensureStringOrNull } from './helpers';
+import logger from './logger';
 
 // ============================================================================
 // ARCHIVED: Barcode Scanning Feature
@@ -226,7 +227,7 @@ export const searchGameUPC = async (barcode, searchTerms = null) => {
 
     if (process.env.NODE_ENV === 'development') {
       if (__DEV__) {
-        console.log('GameUPC API Response:', response.data);
+        logger.debug('GameUPC API Response:', response.data);
       }
     }
 
@@ -308,7 +309,7 @@ export const searchGameByBarcode = async (barcode) => {
 
     if (process.env.NODE_ENV === 'development') {
       if (__DEV__) {
-        console.log('Primary Barcode API Response:', response.data);
+        logger.debug('Primary Barcode API Response:', response.data);
       }
     }
 
@@ -461,7 +462,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
   
   try {
     if (__DEV__) {
-      console.log('[Game Search] Searching for:', query);
+      logger.debug('[Game Search] Searching for:', query);
     }
 
     // Try Firebase Firestore first (if available)
@@ -477,8 +478,8 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       
       if (firestoreResults && firestoreResults.length > 0) {
         if (__DEV__) {
-          console.log('[Firestore] Query completed, results:', firestoreResults.length);
-          console.log(`[Firestore] Found ${firestoreResults.length} games`);
+          logger.debug('[Firestore] Query completed, results:', firestoreResults.length);
+          logger.debug(`[Firestore] Found ${firestoreResults.length} games`);
         }
         // Format response
         const formatted = firestoreResults.map(game => ({
@@ -487,7 +488,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
           yearPublished: game.yearPublished || '',
         }));
         if (__DEV__) {
-          console.log('[Firestore] Returning formatted results:', formatted.length);
+          logger.debug('[Firestore] Returning formatted results:', formatted.length);
         }
         // Return results with try counts
         return { results: formatted, firebaseTries, bggTries };
@@ -495,7 +496,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
         // Firestore returned empty array or null - mark as failed to trigger BGG fallback
         firestoreFailed = true;
         if (__DEV__) {
-          console.log('[Firestore] No results found');
+          logger.debug('[Firestore] No results found');
         }
       }
     } catch (firestoreError) {
@@ -517,7 +518,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       
       if (__DEV__) {
         console.warn(`[Game Search] Firestore search error for "${query}":`, firestoreError.message);
-        console.log('[Firestore] Not available or error, trying BGG API:', firestoreError.message);
+        logger.debug('[Firestore] Not available or error, trying BGG API:', firestoreError.message);
       }
       // Don't throw - fall through to BGG API if fallback is enabled
     }
@@ -540,7 +541,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       }
       
       if (__DEV__) {
-        console.log('[Game Search] Firestore failed or returned no results, trying BGG API...');
+        logger.debug('[Game Search] Firestore failed or returned no results, trying BGG API...');
       }
       
       // Retry BGG search with exponential backoff if rate limited
@@ -553,7 +554,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       const searchStartTime = Date.now();
       
       if (__DEV__) {
-        console.log(`[Game Search → BGG API] ⏱️ Starting search for "${query}"`, {
+        logger.debug(`[Game Search → BGG API] ⏱️ Starting search for "${query}"`, {
           timestamp: new Date().toISOString(),
         });
       }
@@ -566,14 +567,14 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             const backoffMs = Math.min(10000 * Math.pow(2, Math.min(bggRetryCount - 1, 4)), 80000);
             const elapsed = ((Date.now() - searchStartTime) / 1000).toFixed(1);
             if (__DEV__) {
-              console.log(`[Game Search → BGG API] 🔄 Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`, {
+              logger.debug(`[Game Search → BGG API] 🔄 Retry ${bggRetryCount}/${maxBggRetries} for "${query}" after ${backoffMs}ms delay...`, {
                 elapsedSeconds: elapsed,
               });
             }
             await new Promise(resolve => setTimeout(resolve, backoffMs));
           } else {
             if (__DEV__) {
-              console.log(`[Game Search → BGG API] 📡 Sending search query to BGG: "${query}"`);
+              logger.debug(`[Game Search → BGG API] 📡 Sending search query to BGG: "${query}"`);
             }
           }
           
@@ -632,7 +633,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             const isFirstVariant = variantIndex === 0;
             
             if (__DEV__ && !isFirstVariant) {
-              console.log(`[Game Search → BGG API] Trying variant ${variantIndex + 1}/${searchVariants.length}: "${searchVariant}"`);
+              logger.debug(`[Game Search → BGG API] Trying variant ${variantIndex + 1}/${searchVariants.length}: "${searchVariant}"`);
             }
             
             const attemptStartTime = Date.now();
@@ -675,13 +676,13 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
                 bggResults = processedResults;
                 const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
                 if (__DEV__) {
-                  console.log(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}" (using variant "${searchVariant}")`, {
+                  logger.debug(`[Game Search → BGG API] ✅ BGG returned ${bggResults.length} result(s) for "${query}" (using variant "${searchVariant}")`, {
                     attemptDurationSeconds: attemptDuration,
                     totalDurationSeconds: totalDuration,
                     attempts: bggRetryCount + 1,
                     variantUsed: searchVariant,
                   });
-                  console.log(`[BGG API] Found ${bggResults.length} games`);
+                  logger.debug(`[BGG API] Found ${bggResults.length} games`);
                 }
                 break; // Found results, stop trying variants
               }
@@ -690,7 +691,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             // If this was the last variant and we still have no results, use empty array
             if (variantIndex === searchVariants.length - 1 && bggResults.length === 0) {
               if (__DEV__) {
-                console.log(`[Game Search → BGG API] No results found after trying all ${searchVariants.length} variants`);
+                logger.debug(`[Game Search → BGG API] No results found after trying all ${searchVariants.length} variants`);
               }
             }
           }
@@ -711,7 +712,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
             const totalDuration = ((Date.now() - searchStartTime) / 1000).toFixed(2);
             bggTries = bggRetryCount + 1; // Count total BGG attempts
             if (__DEV__) {
-              console.log(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (will be added to pending retries)`, {
+              logger.debug(`[Game Search → BGG API] ✅ BGG returned no results for "${query}" (will be added to pending retries)`, {
                 attemptDurationSeconds: attemptDuration,
                 totalDurationSeconds: totalDuration,
               });
@@ -834,7 +835,7 @@ export const searchGamesByName = async (query, fallbackToBGG = false) => {
       console.warn(`[Game Search] No results found for "${query}" (successful API call with no results)`);
     }
     if (__DEV__) {
-      console.log('[Game Search] No results found, returning empty array');
+      logger.debug('[Game Search] No results found, returning empty array');
     }
     return { results: [], firebaseTries, bggTries };
   } catch (error) {
@@ -891,7 +892,7 @@ export const getGames = async (gameId, source = 'unknown') => {
         }
         
         if (__DEV__) {
-          console.log(`[getGames] ✅ Found in Firebase: ${firestoreGame.name} (${gameId})`);
+          logger.debug(`[getGames] ✅ Found in Firebase: ${firestoreGame.name} (${gameId})`);
         }
         
         dataSource = 'firebase';
@@ -961,7 +962,7 @@ export const getGames = async (gameId, source = 'unknown') => {
               }
               
               if (__DEV__) {
-                console.log(`[getGames] ✅ Enriched from BGG API: ${bggData.name} (${gameId})`);
+                logger.debug(`[getGames] ✅ Enriched from BGG API: ${bggData.name} (${gameId})`);
               }
               
               dataSource = 'firebase+bgg';
@@ -1013,7 +1014,7 @@ export const getGames = async (gameId, source = 'unknown') => {
               };
               
               if (__DEV__) {
-                console.log(`[Game Details] Updated game data from BGG API "thing" object for: ${gameData.name}`, {
+                logger.debug(`[Game Details] Updated game data from BGG API "thing" object for: ${gameData.name}`, {
                   hasThumbnail: !!gameData.thumbnail,
                   hasImage: !!gameData.image,
                   hasDescription: !!gameData.description,
@@ -1047,7 +1048,7 @@ export const getGames = async (gameId, source = 'unknown') => {
       }
     } catch (firestoreError) {
       if (__DEV__) {
-        console.log('[Firestore] Not available, will try BGG API');
+        logger.debug('[Firestore] Not available, will try BGG API');
       }
     }
 
@@ -1055,7 +1056,7 @@ export const getGames = async (gameId, source = 'unknown') => {
     if (!gameData) {
       try {
         if (__DEV__) {
-          console.log('[BGG API] Game not in database, fetching from BGG API');
+          logger.debug('[BGG API] Game not in database, fetching from BGG API');
         }
         const { getGamesFromGeek } = await import('../services/bggApi');
         const bggData = await getGamesFromGeek(gameId);
@@ -1077,7 +1078,7 @@ export const getGames = async (gameId, source = 'unknown') => {
           }
           
           if (__DEV__) {
-            console.log(`[getGames] ✅ Found in BGG API (fallback): ${bggData.name} (${gameId})`);
+            logger.debug(`[getGames] ✅ Found in BGG API (fallback): ${bggData.name} (${gameId})`);
           }
           
           dataSource = 'bgg';
@@ -1172,7 +1173,7 @@ export const getGames = async (gameId, source = 'unknown') => {
     }
     
     if (__DEV__ && dataSource) {
-      console.log(`[getGames] ✅ Final result from ${dataSource}: ${gameData.name} (${gameId})`);
+      logger.debug(`[getGames] ✅ Final result from ${dataSource}: ${gameData.name} (${gameId})`);
     }
 
     return gameData;
@@ -1237,7 +1238,7 @@ function getBGGToken() {
       if (token) {
         if (__DEV__) {
 
-          console.log('[BGG Collection] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
+          logger.debug('[BGG Collection] Token found, length:', token.length, 'first 10 chars:', token.substring(0, 10));
 
         }
       } else {
@@ -1303,10 +1304,10 @@ export const fetchBGGCollection = async (username, options = {}) => {
     const token = getBGGToken();
     
     if (__DEV__) {
-      console.log('[BGG Collection] Fetching collection for:', username);
+      logger.debug('[BGG Collection] Fetching collection for:', username);
       if (__DEV__) {
 
-        console.log('[BGG Collection] URL:', url);
+        logger.debug('[BGG Collection] URL:', url);
 
       }
     }
@@ -1328,7 +1329,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
       });
       
       if (__DEV__) {
-        console.log(`[BGG Collection] Response status: ${response.status} (attempt ${retries + 1}/${maxRetries})`);
+        logger.debug(`[BGG Collection] Response status: ${response.status} (attempt ${retries + 1}/${maxRetries})`);
       }
       
       if (response.status === 200) {
@@ -1349,7 +1350,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
         }
         
         if (__DEV__) {
-          console.log(`[BGG Collection] BGG is processing request (202). Waiting ${delay}ms before retry ${retries + 1}/${maxRetries}...`);
+          logger.debug(`[BGG Collection] BGG is processing request (202). Waiting ${delay}ms before retry ${retries + 1}/${maxRetries}...`);
         }
         await new Promise(resolve => setTimeout(resolve, delay));
         retries++;
@@ -1358,7 +1359,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
         retries++;
         const rateLimitDelay = 60000; // 60 seconds for rate limits
         if (__DEV__) {
-          console.log(`[BGG Collection] Rate limit exceeded (429). Waiting ${rateLimitDelay}ms before retry ${retries}/${maxRetries}...`);
+          logger.debug(`[BGG Collection] Rate limit exceeded (429). Waiting ${rateLimitDelay}ms before retry ${retries}/${maxRetries}...`);
         }
         
         // If we've exhausted retries, throw error
@@ -1375,7 +1376,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
         // If we have a token and got 401, try without token
         if (token) {
           if (__DEV__) {
-            console.log('[BGG Collection] Token auth failed (401), trying without token');
+            logger.debug('[BGG Collection] Token auth failed (401), trying without token');
           }
           const responseNoAuth = await fetch(url);
           if (responseNoAuth.status === 200) {
@@ -1395,7 +1396,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
             }
             
             if (__DEV__) {
-              console.log(`[BGG Collection] BGG is processing request (202). Waiting ${delay}ms before retry...`);
+              logger.debug(`[BGG Collection] BGG is processing request (202). Waiting ${delay}ms before retry...`);
             }
             await new Promise(resolve => setTimeout(resolve, delay));
             retries++;
@@ -1405,7 +1406,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
             retries++;
             const rateLimitDelay = 60000;
             if (__DEV__) {
-              console.log(`[BGG Collection] Rate limit exceeded (429) on retry. Waiting ${rateLimitDelay}ms before retry ${retries}/${maxRetries}...`);
+              logger.debug(`[BGG Collection] Rate limit exceeded (429) on retry. Waiting ${rateLimitDelay}ms before retry ${retries}/${maxRetries}...`);
             }
             
             // If we've exhausted retries, throw error
@@ -1583,7 +1584,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
     }
 
     if (__DEV__) {
-      console.log(`[BGG Collection] Found ${collection.length} games`);
+      logger.debug(`[BGG Collection] Found ${collection.length} games`);
     }
 
     // If collection is empty and we don't have an items element, it might be a privacy issue
@@ -1600,7 +1601,7 @@ export const fetchBGGCollection = async (username, options = {}) => {
         // Valid response with 0 items - user has no games matching the criteria
         // This is fine, return empty array
         if (__DEV__) {
-          console.log('[BGG Collection] User has no games matching the criteria (own=1, subtype=boardgame)');
+          logger.debug('[BGG Collection] User has no games matching the criteria (own=1, subtype=boardgame)');
         }
         // Return empty array - this is a valid state (user exists but has no games)
         return collection;
