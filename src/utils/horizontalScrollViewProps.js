@@ -6,6 +6,8 @@ import { Platform } from 'react-native';
  * prevents long-press and makes taps feel flaky inside horizontal carousels.
  */
 export const horizontalScrollViewProps = {
-  keyboardShouldPersistTaps: 'handled',
-  ...(Platform.OS === 'ios' ? { delayContentTouches: false } : {}),
+  /* 'always' helps nested parents (e.g. Onboarding calendar modal) deliver taps to day cells. */
+  keyboardShouldPersistTaps: 'always',
+  nestedScrollEnabled: true,
+  ...(Platform.OS === 'ios' ? { delayContentTouches: false, directionalLockEnabled: true } : {}),
 };

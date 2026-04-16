@@ -578,9 +578,12 @@ const EventHub = () => {
     : membershipStatus.STRANGER;
   const isMember = memberStatus === membershipStatus.MEMBER;
   const isOrganizer = event?.organizerId && event.organizerId === userId;
-  // Check if user is organizer or co-organizer (has organizer role)
+  // Primary host or member row with organizer / co-organizer role (Firestore uses 'co-organizer')
   const currentUserMember = event?.members?.find(m => m.userId === userId);
-  const isOrganizerOrCoOrganizer = isOrganizer || currentUserMember?.role === memberRoles?.ORGANIZER;
+  const isOrganizerOrCoOrganizer =
+    isOrganizer ||
+    currentUserMember?.role === memberRoles?.ORGANIZER ||
+    currentUserMember?.role === memberRoles?.CO_ORGANIZER;
   // Get user's proposal limit from members
   const userProposalLimit = currentUserMember?.proposalLimit !== undefined ? currentUserMember.proposalLimit : 5;
 
@@ -3401,10 +3404,18 @@ const EventHub = () => {
         title="📅 Calendar View"
       >
         <View style={styles.calendarModalContent}>
-          {isOrganizerOrCoOrganizer && (
+          {isOrganizerOrCoOrganizer ? (
             <View style={styles.longPressInstructionBox}>
               <Text style={styles.longPressInstructionText}>
-                <Text style={styles.longPressInstructionBold}>Long press</Text> on a date to add or remove an event date.
+                <Text style={styles.longPressInstructionBold}>Tap</Text> a date to add it, or{' '}
+                <Text style={styles.longPressInstructionBold}>long press</Text> a date to add or remove. Long press a selected date to delete it.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.longPressInstructionBox}>
+              <Text style={styles.longPressInstructionText}>
+                <Text style={styles.longPressInstructionBold}>Today</Text> is highlighted in blue.{' '}
+                <Text style={styles.longPressInstructionBold}>Green</Text> dates are scheduled meetups. Tap a green date to jump to that night in the schedule. Only organizers can add or remove dates here.
               </Text>
             </View>
           )}

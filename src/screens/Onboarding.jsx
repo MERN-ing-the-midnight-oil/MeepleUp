@@ -18,7 +18,6 @@ import PoweredByBGG from '../components/PoweredByBGG';
 import JoinForm from '../components/JoinForm';
 import EventCard from '../components/EventCard';
 import UserProfileModal from '../components/UserProfileModal';
-import MeepleupPurchaseModal from '../components/MeepleupPurchaseModal';
 import ArchivedMeepleUpsModal from '../components/ArchivedMeepleUpsModal';
 import AppTour, { useTour } from '../components/AppTour';
 import logger from '../utils/logger';
@@ -56,9 +55,7 @@ const Onboarding = () => {
   const [memberData, setMemberData] = useState({}); // { eventId: { [userId]: { name, avatarUrl } } }
   const [selectedUserForProfile, setSelectedUserForProfile] = useState(null);
   const [joinedEventName, setJoinedEventName] = useState(null); // Store event name for success modal
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [showArchivedMeepleUpsModal, setShowArchivedMeepleUpsModal] = useState(false);
-  const [pendingEventData, setPendingEventData] = useState(null); // Store event data when purchase is required
   const scrollViewRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const selectedDatesRef = useRef(selectedDates);
@@ -483,16 +480,7 @@ const Onboarding = () => {
         eventData.usualEndTime = usualEndTime.toISOString();
       }
 
-      // Use createEventWithPurchaseCheck to handle purchase flow
       const result = await createEventWithPurchaseCheck(eventData);
-
-      if (result.requiresPurchase) {
-        // Purchase required - show purchase modal
-        setPendingEventData(eventData);
-        setShowPurchaseModal(true);
-        setLoading(false);
-        return;
-      }
 
       if (!result.success) {
         setError(result.error || 'Failed to create MeepleUp. Please try again.');
@@ -1118,15 +1106,14 @@ const Onboarding = () => {
         title="Select Event Dates"
         fullScreen={true}
       >
-        <ScrollView
-          style={styles.modalContent}
-          contentContainerStyle={styles.modalScrollContent}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-        >
+        {/*
+          Avoid nesting CalendarDatePicker's horizontal ScrollView inside a vertical ScrollView —
+          on iOS (esp. newer releases) the parent often wins gesture negotiation and day taps never fire.
+        */}
+        <View style={[styles.modalContent, { flex: 1, minHeight: 0 }]}>
           <View style={styles.modalFieldContainer}>
             <Text style={styles.fieldLabel}>Usual Time</Text>
-            
+
             <View style={styles.timeRow}>
               <View style={styles.timeInputContainer}>
                 <Text style={styles.timeLabel}>Start Time</Text>
@@ -1141,7 +1128,7 @@ const Onboarding = () => {
                     styles.timeButtonText,
                     !usualStartTime && styles.timeButtonTextPlaceholder
                   ]}>
-                    {usualStartTime 
+                    {usualStartTime
                       ? usualStartTime.toLocaleTimeString('en-US', {
                           hour: 'numeric',
                           minute: '2-digit',
@@ -1152,7 +1139,7 @@ const Onboarding = () => {
                   <MaterialIcons name="access-time" size={20} color={theme.colors.textSecondary} style={styles.timeIcon} />
                 </Pressable>
               </View>
-              
+
               <View style={styles.timeInputContainer}>
                 <Text style={styles.timeLabel}>End Time</Text>
                 <Pressable
@@ -1166,7 +1153,7 @@ const Onboarding = () => {
                     styles.timeButtonText,
                     !usualEndTime && styles.timeButtonTextPlaceholder
                   ]}>
-                    {usualEndTime 
+                    {usualEndTime
                       ? usualEndTime.toLocaleTimeString('en-US', {
                           hour: 'numeric',
                           minute: '2-digit',
@@ -1180,85 +1167,82 @@ const Onboarding = () => {
             </View>
           </View>
 
-          <View style={[styles.modalFieldContainer, { marginBottom: theme.spacing.xs }]}>
-            <Text style={styles.fieldLabel}>Long press to set dates, tap to edit times</Text>
-            <CalendarDatePicker
-              persistScrollRestore={false}
-              selectedDates={selectedDates}
-              onDatesChange={(newDates) => {
-                if (__DEV__) {
-                  logger.debug('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
-                    count: newDates.length,
-                    dates: newDates.map(d => ({
-                      date: d.date instanceof Date ? d.date.toISOString() : d.date,
-                      dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
-                      startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
-                      startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
-                      endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
-                      endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
-                    })),
-                  });
-                }
-                setSelectedDates(newDates);
-              }}
-              minDate={new Date()}
-              usualStartTime={usualStartTime}
-              usualEndTime={usualEndTime}
-              onDateTimeEdit={(dateIndex, timeType) => {
-                setShowTimePicker({ type: timeType || 'start', dateIndex });
-              }}
-              onDatePress={(dateIndex, dateInfo) => {
-                if (__DEV__) {
-                  logger.debug('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
-                }
-                
-                // Close calendar modal first
-                setShowCalendarModal(false);
-                
-                // Use setTimeout to ensure calendar modal closes before opening edit modal
-                // Use ref to get latest selectedDates
-                setTimeout(() => {
-                  const currentDates = selectedDatesRef.current;
+          <View style={[styles.modalFieldContainer, { flex: 1, minHeight: 0, marginBottom: theme.spacing.xs }]}>
+            <Text style={styles.fieldLabel}>Tap or long press to set dates; tap a selected date to edit times</Text>
+            <View style={{ flex: 1, minHeight: 260 }}>
+              <CalendarDatePicker
+                persistScrollRestore={false}
+                selectedDates={selectedDates}
+                onDatesChange={(newDates) => {
                   if (__DEV__) {
-                    logger.debug('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
-                  }
-                  
-                  if (dateIndex !== null && dateIndex !== undefined && dateIndex >= 0 && currentDates[dateIndex]) {
-                    const date = currentDates[dateIndex];
-                    if (__DEV__) {
-                      logger.debug('[Onboarding] Opening edit modal for date:', date);
-                      logger.debug('[Onboarding] Setting editingDateIndex to:', dateIndex);
-                    }
-                    setEditingDateIndex(dateIndex);
-                    setEditingDateForm({
-                      location: date.location || '',
-                      note: date.note || '',
+                    logger.debug('[Onboarding] CalendarDatePicker onDatesChange callback received:', {
+                      count: newDates.length,
+                      dates: newDates.map(d => ({
+                        date: d.date instanceof Date ? d.date.toISOString() : d.date,
+                        dateLocal: d.date instanceof Date ? d.date.toString() : new Date(d.date).toString(),
+                        startTime: d.startTime instanceof Date ? d.startTime.toISOString() : d.startTime,
+                        startTimeLocal: d.startTime instanceof Date ? d.startTime.toString() : new Date(d.startTime).toString(),
+                        endTime: d.endTime instanceof Date ? d.endTime.toISOString() : d.endTime,
+                        endTimeLocal: d.endTime instanceof Date ? d.endTime.toString() : new Date(d.endTime).toString(),
+                      })),
                     });
+                  }
+                  setSelectedDates(newDates);
+                }}
+                minDate={new Date()}
+                usualStartTime={usualStartTime}
+                usualEndTime={usualEndTime}
+                onDateTimeEdit={(dateIndex, timeType) => {
+                  setShowTimePicker({ type: timeType || 'start', dateIndex });
+                }}
+                onDatePress={(dateIndex, dateInfo) => {
+                  if (__DEV__) {
+                    logger.debug('[Onboarding] onDatePress called:', { dateIndex, dateInfo, selectedDatesLength: selectedDates.length });
+                  }
+
+                  setShowCalendarModal(false);
+
+                  setTimeout(() => {
+                    const currentDates = selectedDatesRef.current;
                     if (__DEV__) {
-                      logger.debug('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
+                      logger.debug('[Onboarding] setTimeout callback - currentDates length:', currentDates.length, 'dateIndex:', dateIndex);
                     }
-                  } else {
-                    if (__DEV__) {
-                      console.warn('[Onboarding] Invalid dateIndex or date not found:', { 
-                        dateIndex, 
+
+                    if (dateIndex !== null && dateIndex !== undefined && dateIndex >= 0 && currentDates[dateIndex]) {
+                      const date = currentDates[dateIndex];
+                      if (__DEV__) {
+                        logger.debug('[Onboarding] Opening edit modal for date:', date);
+                        logger.debug('[Onboarding] Setting editingDateIndex to:', dateIndex);
+                      }
+                      setEditingDateIndex(dateIndex);
+                      setEditingDateForm({
+                        location: date.location || '',
+                        note: date.note || '',
+                      });
+                      if (__DEV__) {
+                        logger.debug('[Onboarding] State updated, editingDateIndex should be:', dateIndex);
+                      }
+                    } else if (__DEV__) {
+                      console.warn('[Onboarding] Invalid dateIndex or date not found:', {
+                        dateIndex,
                         selectedDatesLength: currentDates.length,
                         selectedDates: currentDates.map((d, i) => ({ index: i, date: d.date }))
                       });
                     }
-                  }
-                }, 300);
-              }}
-            />
+                  }, 300);
+                }}
+              />
+            </View>
           </View>
 
-          <View style={[styles.modalActions, { marginTop: 0 }]}>
+          <View style={[styles.modalActions, { paddingBottom: theme.spacing.md }]}>
             <Button
               label="Done"
               onPress={() => setShowCalendarModal(false)}
               style={styles.modalButton}
             />
           </View>
-        </ScrollView>
+        </View>
       </Modal>
 
       {/* Date Edit Modal */}
@@ -1686,62 +1670,6 @@ const Onboarding = () => {
         avatarUrl={selectedUserForProfile.avatarUrl}
       />
     )}
-
-    {/* MeepleUp Purchase Modal */}
-    <MeepleupPurchaseModal
-      visible={showPurchaseModal}
-      onClose={() => {
-        setShowPurchaseModal(false);
-        setPendingEventData(null);
-      }}
-      onPurchaseComplete={async () => {
-        setShowPurchaseModal(false);
-        // Retry creating the event after purchase
-        if (pendingEventData) {
-          setLoading(true);
-          try {
-            const result = await createEventWithPurchaseCheck(pendingEventData);
-            if (result.success) {
-              const newEvent = result.event;
-              setEventName('');
-              setEventLocation('');
-              setEventAddress('');
-              setSelectedDates([]);
-              setUsualStartTime(null);
-              setUsualEndTime(null);
-              setEventDescription('');
-              setRsvpRequired(true);
-              setMemberLimit('');
-              setShowCalendarModal(false);
-              setError('');
-              setPendingEventData(null);
-
-              Alert.alert(
-                'MeepleUp Created',
-                'Your MeepleUp has been created successfully!',
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => navigation.replace('EventHub', {
-                      eventId: newEvent.id,
-                      joinCode: newEvent.joinCode,
-                    }),
-                  },
-                ],
-              );
-            } else {
-              setError(result.error || 'Failed to create MeepleUp. Please try again.');
-            }
-          } catch (err) {
-            setError('Failed to create MeepleUp. Please try again.');
-            console.error(err);
-          } finally {
-            setLoading(false);
-          }
-        }
-      }}
-      userId={user?.uid || user?.id}
-    />
 
     {/* Join Success Modal */}
     <Modal

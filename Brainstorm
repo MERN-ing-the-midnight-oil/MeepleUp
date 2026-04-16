@@ -1,15 +1,6 @@
- titlesFromPhoto — function 
 
- titlesFromText — function 
- 
- getGames — function 
-
- getGamesFromFirebase — function 
-
- getGamesFromGeek — function 
-
- ShowGames — component 
-
+npm run start , "i"
+gets the simulator
 
 
 
@@ -373,4 +364,14 @@ Testing Strategy:
   - Test import performance
 
 
- I am thinking about the basic structure of my "Browse and Propose" flow/structure which is the heart of this app. Group members browse the super library of all members, propose games they want to play, weigh in on the proposals, and see which games are popular.  The part I wasn't prepared for is that there may be several upcoming event dates, and not everyone can make every date. It seems clear at this point to me that I need to have seperate discussions about games for different dates. I need to show seperate super-libraries (built by actual attendees).  And attendees need to be okay with the fact that other members may play a loved game without them. I'm just bummed because it seems like this is getting complicated (not in terms of coding, but in terms of UX). Part of me wants to focus on "the event that is coming up next". But that event may be different for different users.  Actually, maybe this isn't a problem? Maybe in "Gameplan" tab I focus on the event that is coming up next by displaying the usual column of cards with sooner events at the top and later events at the bottom. But maybe what I do is only display the "not going" RSVP on events leading up to the next upcoming event for that user, and... in fact, just display the user's own RSVP status on all events following the next upcoming event too. That way the only card encouraging the user to browse, propose, and weigh in is the next upcoming event *for that user*. 
+ I am thinking about the basic structure of my "Browse and Propose" flow/structure which is the heart of this app. Group members browse the super library of all members, propose games they want to play, weigh in on the proposals, and see which games are popular.  The part I wasn't prepared for is that there may be several upcoming event dates, and not everyone can make every date. It seems clear at this point to me that I need to have seperate discussions about games for different dates. I need to show seperate super-libraries (built by actual attendees).  And attendees need to be okay with the fact that other members may play a loved game without them. I'm just bummed because it seems like this is getting complicated (not in terms of coding, but in terms of UX). Part of me wants to focus on "the event that is coming up next". But that event may be different for different users.  Actually, maybe this isn't a problem? Maybe in "Gameplan" tab I focus on the event that is coming up next by displaying the usual column of cards with sooner events at the top and later events at the bottom. But maybe what I do is only display the "not going" RSVP on events leading up to the next upcoming event for that user, and... in fact, just display the user's own RSVP status on all events following the next upcoming event too. That way the only card encouraging the user to browse, propose, and weigh in is the next upcoming event *for that user*.  titlesFromPhoto — function 
+
+ titlesFromText — function 
+ 
+ getGames — function 
+
+ getGamesFromFirebase — function 
+
+ getGamesFromGeek — function 
+
+ ShowGames — component 

@@ -757,8 +757,7 @@ const CalendarDatePicker = ({
                       pressed && !isDisabled && styles.dayCellPressed,
                     ]}
                     onPress={() => {
-                      // If date is selected and onDatePress callback exists, call it
-                      // This allows editing the date's time, location, and note
+                      // Selected date: optional navigation / edit (parent provides onDatePress)
                       logger.debug('[CalendarDatePicker] Date pressed:', {
                         isDisabled,
                         isSelected,
@@ -766,7 +765,7 @@ const CalendarDatePicker = ({
                         hasOnDatePress: !!onDatePress,
                         dateKey: dateToKey(date)
                       });
-                      
+
                       if (!isDisabled && isSelected && dateInfo && onDatePress) {
                         const dateKey = dateToKey(date);
                         const index = selectedDates.findIndex(d => {
@@ -784,16 +783,26 @@ const CalendarDatePicker = ({
                         } else {
                           console.warn('[CalendarDatePicker] Could not find index for dateKey:', dateKey);
                         }
-                      } else {
-                        logger.debug('[CalendarDatePicker] Conditions not met:', {
-                          isDisabled,
-                          isSelected,
-                          hasDateInfo: !!dateInfo,
-                          hasOnDatePress: !!onDatePress
-                        });
+                        return;
                       }
-                      // If date is not selected and not readOnly, toggle it (for long press)
-                      // Regular tap on unselected date does nothing - use long press to select
+
+                      // Unselected date: tap adds the same way as long press (long press still works)
+                      if (!isDisabled && !readOnly && !isSelected) {
+                        if (onDateLongPress) {
+                          onDateLongPress(date, false, null);
+                        } else {
+                          toggleDate(date);
+                        }
+                        return;
+                      }
+
+                      logger.debug('[CalendarDatePicker] Conditions not met:', {
+                        isDisabled,
+                        isSelected,
+                        hasDateInfo: !!dateInfo,
+                        hasOnDatePress: !!onDatePress,
+                        readOnly
+                      });
                     }}
                     onLongPress={() => {
                       if (!isDisabled && !readOnly) {

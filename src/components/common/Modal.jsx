@@ -104,7 +104,8 @@ const ModalComponent = ({ isOpen, onClose, children, title, fullScreen = false }
                   ref={scrollViewRef}
                   key="modal-scrollview" // Stable key to prevent unmounting
                   contentContainerStyle={styles.scrollContent}
-                  keyboardShouldPersistTaps="handled"
+                  /* 'always' helps taps reach nested horizontal ScrollViews / Pressables on iOS (e.g. calendar in modal). */
+                  keyboardShouldPersistTaps="always"
                   showsVerticalScrollIndicator={true}
                   style={[styles.scrollView, { maxHeight: maxScrollHeight }]}
                   nestedScrollEnabled={true}
@@ -172,6 +173,8 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     padding: 0,
     minHeight: 0, // Important for ScrollView to work properly
+    flex: 1,
+    alignSelf: 'stretch', // fill width when parent overlay uses alignItems: 'center'
   },
   header: {
     flexDirection: 'row',

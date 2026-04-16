@@ -9,7 +9,6 @@ import {
   purchaseMeepleupCreation,
   verifyMeepleupPurchaseReceipt,
   acknowledgeMeepleupPurchase,
-  hasPurchasedMeepleupCreation,
   setupMeepleupPurchaseListener,
   initializePurchases,
 } from '../services/meepleupPurchaseService';
@@ -25,6 +24,7 @@ const MEMBERSHIP_STATUS = {
 
 const MEMBER_ROLES = {
   ORGANIZER: 'organizer',
+  CO_ORGANIZER: 'co-organizer',
   MEMBER: 'member',
 };
 
@@ -457,18 +457,7 @@ export const EventsProvider = ({ children }) => {
   }, [events, initialised]);
 
   const createEvent = useCallback(
-    async (eventData = {}, skipPurchaseCheck = false) => {
-      // If skipPurchaseCheck is false, we need to verify purchase first
-      if (!skipPurchaseCheck) {
-        const userId = user?.uid || user?.id;
-        if (userId) {
-          const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
-          if (!purchaseStatus.hasPurchase) {
-            throw new Error('PURCHASE_REQUIRED');
-          }
-        }
-      }
-
+    async (eventData = {}) => {
       const organizerId = eventData.organizerId || user?.uid || user?.id || null;
       const initialCode = eventData.joinCode || generateJoinCode();
       const normalizedInitialCode = initialCode.trim().toLowerCase().replace(/[\s-]+/g, ' ');
@@ -634,41 +623,17 @@ export const EventsProvider = ({ children }) => {
   }, [user]);
 
   /**
-   * Create event with purchase check and flow
-   * This is the main function UI should call - it handles purchase flow automatically
+   * Legacy name: creation is free for all signed-in users (host = creator via organizerId).
+   * Kept so existing callers get a consistent { success, event } result shape.
    */
   const createEventWithPurchaseCheck = useCallback(
     async (eventData = {}) => {
       const userId = user?.uid || user?.id;
       if (!userId) {
-        throw new Error('User must be authenticated to create a meepleup');
+        return { success: false, error: 'User must be authenticated to create a meepleup' };
       }
-
-      // Check for bypass flag (useful for TestFlight/testing builds)
-      // Set EXPO_PUBLIC_BYPASS_PURCHASE_CHECK=true in EAS build secrets for test builds
-      const bypassPurchaseCheck = 
-        __DEV__ || 
-        process.env.EXPO_PUBLIC_BYPASS_PURCHASE_CHECK === 'true';
-
-      if (!bypassPurchaseCheck) {
-        // Check if user has already purchased meepleup creation
-        const purchaseStatus = await hasPurchasedMeepleupCreation(userId);
-        
-        if (!purchaseStatus.hasPurchase) {
-          // User needs to purchase - return special error to trigger purchase flow in UI
-          return {
-            requiresPurchase: true,
-            error: 'PURCHASE_REQUIRED',
-          };
-        }
-      } else {
-        // In development or when bypass is enabled, log that we're bypassing purchase check
-        logger.debug('[createEventWithPurchaseCheck] Purchase check bypassed (dev mode or EXPO_PUBLIC_BYPASS_PURCHASE_CHECK enabled)');
-      }
-
-      // User has purchase (or bypass enabled), proceed with event creation
       try {
-        const event = await createEvent(eventData, true); // Skip purchase check since we already verified (or bypass enabled)
+        const event = await createEvent(eventData);
         return { success: true, event };
       } catch (error) {
         console.error('[createEventWithPurchaseCheck] Error creating event:', error);
@@ -1093,12 +1058,14 @@ export const EventsProvider = ({ children }) => {
         throw new Error('Event not found');
       }
 
-      // Check if current user is organizer or co-organizer
-      const isOrganizer = event.organizerId === currentUserId;
+      // Primary host or organizer / co-organizer role on the member record
+      const isPrimaryOrganizer = event.organizerId === currentUserId;
       const currentUserMember = event.members.find((m) => m.userId === currentUserId);
-      const isCoOrganizer = currentUserMember?.role === MEMBER_ROLES.ORGANIZER;
-      
-      if (!isOrganizer && !isCoOrganizer) {
+      const hasOrganizerRole =
+        currentUserMember?.role === MEMBER_ROLES.ORGANIZER ||
+        currentUserMember?.role === MEMBER_ROLES.CO_ORGANIZER;
+
+      if (!isPrimaryOrganizer && !hasOrganizerRole) {
         throw new Error('Only organizers can remove members');
       }
 
