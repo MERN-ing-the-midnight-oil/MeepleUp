@@ -124,9 +124,14 @@
       min-height: 11in;
       padding: 0;
       overflow: hidden;
+      background-color: #e5d8c4;
       background-size: cover;
       background-position: center;
       background-repeat: no-repeat;
+    }
+
+    .jcf-skyscraper {
+      background-color: #0f1a35;
     }
 
     .jcf-panel {
@@ -425,8 +430,9 @@
 
         const bgImg = useSkyscraper ? SKYSCRAPER_IMG : DUNGEON_IMG;
         const bgFallback = useSkyscraper ? SKY_BG_FALLBACK : DUNGEON_BG_FALLBACK;
-        const bgStyle = 'background-image: url("' + bgImg + '"), ' + bgFallback + ';' +
-          'background-size: cover, cover; background-position: center, center;';
+        /* Single-quoted url() so the outer HTML style="..." attribute is not broken by nested " */
+        const bgStyle = "background-image: url('" + bgImg + "'), " + bgFallback + ';' +
+          'background-size: cover, cover; background-position: center, center; background-repeat: no-repeat, no-repeat;';
         const skyscraperClass = useSkyscraper ? ' jcf-skyscraper' : '';
 
         const qrBlock = '<div class="jcf-cta-qr"><img src="' + escapeHtml(DOWNLOAD_QR_URL) + '" alt="Download MeepleUp" class="jcf-qr" /></div>';
