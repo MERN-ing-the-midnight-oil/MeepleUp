@@ -115,11 +115,26 @@ body {
   object-fit: contain;
 }
 
-.sidebar-how-it-works {
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
   width: 100%;
   max-width: 200px;
-  text-align: center;
+  align-self: center;
   margin-top: 0.5rem;
+}
+
+.sidebar-actions .print-sidebar-link {
+  margin-top: 0;
+}
+
+.sidebar-how-it-works {
+  width: 100%;
+  max-width: none;
+  text-align: center;
+  margin-top: 0;
 }
 
 /* Sidebar Legal Links */

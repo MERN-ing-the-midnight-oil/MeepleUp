@@ -406,6 +406,8 @@
       const DOWNLOAD_QR_URL = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent('https://meepleup.com/download.html');
       const DUNGEON_IMG = 'images/flyer-dungeon.png';
       const SKYSCRAPER_IMG = 'images/flyer-skyscraper.png';
+      const DUNGEON_BG_FALLBACK = 'linear-gradient(165deg, #ede4d3 0%, #e5d8c4 45%, #dccfb8 100%)';
+      const SKY_BG_FALLBACK = 'linear-gradient(155deg, #1e2d52 0%, #0f1a35 40%, #1a1530 100%)';
 
       function escapeHtml(text) {
         const div = document.createElement('div');
@@ -422,7 +424,9 @@
         const joinText = "Join " + possessive + " MeepleUp";
 
         const bgImg = useSkyscraper ? SKYSCRAPER_IMG : DUNGEON_IMG;
-        const bgStyle = 'background-image: url(' + bgImg + ');';
+        const bgFallback = useSkyscraper ? SKY_BG_FALLBACK : DUNGEON_BG_FALLBACK;
+        const bgStyle = 'background-image: url("' + bgImg + '"), ' + bgFallback + ';' +
+          'background-size: cover, cover; background-position: center, center;';
         const skyscraperClass = useSkyscraper ? ' jcf-skyscraper' : '';
 
         const qrBlock = '<div class="jcf-cta-qr"><img src="' + escapeHtml(DOWNLOAD_QR_URL) + '" alt="Download MeepleUp" class="jcf-qr" /></div>';
